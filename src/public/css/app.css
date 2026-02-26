@@ -1,0 +1,45 @@
+:root {
+  --legends-green: #0e5135;
+  --legends-sand: #f3e9d2;
+  --legends-ink: #15231c;
+}
+
+body {
+  background: linear-gradient(180deg, #f8f9f4 0%, #edf3ef 100%);
+  color: var(--legends-ink);
+}
+
+.auth-body {
+  min-height: 100vh;
+  background: radial-gradient(circle at top right, #d7ebdf, #f8f9f4 60%);
+}
+
+.legends-nav {
+  background: var(--legends-green);
+}
+
+.btn-legends {
+  background: var(--legends-green);
+  border-color: var(--legends-green);
+  color: #fff;
+}
+
+.btn-legends:hover {
+  background: #0a3f29;
+  border-color: #0a3f29;
+  color: #fff;
+}
+
+.card {
+  border-radius: 0.85rem;
+}
+
+@media (max-width: 576px) {
+  .table {
+    font-size: 0.9rem;
+  }
+
+  .card {
+    border-radius: 0.6rem;
+  }
+}

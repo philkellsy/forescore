@@ -1,0 +1,10 @@
+{
+  "name": "Legends Golf",
+  "short_name": "Legends",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9f4",
+  "theme_color": "#0e5135",
+  "description": "Scoring and leaderboards for the annual Legends golf trip.",
+  "icons": []
+}

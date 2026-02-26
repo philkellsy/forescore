@@ -1,0 +1,25 @@
+app = "legends-scoring"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "5050"
+
+[[mounts]]
+  source = "legends_data"
+  destination = "/app/data"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 5050
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]

@@ -1,0 +1,40 @@
+{
+  "name": "legends-scoring",
+  "version": "0.1.0",
+  "description": "Legends golf trip scoring and admin PWA",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test test/unit/**/*.test.js",
+    "test:integration": "node --test test/integration/**/*.test.js",
+    "test:watch": "node --test --watch test/unit/**/*.test.js test/integration/**/*.test.js",
+    "audit": "npm audit --audit-level=moderate",
+    "audit:offline": "npm audit --offline",
+    "audit:fix": "npm audit fix",
+    "deps:update": "npm update"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "connect-sqlite3": "^0.9.16",
+    "cookie-parser": "^1.4.7",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.18.1",
+    "helmet": "^8.1.0",
+    "knex": "^3.1.0",
+    "multer": "^2.0.2",
+    "sqlite3": "^5.1.7"
+  },
+  "overrides": {
+    "tar": "^7.5.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
