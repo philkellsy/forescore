@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "migrate": "knex migrate:latest --knexfile knexfile.js",
+    "migrate:make": "knex migrate:make --knexfile knexfile.js",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test test/unit/**/*.test.js",
     "test:integration": "node --test test/integration/**/*.test.js",

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+  </head>
+  <body>
+    <%- include('../partials/nav') %>
+    <main class="container py-3 py-md-4">
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+        <div>
+          <h1 class="h4 mb-1"><%= title %></h1>
+          <p class="text-muted mb-0">Event <%= event.year %> · <%= model.dayLabel %></p>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="<%= backUrl %>">Back</a>
+      </div>
+
+      <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+      <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+      <%- include('../partials/scorecard-viewer', { model }) %>
+
+      <section id="adjustments" class="card border-0 shadow-sm mt-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-2">
+            <h2 class="h6 mb-0">Admin Gross Adjustments</h2>
+            <% if (canEdit) { %>
+              <span class="badge text-bg-warning">Unpublished Day</span>
+            <% } else { %>
+              <span class="badge text-bg-secondary">Published Day</span>
+            <% } %>
+          </div>
+          <% if (!canEdit) { %>
+            <p class="text-danger mb-0">This day is published. Unpublish the day before editing scores.</p>
+          <% } else { %>
+            <p class="small text-muted">Each save updates the hole, logs your user as the last editor for that hole, and marks leaderboards dirty.</p>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Hole</th>
+                    <th>Par</th>
+                    <th>SI</th>
+                    <th>Current Gross</th>
+                    <th style="width: 180px;">New Gross</th>
+                    <th class="text-end">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% (model.holes || []).forEach((hole) => { %>
+                    <tr>
+                      <td><%= hole.holeNumber %></td>
+                      <td><%= hole.par %></td>
+                      <td><%= hole.siPrimary %></td>
+                      <td><%= hole.gross == null ? '—' : hole.gross %></td>
+                      <td>
+                        <form
+                          action="/admin/events/<%= event.id %>/scorecards/<%= scorecard.id %>/holes/<%= hole.holeNumber %>"
+                          method="post"
+                          class="d-flex align-items-center gap-2"
+                          data-edit-score-form
+                        >
+                          <input type="hidden" name="returnTo" value="<%= backUrl %>" />
+                          <input
+                            name="grossScore"
+                            type="number"
+                            min="1"
+                            max="25"
+                            class="form-control form-control-sm"
+                            placeholder="Blank clears"
+                            value="<%= hole.gross == null ? '' : hole.gross %>"
+                          />
+                          <button class="btn btn-sm btn-outline-dark" type="submit" title="Save">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                          </button>
+                        </form>
+                      </td>
+                      <td class="text-end small text-muted">
+                        <% if (model.calcType === 'stableford') { %>
+                          <%= hole.stableford == null ? '—' : `${hole.stableford} pts` %>
+                        <% } else { %>
+                          <%= hole.net == null ? '—' : `Net ${hole.net}` %>
+                        <% } %>
+                      </td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          <% } %>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm mt-3">
+        <div class="card-body">
+          <h2 class="h6 mb-2">Edit Log</h2>
+          <% if ((editLogs || []).length) { %>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width: 90px;">Hole</th>
+                    <th>Change</th>
+                    <th>Edited By</th>
+                    <th style="width: 210px;">At</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% (editLogs || []).forEach((entry) => { %>
+                    <% const editorName = `${entry.first_name || ''} ${entry.last_name || ''}`.trim() || 'Unknown'; %>
+                    <% const fromGross = entry.previous_gross_score == null ? '—' : entry.previous_gross_score; %>
+                    <% const toGross = entry.new_gross_score == null ? '—' : entry.new_gross_score; %>
+                    <% const fromSf = entry.previous_stableford_points == null ? '—' : entry.previous_stableford_points; %>
+                    <% const toSf = entry.new_stableford_points == null ? '—' : entry.new_stableford_points; %>
+                    <% const editedAt = entry.created_at ? new Date(entry.created_at) : null; %>
+                    <tr>
+                      <td><strong><%= entry.hole_number %></strong></td>
+                      <td>
+                        Gross <strong><%= fromGross %></strong> → <strong><%= toGross %></strong>
+                        <% if (model.calcType === 'stableford') { %>
+                          <span class="text-muted ms-2">S <%= fromSf %> → <%= toSf %></span>
+                        <% } %>
+                      </td>
+                      <td><%= editorName %></td>
+                      <td><%= editedAt ? editedAt.toLocaleString('en-AU') : '—' %></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          <% } else { %>
+            <p class="text-muted mb-0">No edits logged for this scorecard.</p>
+          <% } %>
+        </div>
+      </section>
+    </main>
+
+    <% if (canEdit) { %>
+      <div class="modal fade" id="confirmAdjustScoreModal" tabindex="-1" aria-labelledby="confirmAdjustScoreModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 class="modal-title fs-5" id="confirmAdjustScoreModalLabel">Confirm Score Adjustment</h2>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <p class="mb-0">This will change a submitted score and mark leaderboards for refresh. Continue?</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button id="confirmAdjustScoreSubmitBtn" type="button" class="btn btn-danger">Confirm Change</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    <% } %>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const modalEl = document.getElementById('confirmAdjustScoreModal');
+        if (!modalEl || !window.bootstrap) return;
+        const modal = new bootstrap.Modal(modalEl);
+        const confirmBtn = document.getElementById('confirmAdjustScoreSubmitBtn');
+        let pendingForm = null;
+
+        document.querySelectorAll('[data-edit-score-form]').forEach((form) => {
+          form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            pendingForm = form;
+            modal.show();
+          });
+        });
+
+        confirmBtn?.addEventListener('click', () => {
+          if (!pendingForm) return;
+          const submitBtn = pendingForm.querySelector('button[type="submit"]');
+          if (submitBtn) {
+            submitBtn.setAttribute('disabled', 'disabled');
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          }
+          modal.hide();
+          pendingForm.submit();
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', () => {
+          pendingForm = null;
+        });
+      });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  </body>
+</html>

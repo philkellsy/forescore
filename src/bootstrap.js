@@ -4,190 +4,58 @@ const fs = require('fs');
 const path = require('path');
 const { ROLES } = require('./config/roles');
 
-async function ensureSchema(db) {
+const BASELINE_MIGRATION = '001_initial_schema.js';
+
+function migrationDir() {
+  return path.resolve(__dirname, '../migrations');
+}
+
+async function ensureDataDir() {
   const dataDir = path.resolve(process.env.DB_FILE ? path.dirname(process.env.DB_FILE) : './data');
   fs.mkdirSync(dataDir, { recursive: true });
+}
 
-  if (!(await db.schema.hasTable('users'))) {
-    await db.schema.createTable('users', (table) => {
+async function markBaselineIfExistingSchema(db) {
+  const hasUsers = await db.schema.hasTable('users');
+  if (!hasUsers) return;
+
+  const hasMigrations = await db.schema.hasTable('knex_migrations');
+  const hasLock = await db.schema.hasTable('knex_migrations_lock');
+
+  if (!hasMigrations) {
+    await db.schema.createTable('knex_migrations', (table) => {
       table.increments('id').primary();
-      table.string('first_name').notNullable();
-      table.string('last_name').notNullable();
-      table.string('email').notNullable().unique();
-      table.string('phone_number');
-      table.string('role').notNullable().defaultTo(ROLES.PLAYER);
-      table.boolean('is_previous_year_winner').notNullable().defaultTo(false);
-      table.timestamp('email_verified_at');
-      table.timestamps(true, true);
+      table.string('name');
+      table.integer('batch');
+      table.timestamp('migration_time');
     });
   }
-
-  if (!(await db.schema.hasTable('events'))) {
-    await db.schema.createTable('events', (table) => {
-      table.increments('id').primary();
-      table.integer('year').notNullable().unique();
-      table.string('location').notNullable();
-      table.date('start_date').notNullable();
-      table.date('end_date').notNullable();
-      table.boolean('is_active').notNullable().defaultTo(false);
-      table.timestamps(true, true);
+  if (!hasLock) {
+    await db.schema.createTable('knex_migrations_lock', (table) => {
+      table.increments('index').primary();
+      table.integer('is_locked');
     });
+    await db('knex_migrations_lock').insert({ index: 1, is_locked: 0 });
+  } else {
+    const lockRow = await db('knex_migrations_lock').where({ index: 1 }).first();
+    if (!lockRow) {
+      await db('knex_migrations_lock').insert({ index: 1, is_locked: 0 });
+    }
   }
 
-  if (!(await db.schema.hasTable('event_players'))) {
-    await db.schema.createTable('event_players', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.string('status').notNullable().defaultTo('active');
-      table.unique(['event_id', 'user_id']);
-      table.timestamps(true, true);
+  const baseline = await db('knex_migrations').where({ name: BASELINE_MIGRATION }).first();
+  if (!baseline) {
+    await db('knex_migrations').insert({
+      name: BASELINE_MIGRATION,
+      batch: 1,
+      migration_time: db.fn.now()
     });
   }
+}
 
-  if (!(await db.schema.hasTable('courses'))) {
-    await db.schema.createTable('courses', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.string('course_name').notNullable();
-      table.string('tee_name').notNullable();
-      table.unique(['event_id', 'course_name', 'tee_name']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('holes'))) {
-    await db.schema.createTable('holes', (table) => {
-      table.increments('id').primary();
-      table.integer('course_id').notNullable().references('id').inTable('courses').onDelete('CASCADE');
-      table.integer('hole_number').notNullable();
-      table.integer('par').notNullable();
-      table.integer('stroke_index').notNullable();
-      table.unique(['course_id', 'hole_number']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('player_handicaps'))) {
-    await db.schema.createTable('player_handicaps', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.decimal('playing_handicap', 5, 2).notNullable();
-      table.unique(['event_id', 'user_id']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('tee_groups'))) {
-    await db.schema.createTable('tee_groups', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('day').notNullable();
-      table.time('tee_time').notNullable();
-      table.string('tee_location');
-      table.integer('group_number').notNullable();
-      table.string('source').notNullable().defaultTo('manual');
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('tee_group_players'))) {
-    await db.schema.createTable('tee_group_players', (table) => {
-      table.increments('id').primary();
-      table.integer('tee_group_id').notNullable().references('id').inTable('tee_groups').onDelete('CASCADE');
-      table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.integer('position').notNullable();
-      table.unique(['tee_group_id', 'user_id']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('teams'))) {
-    await db.schema.createTable('teams', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('day').notNullable();
-      table.string('competition_type').notNullable();
-      table.string('name').notNullable();
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('team_members'))) {
-    await db.schema.createTable('team_members', (table) => {
-      table.increments('id').primary();
-      table.integer('team_id').notNullable().references('id').inTable('teams').onDelete('CASCADE');
-      table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.boolean('is_dual_assigned').notNullable().defaultTo(false);
-      table.unique(['team_id', 'user_id']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('scorecards'))) {
-    await db.schema.createTable('scorecards', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('day').notNullable();
-      table.string('type').notNullable();
-      table.integer('user_id').references('id').inTable('users').onDelete('CASCADE');
-      table.integer('team_id').references('id').inTable('teams').onDelete('CASCADE');
-      table.string('status').notNullable().defaultTo('draft');
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('scorecard_holes'))) {
-    await db.schema.createTable('scorecard_holes', (table) => {
-      table.increments('id').primary();
-      table.integer('scorecard_id').notNullable().references('id').inTable('scorecards').onDelete('CASCADE');
-      table.integer('hole_number').notNullable();
-      table.integer('gross_score').notNullable();
-      table.integer('stableford_points');
-      table.unique(['scorecard_id', 'hole_number']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('calcutta_auctions'))) {
-    await db.schema.createTable('calcutta_auctions', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('auctioned_user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.integer('owner_user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.decimal('auction_bid_amount', 10, 2).notNullable();
-      table.integer('draw_order').notNullable();
-      table.unique(['event_id', 'auctioned_user_id']);
-      table.unique(['event_id', 'draw_order']);
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('leaderboard_snapshots'))) {
-    await db.schema.createTable('leaderboard_snapshots', (table) => {
-      table.increments('id').primary();
-      table.integer('event_id').notNullable().references('id').inTable('events').onDelete('CASCADE');
-      table.integer('day').notNullable();
-      table.string('competition_type').notNullable();
-      table.text('payload_json').notNullable();
-      table.timestamp('calculated_at').notNullable();
-      table.timestamps(true, true);
-    });
-  }
-
-  if (!(await db.schema.hasTable('login_tokens'))) {
-    await db.schema.createTable('login_tokens', (table) => {
-      table.increments('id').primary();
-      table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
-      table.string('token_hash').notNullable().unique();
-      table.timestamp('expires_at').notNullable();
-      table.timestamp('used_at');
-      table.string('ip');
-      table.string('user_agent');
-      table.timestamps(true, true);
-    });
-  }
+async function runMigrations(db) {
+  await markBaselineIfExistingSchema(db);
+  await db.migrate.latest({ directory: migrationDir() });
 }
 
 async function seedDefaults(db) {
@@ -207,8 +75,81 @@ async function seedDefaults(db) {
   }
 }
 
+async function cleanupScorecards(db) {
+  await db.raw(`
+    DELETE FROM scorecards
+    WHERE type = 'team'
+      AND (team_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM teams t WHERE t.id = scorecards.team_id
+      ))
+  `);
+
+  await db.raw(`
+    DELETE FROM scorecards
+    WHERE type = 'individual'
+      AND (user_id IS NULL OR NOT EXISTS (
+        SELECT 1
+        FROM event_players ep
+        WHERE ep.event_id = scorecards.event_id
+          AND ep.user_id = scorecards.user_id
+      ))
+  `);
+
+  const duplicateIndividuals = await db('scorecards')
+    .where({ type: 'individual' })
+    .whereNotNull('user_id')
+    .select('event_id', 'day', 'user_id')
+    .count({ total: '*' })
+    .groupBy('event_id', 'day', 'user_id')
+    .having('total', '>', 1);
+
+  for (const dup of duplicateIndividuals) {
+    const rows = await db('scorecards')
+      .where({
+        type: 'individual',
+        event_id: dup.event_id,
+        day: dup.day,
+        user_id: dup.user_id
+      })
+      .orderBy('id', 'asc')
+      .select('id');
+    const keepId = rows[0]?.id;
+    const removeIds = rows.slice(1).map((r) => r.id);
+    if (keepId && removeIds.length) {
+      await db('scorecards').whereIn('id', removeIds).del();
+    }
+  }
+
+  const duplicateTeams = await db('scorecards')
+    .where({ type: 'team' })
+    .whereNotNull('team_id')
+    .select('event_id', 'day', 'team_id')
+    .count({ total: '*' })
+    .groupBy('event_id', 'day', 'team_id')
+    .having('total', '>', 1);
+
+  for (const dup of duplicateTeams) {
+    const rows = await db('scorecards')
+      .where({
+        type: 'team',
+        event_id: dup.event_id,
+        day: dup.day,
+        team_id: dup.team_id
+      })
+      .orderBy('id', 'asc')
+      .select('id');
+    const keepId = rows[0]?.id;
+    const removeIds = rows.slice(1).map((r) => r.id);
+    if (keepId && removeIds.length) {
+      await db('scorecards').whereIn('id', removeIds).del();
+    }
+  }
+}
+
 async function bootstrap(db) {
-  await ensureSchema(db);
+  await ensureDataDir();
+  await runMigrations(db);
+  await cleanupScorecards(db);
   await seedDefaults(db);
 }
 

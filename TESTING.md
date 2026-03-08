@@ -27,8 +27,9 @@
 - `npm run test:watch`: local TDD watch mode.
 
 ## Coverage Priorities
-1. Stableford and per-hole handicap stroke logic.
+1. Stableford and per-hole dual stroke-index handicap logic (`primary 1-18`, `secondary 19-36`).
 2. Day 2 Calcutta draw-order constraints (including prior winner in group 1).
 3. Sultans "best 3 of 4" hole rollups.
-4. Auth token expiry, single-use enforcement, and logout invalidation.
-5. Player-scoped score entry permissions by tee group.
+4. Skins jackpot carry sequencing from hole to hole and day to day.
+5. Auth token expiry, single-use enforcement, and logout invalidation.
+6. Player-scoped score entry permissions by tee group.

@@ -4,57 +4,467 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
   </head>
   <body>
     <%- include('../partials/nav') %>
     <main class="container py-3 py-md-4">
       <h1 class="h4 mb-3">Leaderboards</h1>
+      <% if (message) { %>
+        <div class="alert alert-success"><%= message %></div>
+      <% } %>
+      <% if (error) { %>
+        <div class="alert alert-danger"><%= error %></div>
+      <% } %>
       <% if (!activeEvent) { %>
         <div class="alert alert-warning">No active event configured yet.</div>
       <% } else { %>
+        <% const publishedByDay = {}; (dayStates || []).forEach((d) => { publishedByDay[Number(d.day)] = Boolean(d.leaderboardPublished); }); %>
         <p class="text-muted mb-4"><%= activeEvent.year %> at <%= activeEvent.location %></p>
+        <% if (hasDirtyMarker && canManagePublish) { %>
+          <div class="alert alert-warning py-2">Scores changed since last leaderboard build. Results were refreshed just now.</div>
+        <% } %>
 
-        <div class="row g-3">
-          <section class="col-12 col-lg-4">
-            <div class="card border-0 shadow-sm h-100">
-              <div class="card-body">
-                <h2 class="h6">Day 1 Ambrose</h2>
-                <ol class="mb-0 ps-3">
-                  <% boards.ambrose.forEach((row) => { %>
-                    <li><%= row.name %> (<%= Number(row.totalGross || 0) %>)</li>
-                  <% }) %>
-                </ol>
-              </div>
-            </div>
-          </section>
-          <section class="col-12 col-lg-4">
-            <div class="card border-0 shadow-sm h-100">
-              <div class="card-body">
-                <h2 class="h6">Eclectic (D2-D4)</h2>
-                <ol class="mb-0 ps-3">
-                  <% boards.eclectic.forEach((row) => { %>
-                    <li><%= row.name %> (<%= Number(row.totalGross || 0) %>)</li>
-                  <% }) %>
-                </ol>
-              </div>
-            </div>
-          </section>
-          <section class="col-12 col-lg-4">
-            <div class="card border-0 shadow-sm h-100">
-              <div class="card-body">
-                <h2 class="h6">Sultans of Swing</h2>
-                <ol class="mb-0 ps-3">
-                  <% boards.sultans.forEach((row) => { %>
-                    <li><%= row.name %> (<%= Number(row.aggregate || 0) %>)</li>
-                  <% }) %>
-                </ol>
-              </div>
-            </div>
-          </section>
+        <% if (!boards.ambrose.length && !boards.stableford.byDay[2].length && !boards.stableford.byDay[3].length && !boards.stableford.byDay[4].length && !boards.stableford.championship.length && !boards.eclectic.length && !boards.sultans.length) { %>
+          <div class="alert alert-info mb-3">Leaderboards have not been released yet.</div>
+        <% } %>
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <a class="btn <%= activeView === 'championship' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=championship">Championship</a>
+          <a class="btn <%= activeView === 'ambrose' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=ambrose">Ambrose</a>
+          <a class="btn <%= activeView === 'eclectic' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=eclectic">Eclectic</a>
+          <a class="btn <%= activeView === 'sultans' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=sultans">Sultans</a>
+          <a class="btn <%= activeView === 'skins' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=skins">Skins</a>
+          <% if (calcuttaSummary && calcuttaSummary.finalized) { %>
+            <a class="btn <%= activeView === 'calcutta' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=calcutta">Calcutta</a>
+          <% } %>
         </div>
+
+        <% if (activeView === 'championship') { %>
+          <section class="card border-0 shadow-sm">
+            <div class="card-body">
+              <h2 class="h6 mb-2">Legends Championship</h2>
+              <p class="text-muted small mb-3">Rounds shown as R1 (Day 2), R2 (Day 3), R3 (Day 4). Ties use countback.</p>
+              <% if (!championshipTable.length) { %>
+                <p class="text-muted mb-0">Not released yet.</p>
+              <% } else { %>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player</th>
+                        <th>R1</th>
+                        <th>R2</th>
+                        <th>R3</th>
+                        <th>Total</th>
+                        <th>Countback</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% championshipTable.forEach((row) => { %>
+                        <% const meta = (playerMetaById && playerMetaById[row.userId]) ? playerMetaById[row.userId] : null; %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td>
+                            <%- include('../partials/participant-card', {
+                              name: meta?.name || row.name,
+                              handicapText: (meta && meta.handicap !== null && meta.handicap !== undefined) ? String(meta.handicap) : '',
+                              isDefendingChampion: Boolean(meta && meta.isDefendingChampion),
+                              isPreviousWinner: Boolean(meta && meta.isPreviousWinner)
+                            }) %>
+                          </td>
+                          <td>
+                            <% if (publishedByDay[2]) { %>
+                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=2"><%= row.r1 %></a>
+                            <% } else { %>
+                              <%= row.r1 %>
+                            <% } %>
+                          </td>
+                          <td>
+                            <% if (publishedByDay[3]) { %>
+                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=3"><%= row.r2 %></a>
+                            <% } else { %>
+                              <%= row.r2 %>
+                            <% } %>
+                          </td>
+                          <td>
+                            <% if (publishedByDay[4]) { %>
+                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=4"><%= row.r3 %></a>
+                            <% } else { %>
+                              <%= row.r3 %>
+                            <% } %>
+                          </td>
+                          <td>
+                            <% if (publishedByDay[2] && publishedByDay[3] && publishedByDay[4]) { %>
+                              <strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/championship/<%= row.userId %>"><%= row.total %></a></strong>
+                            <% } else { %>
+                              <strong><%= row.total %></strong>
+                            <% } %>
+                          </td>
+                          <td class="text-muted">
+                            <%= row.countbackUsed ? `${row.cb9}/${row.cb6}/${row.cb3}/${row.cb1}` : '-' %>
+                          </td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              <% } %>
+            </div>
+          </section>
+        <% } %>
+
+        <% if (activeView === 'ambrose') { %>
+          <section class="card border-0 shadow-sm">
+            <div class="card-body">
+              <h2 class="h6 mb-2"><%= dayLabel(1) %> Ambrose</h2>
+              <p class="text-muted small mb-3">Team result is Gross minus exact team handicap. Handicap allowance is 1/4 of combined handicaps for 2-ball teams and 1/3 for 3-ball teams.</p>
+              <% if (!boards.ambrose.length) { %>
+                <p class="text-muted mb-0">Not released yet.</p>
+              <% } else { %>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Team</th>
+                        <th>Gross</th>
+                        <th>Net</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% boards.ambrose.forEach((row, i) => { %>
+                        <tr>
+                          <td><%= i + 1 %></td>
+                          <td>
+                            <%- include('../partials/team-card', {
+                              teamName: row.name,
+                              exactHandicapText: String(Number(row.teamHandicap || 0)),
+                              members: (ambroseTeamMembersById && ambroseTeamMembersById[row.id]) ? ambroseTeamMembersById[row.id] : [],
+                              canDelete: false,
+                              deleteAction: '',
+                              summary: null,
+                              dayPublished: true,
+                              eventId: activeEvent.id,
+                              returnTo: leaderboardBasePath,
+                              className: 'mb-0'
+                            }) %>
+                          </td>
+                          <td><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/team/<%= row.id %>"><%= Number(row.totalGross || 0) %></a></td>
+                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/team/<%= row.id %>"><%= Number(row.totalNet || 0) %></a></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              <% } %>
+            </div>
+          </section>
+        <% } %>
+
+        <% if (activeView === 'eclectic') { %>
+          <section class="card border-0 shadow-sm">
+            <div class="card-body">
+              <h2 class="h6 mb-2">Eclectic (Rounds 1-3)</h2>
+              <p class="text-muted small mb-3">Best Stableford score per hole across R1-R3 builds the Eclectic card. Those 18 best-hole scores are summed for the total.</p>
+              <% if (!boards.eclectic.length) { %>
+                <p class="text-muted mb-0">Not released yet.</p>
+              <% } else { %>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player</th>
+                        <th>Total Stableford</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% boards.eclectic.forEach((row, i) => { %>
+                        <% const meta = (playerMetaById && playerMetaById[row.userId]) ? playerMetaById[row.userId] : null; %>
+                        <tr>
+                          <td><%= i + 1 %></td>
+                          <td>
+                            <%- include('../partials/participant-card', {
+                              name: meta?.name || row.name,
+                              handicapText: (meta && meta.handicap !== null && meta.handicap !== undefined) ? String(meta.handicap) : '',
+                              isDefendingChampion: Boolean(meta && meta.isDefendingChampion),
+                              isPreviousWinner: Boolean(meta && meta.isPreviousWinner)
+                            }) %>
+                          </td>
+                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/eclectic/<%= row.userId %>"><%= Number(row.totalPoints || 0) %></a></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              <% } %>
+            </div>
+          </section>
+        <% } %>
+
+        <% if (activeView === 'sultans') { %>
+          <section class="card border-0 shadow-sm">
+            <div class="card-body">
+              <h2 class="h6 mb-2">Sultans of Swing</h2>
+              <p class="text-muted small mb-3">Each hole uses the best 3 Stableford scores from 4 team members. Round totals (R1-R3) are summed for aggregate position.</p>
+              <% if (!boards.sultans.length) { %>
+                <p class="text-muted mb-0">Not released yet.</p>
+              <% } else { %>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Team</th>
+                        <th>R1</th>
+                        <th>R2</th>
+                        <th>R3</th>
+                        <th>Aggregate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% boards.sultans.forEach((row, i) => { %>
+                        <tr>
+                          <td><%= i + 1 %></td>
+                          <td>
+                            <%- include('../partials/team-card', {
+                              teamName: row.name,
+                              exactHandicapText: '',
+                              members: (sultansTeamMembersById && sultansTeamMembersById[row.id]) ? sultansTeamMembersById[row.id] : [],
+                              membersLayout: 'grid-2',
+                              showGhostTag: true,
+                              canDelete: false,
+                              deleteAction: '',
+                              summary: null,
+                              dayPublished: true,
+                              eventId: activeEvent.id,
+                              returnTo: leaderboardBasePath,
+                              className: 'mb-0'
+                            }) %>
+                          </td>
+                          <td><%= Number((row.days && row.days[2]) || 0) %></td>
+                          <td><%= Number((row.days && row.days[3]) || 0) %></td>
+                          <td><%= Number((row.days && row.days[4]) || 0) %></td>
+                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/sultans/<%= row.id %>"><%= Number(row.aggregate || 0) %></a></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              <% } %>
+            </div>
+          </section>
+        <% } %>
+
+        <% if (activeView === 'skins') { %>
+          <section class="card border-0 shadow-sm">
+            <div class="card-body">
+              <h2 class="h6 mb-2">Skins Leaderboard</h2>
+              <p class="text-muted small mb-3">Player skins and payout totals are shown below. Team skins are listed separately.</p>
+              <% if (skinsCarryovers && skinsCarryovers.length) { %>
+                <div class="table-responsive mb-3">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Day</th>
+                        <th>Carry In</th>
+                        <th>Carry Out</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% skinsCarryovers.forEach((row) => { %>
+                        <tr>
+                          <td><%= dayLabel(row.day) %></td>
+                          <td><%= Number(row.carryInSkins || 0) > 0 ? `${Number(row.carryInSkins || 0)} to Hole 1` : '-' %></td>
+                          <td><%= Number(row.carryOutSkins || 0) > 0 ? `${Number(row.carryOutSkins || 0)} to next day Hole 1` : '-' %></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                </div>
+              <% } %>
+
+              <div class="row g-3">
+                <div class="col-12 col-lg-6">
+                  <h3 class="h6 mb-2">Player Skins</h3>
+                  <% if (!skinsLeaderboard || !(skinsLeaderboard.playerRows || []).length) { %>
+                    <p class="text-muted mb-0">No published player skins yet.</p>
+                  <% } else { %>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Player</th>
+                            <th>Skins</th>
+                            <th>Payout</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <% (skinsLeaderboard.playerRows || []).forEach((row, i) => { %>
+                            <tr>
+                              <td><%= i + 1 %></td>
+                              <td><%= row.name %></td>
+                              <td><strong><%= Number(row.skinsWon || 0) %></strong></td>
+                              <td>$<%= Number(row.payoutAmount || 0).toFixed(2) %></td>
+                            </tr>
+                          <% }) %>
+                        </tbody>
+                      </table>
+                    </div>
+                  <% } %>
+                </div>
+
+                <div class="col-12 col-lg-6">
+                  <h3 class="h6 mb-2">Team Skins</h3>
+                  <% if (!skinsLeaderboard || !(skinsLeaderboard.teamRows || []).length) { %>
+                    <p class="text-muted mb-0">No published team skins yet.</p>
+                  <% } else { %>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Team</th>
+                            <th>Skins</th>
+                            <th>Payout</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <% (skinsLeaderboard.teamRows || []).forEach((row, i) => { %>
+                            <tr>
+                              <td><%= i + 1 %></td>
+                              <td><%= row.name %></td>
+                              <td><strong><%= Number(row.skinsWon || 0) %></strong></td>
+                              <td>$<%= Number(row.payoutAmount || 0).toFixed(2) %></td>
+                            </tr>
+                          <% }) %>
+                        </tbody>
+                      </table>
+                    </div>
+                  <% } %>
+                </div>
+              </div>
+            </div>
+          </section>
+        <% } %>
+
+        <% if (activeView === 'calcutta' && calcuttaSummary && calcuttaSummary.finalized) { %>
+          <section class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+              <h2 class="h6 mb-2">Calcutta Summary</h2>
+              <p class="text-muted small mb-3">Shows final draw sales, owner payouts (50%), and buyer purchase balances.</p>
+              <div class="row g-2 mb-3">
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-2 bg-light small">
+                    <div class="text-muted">Players</div>
+                    <div class="fw-semibold"><%= Number(calcuttaSummary.totalPlayers || 0) %> / <%= Number(calcuttaSummary.drawnPlayers || 0) %> drawn</div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-2 bg-light small">
+                    <div class="text-muted">Owners Missing</div>
+                    <div class="fw-semibold"><%= Number(calcuttaSummary.missingOwnerCount || 0) %></div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-2 bg-light small">
+                    <div class="text-muted">Pool Total</div>
+                    <div class="fw-semibold">$<%= Number(calcuttaSummary.poolTotal || 0).toFixed(2) %></div>
+                  </div>
+                </div>
+              </div>
+
+              <% if (calcuttaSummary.viewerBalance) { %>
+                <div class="border rounded p-2 bg-light small mb-3">
+                  <div class="fw-semibold mb-1">Your Calcutta Position</div>
+                  <div>Ownership Receivable: <strong>$<%= Number(calcuttaSummary.viewerBalance.ownershipReceivable || 0).toFixed(2) %></strong></div>
+                  <div>Purchases Owed: <strong>$<%= Number(calcuttaSummary.viewerBalance.purchasesOwed || 0).toFixed(2) %></strong></div>
+                  <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
+                    <div>Personal Payout: <strong>$<%= Number(calcuttaSummary.viewerBalance.personalPayout || 0).toFixed(2) %></strong></div>
+                  <% } %>
+                  <div>Net Balance: <strong>$<%= Number(calcuttaSummary.viewerBalance.netBalance || 0).toFixed(2) %></strong></div>
+                  <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
+                    <div>Net After Payout: <strong>$<%= Number(calcuttaSummary.viewerBalance.netAfterPayout || 0).toFixed(2) %></strong></div>
+                  <% } %>
+                </div>
+              <% } %>
+
+              <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
+                <div class="table-responsive mb-3">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th>Player</th>
+                        <th>Owner</th>
+                        <th>%</th>
+                        <th>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% (calcuttaSummary.payouts.rows || []).forEach((row) => { %>
+                        <tr>
+                          <td><%= row.category %></td>
+                          <td><%= row.basisName %></td>
+                          <td><%= row.recipientName %></td>
+                          <td><%= Number(row.percent || 0).toFixed(2) %>%</td>
+                          <td><strong>$<%= Number(row.amount || 0).toFixed(2) %></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <th colspan="4" class="text-end">Total Calcutta Payout</th>
+                        <th>$<%= Number(calcuttaSummary.payouts.totalPayout || 0).toFixed(2) %></th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              <% } %>
+
+              <div class="table-responsive mb-3">
+                <table class="table table-sm align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Draw</th>
+                      <th>Player</th>
+                      <th>Buyer</th>
+                      <th>Owner</th>
+                      <th>Price</th>
+                      <th>Owner 50%</th>
+                      <th>Pool 50%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% (calcuttaSummary.rows || []).forEach((row) => { %>
+                      <tr>
+                        <td><%= row.drawOrder %></td>
+                        <td><%= row.playerName %></td>
+                        <td><%= row.buyerName %></td>
+                        <td><%= row.ownerName %></td>
+                        <td>$<%= Number(row.price || 0).toFixed(2) %></td>
+                        <td>$<%= Number(row.ownerShare || 0).toFixed(2) %></td>
+                        <td>$<%= Number(row.poolShare || 0).toFixed(2) %></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </div>
+
+            </div>
+          </section>
+        <% } %>
       <% } %>
     </main>
+      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   </body>
 </html>

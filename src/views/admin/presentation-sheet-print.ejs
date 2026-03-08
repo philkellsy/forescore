@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %></title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        color: #111;
+        background: #fff;
+      }
+      .sheet {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 10px;
+      }
+      .toolbar button {
+        border: 1px solid #222;
+        background: #fff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .header {
+        border-bottom: 2px solid #1a1a1a;
+        margin-bottom: 14px;
+        padding-bottom: 10px;
+      }
+      .title {
+        margin: 0;
+        font-size: 30px;
+      }
+      .subtitle {
+        margin: 6px 0 0;
+        color: #333;
+        font-size: 14px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .card {
+        border: 1px solid #d7d7d7;
+        border-radius: 8px;
+        overflow: hidden;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .card h2 {
+        margin: 0;
+        padding: 9px 12px;
+        font-size: 14px;
+        letter-spacing: 0.03em;
+        background: #f4f6f8;
+        border-bottom: 1px solid #d7d7d7;
+      }
+      .card-body {
+        padding: 10px 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border-bottom: 1px solid #ececec;
+        text-align: left;
+        padding: 6px 4px;
+        font-size: 13px;
+      }
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #444;
+      }
+      tr:last-child td { border-bottom: 0; }
+      .muted { color: #666; }
+      .cols-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .blank-line {
+        display: block;
+        border-bottom: 1px solid #cfcfcf;
+        min-height: 18px;
+      }
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 8mm;
+        }
+        .sheet {
+          max-width: none;
+          padding: 0;
+          font-size: 10px;
+        }
+        .toolbar { display: none; }
+        .header {
+          margin-bottom: 8px;
+          padding-bottom: 6px;
+        }
+        .title {
+          font-size: 20px;
+          line-height: 1.1;
+        }
+        .subtitle {
+          margin-top: 3px;
+          font-size: 11px;
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .cols-2 {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .card {
+          break-inside: avoid;
+          page-break-inside: avoid;
+          margin-bottom: 0;
+        }
+        .card h2 {
+          padding: 6px 8px;
+          font-size: 12px;
+        }
+        .card-body {
+          padding: 7px 8px;
+        }
+        th, td {
+          font-size: 10px;
+          padding: 3px 2px;
+        }
+        th {
+          font-size: 9px;
+        }
+        .blank-line {
+          min-height: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <div class="toolbar">
+        <button type="button" onclick="window.print()">Print</button>
+      </div>
+
+      <header class="header">
+        <h1 class="title">Daily Presentation Sheet</h1>
+        <p class="subtitle"><strong><%= event.year %></strong> · <strong><%= dayLabel %></strong> · <%= event.location %></p>
+      </header>
+
+      <section class="grid">
+        <% if (!isAmbroseDay && (day === 2 || day === 3 || day === 4)) { %>
+          <div class="cols-2">
+            <article class="card">
+              <h2>Daily Individual (Top 5)</h2>
+              <div class="card-body">
+                <% if (!individualTop5.length) { %>
+                  <p class="muted">No individual results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player</th>
+                        <th>Stableford</th>
+                        <% if (individualShowCountback) { %><th>Countback (9/6/3/1)</th><% } %>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% individualTop5WithCountback.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><strong><%= Number(row.points || 0) %></strong></td>
+                          <% if (individualShowCountback) { %>
+                            <td><%= row.countbackUsed ? `${row.cb9}/${row.cb6}/${row.cb3}/${row.cb1}` : '' %></td>
+                          <% } %>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2>Tournament Leaders (Top 5)</h2>
+              <div class="card-body">
+                <% if (!tournamentTop5.length) { %>
+                  <p class="muted">No tournament results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player</th>
+                        <th>R1</th>
+                        <th>R2</th>
+                        <th>R3</th>
+                        <th>Total</th>
+                        <% if (tournamentShowCountback) { %><th>Countback (9/6/3/1)</th><% } %>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% tournamentTop5.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.placeDisplay || row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><%= Number(row.d2 || 0) %></td>
+                          <td><%= Number(row.d3 || 0) %></td>
+                          <td><%= Number(row.d4 || 0) %></td>
+                          <td><strong><%= Number(row.points || 0) %></strong></td>
+                          <% if (tournamentShowCountback) { %><td><%= row.countbackUsed ? row.countbackDisplay : '' %></td><% } %>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              </div>
+            </article>
+          </div>
+        <% } else { %>
+          <article class="card">
+            <h2><%= isAmbroseDay ? 'Ambrose Leaderboard (Top 5)' : 'Individual Leaderboard (Top 5)' %></h2>
+            <div class="card-body">
+              <% if (isAmbroseDay) { %>
+                <% if (!ambroseTop5.length) { %>
+                  <p class="muted">No ambrose results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr><th>#</th><th>Team</th><th>Gross</th><th>Net</th></tr>
+                    </thead>
+                    <tbody>
+                      <% ambroseTop5.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><%= row.gross %></td>
+                          <td><strong><%= row.net %></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              <% } else { %>
+                <% if (!individualTop5.length) { %>
+                  <p class="muted">No individual results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Player</th>
+                        <th>Stableford</th>
+                        <% if (individualShowCountback) { %><th>Countback (9/6/3/1)</th><% } %>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <% individualTop5WithCountback.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><strong><%= Number(row.points || 0) %></strong></td>
+                          <% if (individualShowCountback) { %>
+                            <td><%= row.countbackUsed ? `${row.cb9}/${row.cb6}/${row.cb3}/${row.cb1}` : '' %></td>
+                          <% } %>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              <% } %>
+            </div>
+          </article>
+        <% } %>
+
+        <article class="card">
+          <h2>Skins Summary</h2>
+          <div class="card-body">
+            <% if (carryIntoDay > 0 || carryToNextDay > 0) { %>
+              <p style="margin:0 0 10px;">
+                <% if (carryIntoDay > 0) { %>
+                  <strong>Carry In:</strong> <%= Number(carryIntoDay || 0) %> to Hole 1
+                <% } %>
+                <% if (carryIntoDay > 0 && carryToNextDay > 0) { %>
+                  <span> · </span>
+                <% } %>
+                <% if (carryToNextDay > 0) { %>
+                  <strong>Carry Out:</strong> <%= Number(carryToNextDay || 0) %> to next day Hole 1
+                <% } %>
+              </p>
+            <% } %>
+            <% if (!daySkinsSummary.length) { %>
+              <p class="muted mb-2">No skins won on this day.</p>
+            <% } %>
+
+            <h3 style="font-size:12px;margin:12px 0 6px;color:#444;text-transform:uppercase;letter-spacing:.03em;">Winning Holes</h3>
+            <table>
+              <thead>
+                <tr><th>Hole</th><th>Winner</th><th>Score</th><th>Skins</th></tr>
+              </thead>
+              <tbody>
+                <% daySkinWins.forEach((win) => { %>
+                  <tr>
+                    <td><%= win.holeNumber %></td>
+                    <td><%= win.name %></td>
+                    <td><%= win.stableford == null ? '-' : win.stableford %> nett <%= win.gross == null ? '-' : win.gross %></td>
+                    <td><%= win.skinsCount %></td>
+                  </tr>
+                <% }) %>
+                <% if (!daySkinWins.length) { %>
+                  <tr><td colspan="4" class="muted">No winning holes.</td></tr>
+                <% } %>
+              </tbody>
+            </table>
+
+            <h3 style="font-size:12px;margin:12px 0 6px;color:#444;text-transform:uppercase;letter-spacing:.03em;">Winner Summary</h3>
+            <% if (!daySkinsSummary.length) { %>
+              <p class="muted mb-0">No winner summary available.</p>
+            <% } else { %>
+              <table>
+                <thead>
+                  <tr><th>Winner</th><th>Skins</th></tr>
+                </thead>
+                <tbody>
+                  <% daySkinsSummary.forEach((row) => { %>
+                    <tr>
+                      <td><%= row.name %></td>
+                      <td><%= row.skinsCount %></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            <% } %>
+
+          </div>
+        </article>
+
+        <div class="cols-2">
+          <article class="card">
+            <h2>Nearest The Pin</h2>
+            <div class="card-body">
+              <% if (!ntpResults || !ntpResults.length) { %>
+                <p class="muted mb-0">No NTP novelty events configured for this day.</p>
+              <% } else { %>
+                <table>
+                  <thead>
+                    <tr><th>Hole</th><th>Label</th><th>Winner</th></tr>
+                  </thead>
+                  <tbody>
+                    <% ntpResults.forEach((row) => { %>
+                      <tr>
+                        <td><%= Number(row.holeNumber || 0) %></td>
+                        <td><%= row.label %></td>
+                        <td><%= row.isNoWinner ? 'No Winner' : (row.winnerName || '-') %></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              <% } %>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>Long Drive</h2>
+            <div class="card-body">
+              <% if (!longDriveResults || !longDriveResults.length) { %>
+                <p class="muted mb-0">No Long Drive novelty events configured for this day.</p>
+              <% } else { %>
+                <table>
+                  <thead>
+                    <tr><th>Hole</th><th>Label</th><th>Winner</th></tr>
+                  </thead>
+                  <tbody>
+                    <% longDriveResults.forEach((row) => { %>
+                      <tr>
+                        <td><%= Number(row.holeNumber || 0) %></td>
+                        <td><%= row.label %></td>
+                        <td><%= row.isNoWinner ? 'No Winner' : (row.winnerName || '-') %></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              <% } %>
+            </div>
+          </article>
+        </div>
+
+        <% if (day === 4) { %>
+          <div class="cols-2">
+            <article class="card">
+              <h2>Eclectic (Top 3)</h2>
+              <div class="card-body">
+                <% if (!eclecticTop3 || !eclecticTop3.length) { %>
+                  <p class="muted">No eclectic results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr><th>#</th><th>Player</th><th>Stableford</th></tr>
+                    </thead>
+                    <tbody>
+                      <% eclecticTop3.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><strong><%= row.totalPoints %></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              </div>
+            </article>
+
+            <article class="card">
+              <h2>Sultans Of Swing (Top 2)</h2>
+              <div class="card-body">
+                <% if (!sultansTop2 || !sultansTop2.length) { %>
+                  <p class="muted">No sultans results available.</p>
+                <% } else { %>
+                  <table>
+                    <thead>
+                      <tr><th>#</th><th>Team</th><th>Aggregate</th></tr>
+                    </thead>
+                    <tbody>
+                      <% sultansTop2.forEach((row) => { %>
+                        <tr>
+                          <td><%= row.position %></td>
+                          <td><%= row.name %></td>
+                          <td><strong><%= row.aggregate %></strong></td>
+                        </tr>
+                      <% }) %>
+                    </tbody>
+                  </table>
+                <% } %>
+              </div>
+            </article>
+          </div>
+
+          <article class="card">
+            <h2>Trophies</h2>
+            <div class="card-body">
+              <table>
+                <thead>
+                  <tr><th>Trophy</th><th>Winner</th><th>Result</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Ambrose</td>
+                    <td><%= trophies?.ambrose?.name || '-' %></td>
+                    <td><%= trophies?.ambrose?.detail || '-' %></td>
+                  </tr>
+                  <tr>
+                    <td>Sultans of Swing</td>
+                    <td><%= trophies?.sultans?.name || '-' %></td>
+                    <td><%= trophies?.sultans?.detail || '-' %></td>
+                  </tr>
+                  <tr>
+                    <td>Eclectic</td>
+                    <td><%= trophies?.eclectic?.name || '-' %></td>
+                    <td><%= trophies?.eclectic?.detail || '-' %></td>
+                  </tr>
+                  <tr>
+                    <td>Legends Champion</td>
+                    <td><%= trophies?.legendsChampion?.name || '-' %></td>
+                    <td><%= trophies?.legendsChampion?.detail || '-' %></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        <% } %>
+
+        <article class="card">
+          <h2>Round Highlights Summary</h2>
+          <div class="card-body">
+            <% if (!dayHighlights || Number(dayHighlights.totalHoles || 0) <= 0) { %>
+              <p class="muted mb-0">No score data available.</p>
+            <% } else { %>
+              <table>
+                <thead>
+                  <tr><th>Metric</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>4 Pointers</td>
+                    <td><strong><%= Number(dayHighlights.fourPointers || 0) %></strong></td>
+                  </tr>
+                  <tr>
+                    <td>Eagles</td>
+                    <td><strong><%= Number(dayHighlights.eagles || 0) %></strong></td>
+                  </tr>
+                  <tr>
+                    <td>Aces</td>
+                    <td><strong><%= Number(dayHighlights.aces || 0) %></strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            <% } %>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Daily Payout Schedule</h2>
+          <div class="card-body">
+            <% if (!payoutSchedule || !payoutSchedule.length) { %>
+              <p class="muted mb-0">No payouts for this day.</p>
+            <% } else { %>
+              <table>
+                <thead>
+                  <tr><th>Category</th><th>Recipient</th><th>Detail</th><th>Amount</th></tr>
+                </thead>
+                <tbody>
+                  <% payoutSchedule.forEach((row) => { %>
+                    <tr>
+                      <td><%= row.category %></td>
+                      <td><%= row.recipient %></td>
+                      <td><%= row.detail %></td>
+                      <td><strong>$<%= Number(row.amount || 0).toFixed(2) %></strong></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+              <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+                <div><strong>Day Total: $<%= Number(dailyPayoutTotal || 0).toFixed(2) %></strong></div>
+              </div>
+            <% } %>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

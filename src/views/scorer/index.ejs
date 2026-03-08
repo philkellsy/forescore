@@ -4,8 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
   </head>
   <body>
     <%- include('../partials/nav') %>
@@ -14,27 +19,106 @@
         <h1 class="h4 mb-0">Scoring</h1>
         <% if (canEditAll) { %><span class="badge text-bg-success">Global edit access</span><% } %>
       </div>
+      <% if (message) { %>
+        <div class="alert alert-success"><%= message %></div>
+      <% } %>
 
       <div class="row g-3">
         <% scorecards.forEach((scorecard) => { %>
           <div class="col-12 col-lg-6">
             <article class="card h-100 border-0 shadow-sm">
               <div class="card-body">
-                <h2 class="h6 mb-1">Day <%= scorecard.day %> - <%= scorecard.first_name || 'Team' %> <%= scorecard.last_name || '' %></h2>
-                <p class="text-muted small mb-3">Status: <%= scorecard.status %></p>
-                <form action="/scoring/<%= scorecard.id %>/hole" method="post" class="row g-2 align-items-end">
-                  <div class="col-4">
-                    <label class="form-label small">Hole</label>
-                    <input name="holeNumber" type="number" min="1" max="18" class="form-control" required />
-                  </div>
-                  <div class="col-4">
-                    <label class="form-label small">Gross</label>
-                    <input name="grossScore" type="number" min="1" max="20" class="form-control" required />
-                  </div>
-                  <div class="col-4 d-grid">
-                    <button class="btn btn-legends" type="submit">Save</button>
-                  </div>
-                </form>
+                <h2 class="h6 mb-1">
+                  <%= dayLabel(scorecard.day) %> -
+                  <%= scorecard.type === 'team'
+                    ? (scorecard.team_name || 'Team')
+                    : `${scorecard.first_name || ''} ${scorecard.last_name || ''}`.trim() %>
+                  <% if (scorecard.type === 'team' && scorecard.ambroseTeamHandicapDisplay) { %>
+                    <span class="text-muted">(Hcp <%= scorecard.ambroseTeamHandicapDisplay %>)</span>
+                  <% } %>
+                </h2>
+                <p class="text-muted small mb-1">
+                  Group
+                  <%= scorecard.type === 'team'
+                    ? (scorecard.ambrose_group_number || '-')
+                    : (scorecard.individual_group_number || '-') %>
+                </p>
+                <p class="text-muted small mb-1">
+                  Tee Time
+                  <%= scorecard.type === 'team'
+                    ? (scorecard.ambrose_tee_time || '-')
+                    : (scorecard.individual_tee_time || '-') %>
+                </p>
+                <p class="text-muted small mb-3">
+                  Starting Tee
+                  <%= scorecard.type === 'team'
+                    ? (scorecard.ambrose_starting_hole || '-')
+                    : (scorecard.individual_starting_hole || '-') %>
+                </p>
+                <% if (scorecard.status === 'submitted') { %>
+                  <p class="text-muted small mb-1">Submitted Scores</p>
+                  <% if (scorecard.submittedSummary && scorecard.submittedSummary.length) { %>
+                    <div class="d-grid gap-2 mb-3">
+                      <% scorecard.submittedSummary.forEach((row) => { %>
+                        <div class="border rounded px-2 py-1 bg-light small">
+                          <div class="d-flex justify-content-between align-items-center gap-2">
+                            <span><%= row.label %></span>
+                            <strong><%= row.value %></strong>
+                          </div>
+                          <% if (row.detail) { %>
+                            <div class="text-muted"><%= row.detail %></div>
+                          <% } %>
+                        </div>
+                      <% }) %>
+                    </div>
+                  <% } else { %>
+                    <p class="text-muted small mb-3">No submitted totals available.</p>
+                  <% } %>
+                <% } else { %>
+                  <p class="text-muted small mb-1">Other Players</p>
+                  <% if (scorecard.otherPlayers && scorecard.otherPlayers.length) { %>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                      <% scorecard.otherPlayers.forEach((player) => { %>
+                        <%- include('../partials/participant-card', {
+                          name: player.fullName,
+                          handicapText: player.handicapDisplay,
+                          isPreviousWinner: Boolean(player.isPreviousWinner),
+                          isDefendingChampion: Boolean(player.isDefendingChampion)
+                        }) %>
+                      <% }) %>
+                    </div>
+                  <% } else { %>
+                    <p class="text-muted small mb-3">-</p>
+                  <% } %>
+
+                  <% if (scorecard.type === 'team') { %>
+                    <p class="text-muted small mb-1">Other Teams</p>
+                    <% if (scorecard.ambroseOtherTeams && scorecard.ambroseOtherTeams.length) { %>
+                      <div class="d-flex flex-wrap gap-2 mb-3">
+                        <% scorecard.ambroseOtherTeams.forEach((team) => { %>
+                          <%- include('../partials/participant-card', {
+                            name: team.name,
+                            handicapText: `Hcp ${team.handicapDisplay}`,
+                            isPreviousWinner: false,
+                            isDefendingChampion: false
+                          }) %>
+                        <% }) %>
+                      </div>
+                    <% } else { %>
+                      <p class="text-muted small mb-3">-</p>
+                    <% } %>
+                  <% } %>
+                <% } %>
+
+                <% if (scorecard.status === 'submitted') { %>
+                  <span class="badge text-bg-secondary">Submitted</span>
+                <% } else if (scorecard.day_status === 'open_scoring') { %>
+                  <a class="btn btn-sm btn-success" href="/scoring/live/<%= scorecard.id %>">
+                    <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                  </a>
+                <% } else { %>
+                  <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
+                <% } %>
               </div>
             </article>
           </div>
@@ -47,5 +131,6 @@
         <% } %>
       </div>
     </main>
+      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   </body>
 </html>

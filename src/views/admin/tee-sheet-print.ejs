@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %></title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        color: #111;
+        background: #fff;
+      }
+      .sheet {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .sheet-header {
+        border-bottom: 2px solid #1a1a1a;
+        padding-bottom: 12px;
+        margin-bottom: 16px;
+      }
+      .sheet-title {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: 0.02em;
+      }
+      .sheet-subtitle {
+        margin: 6px 0 0;
+        font-size: 14px;
+        color: #333;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .toolbar button {
+        border: 1px solid #222;
+        background: #fff;
+        color: #111;
+        font-size: 13px;
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .group {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        border: 1px solid #d5d7da;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 14px;
+      }
+      .groups {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .group-header {
+        background: #f3f5f7;
+        border-bottom: 1px solid #d5d7da;
+        padding: 8px 10px;
+      }
+      .group-title {
+        margin: 0;
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: 0.04em;
+      }
+      .group-meta {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: #444;
+      }
+      .group-body {
+        padding: 10px 12px;
+      }
+      .entry {
+        margin: 0 0 8px;
+      }
+      .entry:last-child {
+        margin-bottom: 0;
+      }
+      .entry-team {
+        margin: 0 0 4px;
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .entry-player,
+      .entry-member {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      .entry-member {
+        padding-left: 14px;
+      }
+      .muted {
+        color: #666;
+      }
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 8mm;
+        }
+        .sheet {
+          max-width: none;
+          padding: 0;
+        }
+        .toolbar {
+          display: none;
+        }
+        .groups {
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+        }
+        .group {
+          break-before: auto;
+          page-break-before: auto;
+          break-inside: avoid;
+          page-break-inside: avoid;
+          margin-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <div class="toolbar">
+        <button type="button" onclick="window.print()">Print</button>
+      </div>
+
+      <header class="sheet-header">
+        <h1 class="sheet-title">Legends Tee Sheet</h1>
+        <p class="sheet-subtitle"><strong><%= event.year %></strong> · <%= dayLabel %> · <%= event.location %></p>
+      </header>
+
+      <% if (!groups.length) { %>
+        <p class="muted">No groups configured.</p>
+      <% } %>
+
+      <section class="groups">
+        <% groups.forEach((group) => { %>
+          <section class="group">
+            <div class="group-header">
+              <h2 class="group-title">GROUP <%= group.groupNumber %></h2>
+              <p class="group-meta">
+                Tee Time <strong><%= group.teeTime %></strong> · Start Hole <strong><%= group.startingHole %></strong>
+                <% if (day === 1 && group.teeLocation && group.teeLocation !== '-') { %>
+                  · Tee <strong><%= group.teeLocation %></strong>
+                <% } %>
+              </p>
+            </div>
+            <div class="group-body">
+              <% if (day === 1) { %>
+                <% if (!group.teams.length) { %>
+                  <p class="entry-player muted">(No teams assigned)</p>
+                <% } %>
+                <% group.teams.forEach((team) => { %>
+                  <article class="entry">
+                    <p class="entry-team">Team: <%= team.name %></p>
+                    <% if (!team.members.length) { %>
+                      <p class="entry-member muted">(No players assigned)</p>
+                    <% } %>
+                    <% team.members.forEach((member) => { %>
+                      <p class="entry-member">- <%= member %></p>
+                    <% }) %>
+                  </article>
+                <% }) %>
+              <% } else { %>
+                <% if (!group.players.length) { %>
+                  <p class="entry-player muted">(No players assigned)</p>
+                <% } %>
+                <% group.players.forEach((player) => { %>
+                  <p class="entry-player">- <%= player %></p>
+                <% }) %>
+              <% } %>
+            </div>
+          </section>
+        <% }) %>
+      </section>
+    </main>
+  </body>
+</html>

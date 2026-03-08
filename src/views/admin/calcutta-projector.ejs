@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+    <style>
+      :root {
+        --bg: #0f1214;
+        --panel: #171b20;
+        --muted: #9eb0bc;
+        --accent: #2a9d8f;
+        --text: #f4f7f9;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top left, #1b232b, var(--bg) 55%);
+        color: var(--text);
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .wrap {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 18px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        margin-bottom: 14px;
+      }
+      .title {
+        font-size: clamp(1.4rem, 2vw, 2rem);
+        margin: 0;
+        letter-spacing: .03em;
+      }
+      .subtitle {
+        margin: 0;
+        color: var(--muted);
+        font-size: .98rem;
+      }
+      .refresh-chip {
+        color: var(--muted);
+        font-size: .82rem;
+        border: 1px solid #33404a;
+        border-radius: 999px;
+        padding: .22rem .55rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.15fr .85fr;
+        gap: 14px;
+      }
+      .grid.results-only {
+        grid-template-columns: 1fr;
+      }
+      .panel {
+        background: linear-gradient(180deg, #1b2127, var(--panel));
+        border: 1px solid #2a323a;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .panel h2 {
+        margin: 0 0 .6rem;
+        font-size: 1.05rem;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: #d5e0e7;
+      }
+      .up-card {
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        padding: 18px;
+        background: rgba(42, 157, 143, 0.08);
+      }
+      .up-name {
+        font-size: clamp(2rem, 4vw, 3.2rem);
+        font-weight: 700;
+        line-height: 1.1;
+        margin: 0;
+      }
+      .up-meta {
+        margin-top: .55rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: .45rem;
+      }
+      .chip {
+        border: 1px solid #3e4953;
+        border-radius: 999px;
+        padding: .25rem .6rem;
+        font-size: .92rem;
+        background: #222a31;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .55rem;
+        margin-top: .75rem;
+      }
+      .stat {
+        border: 1px solid #323b44;
+        border-radius: 10px;
+        padding: .55rem .65rem;
+        background: #1f262d;
+      }
+      .stat-label {
+        color: var(--muted);
+        font-size: .78rem;
+      }
+      .stat-val {
+        font-size: 1.15rem;
+        font-weight: 700;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border-bottom: 1px solid #2b333b;
+        padding: .42rem .35rem;
+        font-size: .92rem;
+      }
+      th {
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        font-size: .74rem;
+      }
+      .projector-participant {
+        background: #202830 !important;
+        border-color: #4e5c69 !important;
+        color: #f2f7fb !important;
+        font-weight: 600;
+      }
+      .projector-participant .winner-badge {
+        color: #f7cb5c !important;
+      }
+      .projector-participant .fa-medal {
+        color: #f0c34a !important;
+      }
+      .muted { color: var(--muted); }
+      .money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .top-auction td {
+        color: #c7a008;
+        font-weight: 700;
+      }
+      .group-divider td {
+        border-bottom: 0;
+        padding: .2rem .35rem;
+      }
+      .group-divider hr {
+        border: 0;
+        border-top: 2px solid #3e4a55;
+        margin: .15rem 0;
+        opacity: .95;
+      }
+      .final-results-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .group-block {
+        border: 1px solid #2b333b;
+        border-radius: 8px;
+        padding: 6px;
+        margin-bottom: 8px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .group-title {
+        margin: 0 0 6px;
+        font-size: .82rem;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: #d5e0e7;
+      }
+      @media (max-width: 1100px) {
+        .grid { grid-template-columns: 1fr; }
+        .final-results-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="header">
+        <div>
+          <h1 class="title">Calcutta Auction Room</h1>
+          <p class="subtitle"><%= event.year %> · <%= event.location %></p>
+        </div>
+        <div class="refresh-chip">Refresh in <span id="refreshCountdown">5</span>s</div>
+      </header>
+
+      <% if (error) { %>
+        <div class="panel mb-3"><strong>Error:</strong> <%= error %></div>
+      <% } %>
+      <%
+        const rankedSales = (displaySales || [])
+          .map((sale) => ({
+            id: Number(sale.id || 0),
+            amount: Number(sale.auction_bid_amount || 0),
+            drawOrder: Number(sale.draw_order || 0)
+          }))
+          .sort((a, b) => (b.amount - a.amount) || (a.drawOrder - b.drawOrder))
+          .slice(0, 3);
+        const topAuctionIds = new Set(rankedSales.map((row) => row.id));
+        const allRows = displaySales || [];
+        const groupMap = new Map();
+        allRows.forEach((row) => {
+          const groupNumber = Number(row.day2_group_number || 0);
+          const key = groupNumber > 0 ? `g${groupNumber}` : `u${Number(row.id || 0)}`;
+          if (!groupMap.has(key)) {
+            groupMap.set(key, {
+              groupNumber: groupNumber > 0 ? groupNumber : null,
+              rows: []
+            });
+          }
+          groupMap.get(key).rows.push(row);
+        });
+        const groupedFinalRows = [...groupMap.values()].sort((a, b) => {
+          const aN = a.groupNumber == null ? 9999 : Number(a.groupNumber);
+          const bN = b.groupNumber == null ? 9999 : Number(b.groupNumber);
+          return aN - bN;
+        });
+        const leftGroupCount = Math.ceil(groupedFinalRows.length / 2);
+        const finalGroupsLeft = groupedFinalRows.slice(0, leftGroupCount);
+        const finalGroupsRight = groupedFinalRows.slice(leftGroupCount);
+      %>
+
+      <section class="grid <%= allDrawn ? 'results-only' : '' %>">
+        <% if (!allDrawn) { %>
+          <article class="panel">
+            <h2>Player Up For Auction</h2>
+            <% if (pendingPlayer) { %>
+              <div class="up-card">
+                <p class="up-name"><%= pendingPlayer.first_name %> <%= pendingPlayer.last_name %></p>
+                <div class="mt-2">
+                  <%- include('../partials/participant-card', {
+                    name: `${pendingPlayer.first_name || ''} ${pendingPlayer.last_name || ''}`.trim(),
+                    handicapText: pendingPlayer.playing_handicap === null || pendingPlayer.playing_handicap === undefined
+                      ? ''
+                      : (Number.isInteger(Number(pendingPlayer.playing_handicap))
+                          ? String(Math.trunc(Number(pendingPlayer.playing_handicap)))
+                          : String(Number(pendingPlayer.playing_handicap))),
+                    isDefendingChampion: Number(pendingPlayer.is_previous_year_winner || 0) === 1,
+                    isPreviousWinner: Number(pendingPlayer.is_previous_winner || 0) === 1,
+                    className: 'projector-participant border rounded px-2 py-1 small d-inline-flex align-items-center gap-1'
+                  }) %>
+                </div>
+                <div class="up-meta">
+                  <% if (pendingPlayer.playing_handicap !== null && pendingPlayer.playing_handicap !== undefined) { %>
+                    <span class="chip">HCP <%= Number.isInteger(Number(pendingPlayer.playing_handicap)) ? Math.trunc(Number(pendingPlayer.playing_handicap)) : Number(pendingPlayer.playing_handicap) %></span>
+                  <% } %>
+                  <% if (Number(pendingPlayer.is_previous_year_winner || 0) === 1) { %>
+                    <span class="chip">Defending Champion</span>
+                  <% } %>
+                  <% if (Number(pendingPlayer.is_previous_winner || 0) === 1) { %>
+                    <span class="chip">Past Champion</span>
+                  <% } %>
+                </div>
+              </div>
+            <% } else { %>
+              <p class="muted mb-0">Waiting for next draw...</p>
+            <% } %>
+
+            <div class="stats">
+              <div class="stat">
+                <div class="stat-label">Players</div>
+                <div class="stat-val"><%= totalPlayers %></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Drawn</div>
+                <div class="stat-val"><%= drawnPlayers %></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Missing Owners</div>
+                <div class="stat-val"><%= ownerMissingCount %></div>
+              </div>
+              <div class="stat">
+                <div class="stat-label">Pool (50%)</div>
+                <div class="stat-val money">$<%= Number(poolTotal || 0).toFixed(2) %></div>
+              </div>
+            </div>
+          </article>
+        <% } %>
+
+        <article class="panel">
+          <h2><%= allDrawn ? 'Final Draw Results' : 'Recent Results' %></h2>
+          <% if (!sales.length) { %>
+            <p class="muted mb-0">No sales recorded yet.</p>
+          <% } else if (allDrawn) { %>
+            <div class="final-results-grid">
+              <div>
+                <% finalGroupsLeft.forEach((group) => { %>
+                  <div class="group-block">
+                    <h3 class="group-title"><%= group.groupNumber ? `Group ${group.groupNumber}` : 'Ungrouped' %></h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Draw</th>
+                          <th>Player</th>
+                          <th>Buyer</th>
+                          <th>Owner</th>
+                          <th class="money">Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <% group.rows.forEach((sale) => { %>
+                          <tr class="<%= topAuctionIds.has(Number(sale.id || 0)) ? 'top-auction' : '' %>">
+                            <td><%= sale.draw_order %></td>
+                            <td>
+                              <%- include('../partials/participant-card', {
+                                name: `${sale.auctioned_first_name || ''} ${sale.auctioned_last_name || ''}`.trim(),
+                                handicapText: sale.auctioned_playing_handicap === null || sale.auctioned_playing_handicap === undefined
+                                  ? ''
+                                  : (Number.isInteger(Number(sale.auctioned_playing_handicap))
+                                      ? String(Math.trunc(Number(sale.auctioned_playing_handicap)))
+                                      : String(Number(sale.auctioned_playing_handicap))),
+                                isDefendingChampion: false,
+                                isPreviousWinner: false,
+                                className: 'projector-participant border rounded px-2 py-1 small d-inline-flex align-items-center gap-1'
+                              }) %>
+                              <% if (Number(sale.auctioned_is_previous_year_winner || 0) === 1) { %>
+                                <i class="fa-solid fa-medal text-warning ms-1" title="Defending Champion" aria-label="Defending Champion"></i>
+                              <% } %>
+                              <% if (Number(sale.auctioned_is_previous_winner || 0) === 1) { %>
+                                <span class="ms-1"><%- include('../partials/winner-badge', { showText: false, className: '' }) %></span>
+                              <% } %>
+                            </td>
+                            <td><%= sale.buyer_first_name %> <%= sale.buyer_last_name %></td>
+                            <td><%= sale.owner_user_id ? `${sale.owner_first_name} ${sale.owner_last_name}` : '-' %></td>
+                            <td class="money">$<%= Number(sale.auction_bid_amount || 0).toFixed(2) %></td>
+                          </tr>
+                        <% }) %>
+                      </tbody>
+                    </table>
+                  </div>
+                <% }) %>
+              </div>
+              <div>
+                <% finalGroupsRight.forEach((group) => { %>
+                  <div class="group-block">
+                    <h3 class="group-title"><%= group.groupNumber ? `Group ${group.groupNumber}` : 'Ungrouped' %></h3>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Draw</th>
+                          <th>Player</th>
+                          <th>Buyer</th>
+                          <th>Owner</th>
+                          <th class="money">Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <% group.rows.forEach((sale) => { %>
+                          <tr class="<%= topAuctionIds.has(Number(sale.id || 0)) ? 'top-auction' : '' %>">
+                            <td><%= sale.draw_order %></td>
+                            <td>
+                              <%- include('../partials/participant-card', {
+                                name: `${sale.auctioned_first_name || ''} ${sale.auctioned_last_name || ''}`.trim(),
+                                handicapText: sale.auctioned_playing_handicap === null || sale.auctioned_playing_handicap === undefined
+                                  ? ''
+                                  : (Number.isInteger(Number(sale.auctioned_playing_handicap))
+                                      ? String(Math.trunc(Number(sale.auctioned_playing_handicap)))
+                                      : String(Number(sale.auctioned_playing_handicap))),
+                                isDefendingChampion: false,
+                                isPreviousWinner: false,
+                                className: 'projector-participant border rounded px-2 py-1 small d-inline-flex align-items-center gap-1'
+                              }) %>
+                              <% if (Number(sale.auctioned_is_previous_year_winner || 0) === 1) { %>
+                                <i class="fa-solid fa-medal text-warning ms-1" title="Defending Champion" aria-label="Defending Champion"></i>
+                              <% } %>
+                              <% if (Number(sale.auctioned_is_previous_winner || 0) === 1) { %>
+                                <span class="ms-1"><%- include('../partials/winner-badge', { showText: false, className: '' }) %></span>
+                              <% } %>
+                            </td>
+                            <td><%= sale.buyer_first_name %> <%= sale.buyer_last_name %></td>
+                            <td><%= sale.owner_user_id ? `${sale.owner_first_name} ${sale.owner_last_name}` : '-' %></td>
+                            <td class="money">$<%= Number(sale.auction_bid_amount || 0).toFixed(2) %></td>
+                          </tr>
+                        <% }) %>
+                      </tbody>
+                    </table>
+                  </div>
+                <% }) %>
+              </div>
+            </div>
+          <% } else { %>
+            <table>
+              <thead>
+                <tr>
+                  <th>Draw</th>
+                  <th>Player</th>
+                  <th>Buyer</th>
+                  <th>Owner</th>
+                  <th class="money">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% (displaySales || []).forEach((sale) => { %>
+                  <% if (sale._groupBreakBefore) { %>
+                    <tr class="group-divider"><td colspan="5"><hr /></td></tr>
+                  <% } %>
+                  <tr class="<%= topAuctionIds.has(Number(sale.id || 0)) ? 'top-auction' : '' %>">
+                    <td><%= sale.draw_order %></td>
+                    <td>
+                      <%- include('../partials/participant-card', {
+                        name: `${sale.auctioned_first_name || ''} ${sale.auctioned_last_name || ''}`.trim(),
+                        handicapText: sale.auctioned_playing_handicap === null || sale.auctioned_playing_handicap === undefined
+                          ? ''
+                          : (Number.isInteger(Number(sale.auctioned_playing_handicap))
+                              ? String(Math.trunc(Number(sale.auctioned_playing_handicap)))
+                              : String(Number(sale.auctioned_playing_handicap))),
+                        isDefendingChampion: false,
+                        isPreviousWinner: false,
+                        className: 'projector-participant border rounded px-2 py-1 small d-inline-flex align-items-center gap-1'
+                      }) %>
+                      <% if (Number(sale.auctioned_is_previous_year_winner || 0) === 1) { %>
+                        <i class="fa-solid fa-medal text-warning ms-1" title="Defending Champion" aria-label="Defending Champion"></i>
+                      <% } %>
+                      <% if (Number(sale.auctioned_is_previous_winner || 0) === 1) { %>
+                        <span class="ms-1"><%- include('../partials/winner-badge', { showText: false, className: '' }) %></span>
+                      <% } %>
+                    </td>
+                    <td><%= sale.buyer_first_name %> <%= sale.buyer_last_name %></td>
+                    <td><%= sale.owner_user_id ? `${sale.owner_first_name} ${sale.owner_last_name}` : '-' %></td>
+                    <td class="money">$<%= Number(sale.auction_bid_amount || 0).toFixed(2) %></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          <% } %>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      (function initAutoRefresh() {
+        var seconds = 5;
+        var target = document.getElementById('refreshCountdown');
+        if (target) target.textContent = String(seconds);
+        var timer = setInterval(function tick() {
+          seconds -= 1;
+          if (target) target.textContent = String(Math.max(0, seconds));
+          if (seconds <= 0) {
+            clearInterval(timer);
+            window.location.reload();
+          }
+        }, 1000);
+      }());
+    </script>
+  </body>
+</html>

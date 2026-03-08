@@ -9,7 +9,8 @@ test('stablefordPoints calculates points from net-to-par', () => {
   const result = stablefordPoints({
     grossScore: 5,
     par: 4,
-    strokeIndex: 1,
+    strokeIndexPrimary: 1,
+    strokeIndexSecondary: 19,
     playingHandicap: 18
   });
 
@@ -22,7 +23,8 @@ test('stablefordPoints bottoms at zero points', () => {
   const result = stablefordPoints({
     grossScore: 10,
     par: 4,
-    strokeIndex: 10,
+    strokeIndexPrimary: 10,
+    strokeIndexSecondary: 28,
     playingHandicap: 0
   });
 

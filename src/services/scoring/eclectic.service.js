@@ -1,23 +1,54 @@
 'use strict';
 
-async function calculateEclecticLeaderboard(db, eventId) {
+async function calculateEclecticLeaderboard(db, eventId, days = [2, 3, 4]) {
+  const scopedDays = (Array.isArray(days) ? days : [2, 3, 4])
+    .map((d) => Number(d))
+    .filter((d) => [2, 3, 4].includes(d));
+  if (!scopedDays.length) return [];
+
   const rows = await db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
     .join('users as u', 'u.id', 's.user_id')
     .where('s.event_id', eventId)
-    .whereIn('s.day', [2, 3, 4])
+    .whereIn('s.day', scopedDays)
     .andWhere('s.type', 'individual')
-    .select('s.user_id', 'u.first_name', 'u.last_name', 'sh.hole_number')
-    .min({ bestGross: 'sh.gross_score' });
+    .select(
+      's.user_id',
+      'u.first_name',
+      'u.last_name',
+      'sh.hole_number',
+      'sh.stableford_points'
+    );
 
-  const totals = new Map();
+  const byUserHole = new Map();
   for (const row of rows) {
-    const key = row.user_id;
-    if (!totals.has(key)) totals.set(key, { userId: key, name: `${row.first_name} ${row.last_name}`, totalGross: 0 });
-    totals.get(key).totalGross += Number(row.bestGross || 0);
+    const userId = Number(row.user_id);
+    const holeNumber = Number(row.hole_number);
+    const points = Number(row.stableford_points || 0);
+    const key = `${userId}:${holeNumber}`;
+    const existing = byUserHole.get(key);
+    if (!existing || points > existing.bestStableford) {
+      byUserHole.set(key, {
+        userId,
+        name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+        holeNumber,
+        bestStableford: points
+      });
+    }
   }
 
-  return [...totals.values()].sort((a, b) => a.totalGross - b.totalGross);
+  const totalsByUser = new Map();
+  for (const row of byUserHole.values()) {
+    if (!totalsByUser.has(row.userId)) {
+      totalsByUser.set(row.userId, { userId: row.userId, name: row.name, totalPoints: 0 });
+    }
+    totalsByUser.get(row.userId).totalPoints += Number(row.bestStableford || 0);
+  }
+
+  return [...totalsByUser.values()].sort((a, b) => (
+    Number(b.totalPoints || 0) - Number(a.totalPoints || 0) ||
+    String(a.name || '').localeCompare(String(b.name || ''))
+  ));
 }
 
 module.exports = { calculateEclecticLeaderboard };

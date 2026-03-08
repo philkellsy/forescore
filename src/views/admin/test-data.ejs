@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+  </head>
+  <body>
+    <%- include('../partials/nav') %>
+    <main class="container py-3 py-md-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h1 class="h4 mb-1">Test Data Tools</h1>
+          <p class="text-muted mb-0">Scoped to Event 1 and seeded user only.</p>
+        </div>
+        <a class="btn btn-outline-dark" href="/admin/dashboard">Back</a>
+      </div>
+
+      <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+      <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <% if (!event) { %>
+            <div class="alert alert-danger mb-0">Event 1 does not exist.</div>
+          <% } else { %>
+            <div class="row g-2">
+              <div class="col-12 col-md-4"><strong>Event:</strong> #<%= event.id %> (<%= event.year %>)</div>
+              <div class="col-12 col-md-4"><strong>Event Players:</strong> <%= Number(eventPlayerCount || 0) %></div>
+              <div class="col-12 col-md-4"><strong>Seeded Users:</strong> <%= Number((seedUsers || []).length || 0) %></div>
+            </div>
+          <% } %>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white"><h2 class="h6 mb-0">Setup</h2></div>
+        <div class="card-body d-grid gap-2">
+          <form action="/admin/test-data/create-players" method="post" class="m-0">
+            <button class="btn btn-outline-dark w-100 text-start" type="submit">Create players and add to event</button>
+          </form>
+          <form action="/admin/test-data/day-1-groups-teams" method="post" class="m-0">
+            <button class="btn btn-outline-dark w-100 text-start" type="submit">Day 1 - create groups and teams</button>
+          </form>
+          <form action="/admin/test-data/calcutta" method="post" class="m-0">
+            <button class="btn btn-outline-dark w-100 text-start" type="submit">Generate Calcutta details</button>
+          </form>
+          <form action="/admin/test-data/day-3-groups" method="post" class="m-0">
+            <button class="btn btn-outline-dark w-100 text-start" type="submit">Day 3 - create groups</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white"><h2 class="h6 mb-0">Score Seeding</h2></div>
+        <div class="card-body d-grid gap-2">
+          <form action="/admin/test-data/day-1-scores" method="post" class="m-0">
+            <button class="btn btn-outline-primary w-100 text-start" type="submit">Day 1 - create scores (including drives taken)</button>
+          </form>
+          <form action="/admin/test-data/day-2-scores" method="post" class="m-0">
+            <button class="btn btn-outline-primary w-100 text-start" type="submit">Day 2 - create scores</button>
+          </form>
+          <form action="/admin/test-data/day-3-scores" method="post" class="m-0">
+            <button class="btn btn-outline-primary w-100 text-start" type="submit">Day 3 - create scores</button>
+          </form>
+          <form action="/admin/test-data/day-4-scores" method="post" class="m-0">
+            <button class="btn btn-outline-primary w-100 text-start" type="submit">Day 4 - create scores</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm">
+        <div class="card-header bg-white"><h2 class="h6 mb-0 text-danger">Danger Zone</h2></div>
+        <div class="card-body">
+          <p class="text-muted mb-2">Purges all Event 1 data generated via these tools and removes seeded players.</p>
+          <form action="/admin/test-data/purge" method="post" class="m-0">
+            <button class="btn btn-danger" type="submit">Purge all Event Data</button>
+          </form>
+        </div>
+      </section>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  </body>
+</html>

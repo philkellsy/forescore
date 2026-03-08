@@ -6,5 +6,18 @@
   "background_color": "#f8f9f4",
   "theme_color": "#0e5135",
   "description": "Scoring and leaderboards for the annual Legends golf trip.",
-  "icons": []
+  "icons": [
+    {
+      "src": "/img/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
 }

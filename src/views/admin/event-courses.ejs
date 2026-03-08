@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %> | Legends</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e5135" />
+    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+  </head>
+  <body>
+    <%
+      function formatEventDate(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value || '';
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      }
+    %>
+    <%- include('../partials/nav') %>
+    <main class="container py-3 py-md-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h1 class="h4 mb-1">Event Setup - <%= event.year %></h1>
+          <p class="text-muted mb-0"><%= event.location %> (<%= formatEventDate(event.start_date) %> - <%= formatEventDate(event.end_date) %>)</p>
+        </div>
+        <a class="btn btn-outline-dark" href="/admin/events/<%= event.id %>">Event Dashboard</a>
+      </div>
+
+      <% if (message) { %>
+        <div class="alert alert-success"><%= message %></div>
+      <% } %>
+      <% if (error) { %>
+        <div class="alert alert-danger"><%= error %></div>
+      <% } %>
+
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <% const courseDays = [1, 2, 3, 4]; %>
+          <% const coursesSetCount = courseDays.filter((day) => Number(dayAssignments.get(day) || 0) > 0).length; %>
+          <button
+            class="btn btn-sm btn-outline-dark w-100 d-flex justify-content-between align-items-center mb-2 course-assign-collapse-toggle"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#courseAssignCollapse"
+            aria-expanded="true"
+            aria-controls="courseAssignCollapse"
+          >
+            <span class="d-flex flex-column align-items-start text-start">
+              <span class="fw-semibold">Assign Course By Day</span>
+              <span class="small text-muted"><%= coursesSetCount %> of <%= courseDays.length %> courses set</span>
+            </span>
+            <i class="fa-solid fa-chevron-down novelty-chevron"></i>
+          </button>
+          <div class="collapse show" id="courseAssignCollapse">
+            <form action="/admin/events/<%= event.id %>/setup/assign" method="post" class="row g-3">
+              <% [1,2,3,4].forEach((day) => { %>
+                <div class="col-12 col-md-6">
+                  <label class="form-label"><%= dayLabel(day) %></label>
+                  <select class="form-select" name="courseId_<%= day %>" required>
+                    <option value="">Select course</option>
+                    <% courses.forEach((c) => { %>
+                      <option value="<%= c.id %>" <%= Number(dayAssignments.get(day) || 0) === Number(c.id) ? 'selected' : '' %>>
+                        <%= c.course_name %> - <%= c.tee_name %> (<%= Number(c.holes_count || 0) %> holes)
+                      </option>
+                    <% }) %>
+                  </select>
+                </div>
+              <% }) %>
+              <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-legends" type="submit">Save Day Assignments</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h2 class="h6 mb-3">Novelty Events By Day</h2>
+          <div class="row g-3">
+            <% [1,2,3,4].forEach((day) => { %>
+              <% const novelties = noveltyEventsByDay.get(day) || []; %>
+              <% const ntpCount = novelties.filter((n) => String(n.noveltyType || '') === 'NTP').length; %>
+              <% const longDriveCount = novelties.filter((n) => String(n.noveltyType || '') === 'Long Drive').length; %>
+              <div class="col-12 col-lg-6">
+                <div class="border rounded p-3 h-100">
+                  <button
+                    class="btn btn-sm btn-outline-dark w-100 d-flex justify-content-between align-items-center mb-2 novelty-collapse-toggle"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#noveltyDayCollapse<%= day %>"
+                    aria-expanded="true"
+                    aria-controls="noveltyDayCollapse<%= day %>"
+                  >
+                    <span class="fw-semibold">
+                      <%= dayLabel(day) %>
+                      <span class="text-muted fw-normal ms-2">NTP <%= ntpCount %> · Long Drive <%= longDriveCount %></span>
+                    </span>
+                    <i class="fa-solid fa-chevron-down novelty-chevron"></i>
+                  </button>
+                  <div class="collapse show" id="noveltyDayCollapse<%= day %>">
+                    <form action="/admin/events/<%= event.id %>/setup/novelties" method="post" class="row g-2 align-items-end mb-3">
+                      <input type="hidden" name="day" value="<%= day %>" />
+                      <div class="col-4">
+                        <label class="form-label mb-1">Type</label>
+                        <select class="form-select form-select-sm novelty-type-select" name="noveltyType" required>
+                          <% noveltyTypes.forEach((t) => { %>
+                            <option value="<%= t %>"><%= t %></option>
+                          <% }) %>
+                        </select>
+                      </div>
+                      <div class="col-4">
+                        <label class="form-label mb-1">Hole</label>
+                        <select class="form-select form-select-sm novelty-hole-select" name="holeNumber" required>
+                          <% const dayHoleOptions = noveltyHoleOptionsByDay.get(day) || []; %>
+                          <% if (!dayHoleOptions.length) { %>
+                            <% for (let hole = 1; hole <= 18; hole += 1) { %>
+                              <option value="<%= hole %>" data-par="">Hole <%= hole %></option>
+                            <% } %>
+                          <% } else { %>
+                            <% dayHoleOptions.forEach((h) => { %>
+                              <option value="<%= h.holeNumber %>" data-par="<%= h.par %>">Hole <%= h.holeNumber %> · Par <%= h.par %></option>
+                            <% }) %>
+                          <% } %>
+                        </select>
+                      </div>
+                      <div class="col-4">
+                        <label class="form-label mb-1">Label</label>
+                        <input class="form-control form-control-sm novelty-label-input" name="label" value="NTP" />
+                      </div>
+                      <div class="col-12 d-flex justify-content-end">
+                        <button class="btn btn-sm btn-outline-dark" type="submit">Add Novelty</button>
+                      </div>
+                    </form>
+
+                    <% if (!novelties.length) { %>
+                      <p class="small text-muted mb-0">No novelty events configured.</p>
+                    <% } else { %>
+                      <div class="d-grid gap-2">
+                        <% novelties.forEach((novelty) => { %>
+                          <div class="border rounded p-2 d-flex justify-content-between align-items-center gap-2">
+                            <div>
+                              <div class="fw-semibold"><%= novelty.label %></div>
+                              <div class="small text-muted">Hole <%= novelty.holeNumber %> · <%= novelty.noveltyType %></div>
+                            </div>
+                            <form action="/admin/events/<%= event.id %>/setup/novelties/<%= novelty.id %>/delete" method="post" class="m-0">
+                              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                            </form>
+                          </div>
+                        <% }) %>
+                      </div>
+                    <% } %>
+                  </div>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+      </section>
+
+      <section class="card border-0 shadow-sm">
+        <div class="card-body">
+          <button
+            class="btn btn-sm btn-outline-dark w-100 d-flex justify-content-between align-items-center mb-2 prize-config-collapse-toggle"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#prizeConfigCollapse"
+            aria-expanded="false"
+            aria-controls="prizeConfigCollapse"
+          >
+            <span class="d-flex flex-column align-items-start text-start">
+              <span class="fw-semibold">Prize &amp; Calcutta Config</span>
+              <span class="small text-muted">
+                Total $<%= Number(prizeSummary.totalPrizePool || 0).toFixed(2) %>
+                <span class="mx-1">·</span>
+                Per player $<%= Number(prizeSummary.perPlayerFunding || 0).toFixed(2) %>
+              </span>
+            </span>
+            <i class="fa-solid fa-chevron-down novelty-chevron ms-2"></i>
+          </button>
+          <div class="collapse" id="prizeConfigCollapse">
+            <form action="/admin/events/<%= event.id %>/setup/prizes" method="post" class="row g-3">
+              <div class="col-12"><h3 class="h6 mb-0">Configure Prize Values</h3></div>
+              <div class="col-12 col-lg-6">
+                <section class="border rounded p-3 h-100">
+                  <h4 class="h6 mb-3">Pool</h4>
+                  <div class="d-grid gap-2">
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Sultans Team Winners ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeSultansWinnerAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeSultansWinnerAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Ambrose Winners ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeAmbroseWinnerAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeAmbroseWinnerAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Ambrose Second ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeAmbroseSecondAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeAmbroseSecondAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Daily Winner ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeDailyWinnerAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeDailyWinnerAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Daily 2nd ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeDailySecondAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeDailySecondAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Skins per player/hole ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="skinsAmountPerPlayerPerHole" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.skinsAmountPerPlayerPerHole || 1) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">NTP Prize ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeNtpAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeNtpAmount || 0) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Long Drive Prize ($)</label>
+                      <input class="form-control form-control-sm prize-input-compact" name="prizeLongDriveAmount" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.prizeLongDriveAmount || 0) %>" />
+                    </div>
+                  </div>
+                </section>
+              </div>
+              <div class="col-12 col-lg-6">
+                <section class="border rounded p-3 h-100">
+                  <h4 class="h6 mb-1">Calcutta</h4>
+                  <p class="small text-muted mb-3">Must total 100% (Owner Daily Winner % applies x3).</p>
+                  <div class="d-grid gap-2">
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Owner Daily Winner %</label>
+                      <input class="form-control form-control-sm prize-input-compact calcutta-percent" name="calcuttaOwnerDailyWinnerPercent" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.calcuttaOwnerDailyWinnerPercent || 5) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Calcutta Champion %</label>
+                      <input class="form-control form-control-sm prize-input-compact calcutta-percent" name="calcuttaChampionPercent" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.calcuttaChampionPercent || 10) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Champion Owner %</label>
+                      <input class="form-control form-control-sm prize-input-compact calcutta-percent" name="calcuttaChampionOwnerPercent" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.calcuttaChampionOwnerPercent || 70) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Mystery Place %</label>
+                      <input class="form-control form-control-sm prize-input-compact calcutta-percent" name="calcuttaMysteryPlacePercent" type="number" min="0" step="0.01" value="<%= Number(prizeConfig.calcuttaMysteryPlacePercent || 5) %>" />
+                    </div>
+                    <div class="prize-config-row">
+                      <label class="mb-0 small">Mystery Place</label>
+                      <select class="form-select form-select-sm prize-select-compact" name="calcuttaMysteryPlace">
+                        <option value="">Select place</option>
+                        <% mysteryPlaceOptions.forEach((opt) => { %>
+                          <option value="<%= opt.value %>" <%= Number(prizeConfig.calcuttaMysteryPlace || 0) === Number(opt.value) ? 'selected' : '' %>><%= opt.label %></option>
+                        <% }) %>
+                      </select>
+                    </div>
+                    <div class="small text-muted mt-1">Current Calcutta total: <strong id="calcuttaPercentTotal">0%</strong></div>
+                  </div>
+                </section>
+              </div>
+              <div class="col-12 d-flex justify-content-end">
+                <button class="btn btn-legends" type="submit">Save Prize Config</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const NOVELTY_COLLAPSE_COOKIE = 'noveltyCollapseState';
+      const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+      const readNoveltyCollapseState = () => {
+        const parts = document.cookie.split(';').map((v) => v.trim());
+        const entry = parts.find((v) => v.startsWith(`${NOVELTY_COLLAPSE_COOKIE}=`));
+        if (!entry) return {};
+        const raw = decodeURIComponent(entry.slice(NOVELTY_COLLAPSE_COOKIE.length + 1));
+        if (!raw) return {};
+        return raw.split(',').reduce((acc, pair) => {
+          const [k, v] = pair.split(':');
+          if (k) acc[k] = v === '1' ? 1 : 0;
+          return acc;
+        }, {});
+      };
+      const writeNoveltyCollapseState = (state) => {
+        const payload = Object.keys(state)
+          .sort()
+          .map((k) => `${k}:${state[k] ? 1 : 0}`)
+          .join(',');
+        document.cookie = `${NOVELTY_COLLAPSE_COOKIE}=${encodeURIComponent(payload)}; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
+      };
+
+      const noveltyCollapseState = readNoveltyCollapseState();
+      document.querySelectorAll('.novelty-collapse-toggle').forEach((btn) => {
+        const targetId = String(btn.getAttribute('data-bs-target') || '').replace('#', '');
+        if (!targetId) return;
+        const target = document.getElementById(targetId);
+        if (!target) return;
+
+        if (Object.prototype.hasOwnProperty.call(noveltyCollapseState, targetId)) {
+          const isOpen = Boolean(noveltyCollapseState[targetId]);
+          target.classList.toggle('show', isOpen);
+          btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
+        target.addEventListener('shown.bs.collapse', () => {
+          btn.setAttribute('aria-expanded', 'true');
+          noveltyCollapseState[targetId] = 1;
+          writeNoveltyCollapseState(noveltyCollapseState);
+        });
+        target.addEventListener('hidden.bs.collapse', () => {
+          btn.setAttribute('aria-expanded', 'false');
+          noveltyCollapseState[targetId] = 0;
+          writeNoveltyCollapseState(noveltyCollapseState);
+        });
+      });
+
+      document.querySelectorAll('form[action$="/setup/novelties"]').forEach((form) => {
+        const typeSelect = form.querySelector('.novelty-type-select');
+        const labelInput = form.querySelector('.novelty-label-input');
+        const holeSelect = form.querySelector('.novelty-hole-select');
+        if (!typeSelect || !labelInput || !holeSelect) return;
+
+        const applyHoleFilter = () => {
+          const type = String(typeSelect.value || '');
+          const selectedBefore = String(holeSelect.value || '');
+          const targetPar = type === 'NTP' ? '3' : (type === 'Long Drive' ? '5' : '');
+          let firstVisibleValue = '';
+          Array.from(holeSelect.options).forEach((opt) => {
+            const par = String(opt.getAttribute('data-par') || '');
+            const visible = !targetPar || !par || par === targetPar;
+            opt.hidden = !visible;
+            opt.disabled = !visible;
+            if (visible && !firstVisibleValue) firstVisibleValue = String(opt.value || '');
+          });
+          if (!selectedBefore) {
+            if (firstVisibleValue) holeSelect.value = firstVisibleValue;
+            return;
+          }
+          const selectedOpt = Array.from(holeSelect.options).find((opt) => String(opt.value) === selectedBefore);
+          if (!selectedOpt || selectedOpt.disabled) {
+            holeSelect.value = firstVisibleValue || '';
+          }
+        };
+
+        typeSelect.addEventListener('change', () => {
+          if (!String(labelInput.value || '').trim() || labelInput.value === 'NTP' || labelInput.value === 'Long Drive') {
+            labelInput.value = typeSelect.value;
+          }
+          applyHoleFilter();
+        });
+        applyHoleFilter();
+      });
+
+      const PRIZE_COLLAPSE_COOKIE = 'prizeConfigCollapseOpen';
+      const COURSE_ASSIGN_COLLAPSE_COOKIE = 'courseAssignCollapseOpen';
+      const prizeToggle = document.querySelector('.prize-config-collapse-toggle');
+      const prizeCollapse = document.getElementById('prizeConfigCollapse');
+      if (prizeToggle && prizeCollapse) {
+        const savedState = document.cookie
+          .split(';')
+          .map((v) => v.trim())
+          .find((v) => v.startsWith(`${PRIZE_COLLAPSE_COOKIE}=`));
+        if (savedState) {
+          const isOpen = String(savedState.split('=')[1] || '') === '1';
+          prizeCollapse.classList.toggle('show', isOpen);
+          prizeToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
+        prizeCollapse.addEventListener('shown.bs.collapse', () => {
+          prizeToggle.setAttribute('aria-expanded', 'true');
+          document.cookie = `${PRIZE_COLLAPSE_COOKIE}=1; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
+        });
+        prizeCollapse.addEventListener('hidden.bs.collapse', () => {
+          prizeToggle.setAttribute('aria-expanded', 'false');
+          document.cookie = `${PRIZE_COLLAPSE_COOKIE}=0; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
+        });
+      }
+
+      const courseAssignToggle = document.querySelector('.course-assign-collapse-toggle');
+      const courseAssignCollapse = document.getElementById('courseAssignCollapse');
+      if (courseAssignToggle && courseAssignCollapse) {
+        const savedState = document.cookie
+          .split(';')
+          .map((v) => v.trim())
+          .find((v) => v.startsWith(`${COURSE_ASSIGN_COLLAPSE_COOKIE}=`));
+        if (savedState) {
+          const isOpen = String(savedState.split('=')[1] || '') === '1';
+          courseAssignCollapse.classList.toggle('show', isOpen);
+          courseAssignToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+
+        courseAssignCollapse.addEventListener('shown.bs.collapse', () => {
+          courseAssignToggle.setAttribute('aria-expanded', 'true');
+          document.cookie = `${COURSE_ASSIGN_COLLAPSE_COOKIE}=1; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
+        });
+        courseAssignCollapse.addEventListener('hidden.bs.collapse', () => {
+          courseAssignToggle.setAttribute('aria-expanded', 'false');
+          document.cookie = `${COURSE_ASSIGN_COLLAPSE_COOKIE}=0; path=/; max-age=${COOKIE_MAX_AGE}; samesite=lax`;
+        });
+      }
+
+      const percentInputs = Array.from(document.querySelectorAll('.calcutta-percent'));
+      const percentTotalEl = document.getElementById('calcuttaPercentTotal');
+      const refreshCalcuttaTotal = () => {
+        if (!percentTotalEl || !percentInputs.length) return;
+        const ownerDaily = Number(document.querySelector('[name="calcuttaOwnerDailyWinnerPercent"]')?.value || 0);
+        const champion = Number(document.querySelector('[name="calcuttaChampionPercent"]')?.value || 0);
+        const championOwner = Number(document.querySelector('[name="calcuttaChampionOwnerPercent"]')?.value || 0);
+        const mystery = Number(document.querySelector('[name="calcuttaMysteryPlacePercent"]')?.value || 0);
+        const total = (ownerDaily * 3) + champion + championOwner + mystery;
+        percentTotalEl.textContent = `${total.toFixed(2)}%`;
+        percentTotalEl.classList.toggle('text-danger', Math.abs(total - 100) > 0.0001);
+        percentTotalEl.classList.toggle('text-success', Math.abs(total - 100) <= 0.0001);
+      };
+      percentInputs.forEach((input) => input.addEventListener('input', refreshCalcuttaTotal));
+      refreshCalcuttaTotal();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  </body>
+</html>

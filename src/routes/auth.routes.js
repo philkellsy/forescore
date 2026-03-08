@@ -11,7 +11,7 @@ function authRouter(db) {
 
   router.get('/login', (req, res) => {
     if (req.session?.user) return res.redirect('/');
-    return res.render('auth/login', { title: 'Sign In', sent: false, user: null });
+    return res.render('auth/login', { title: 'Sign In', sent: false, error: null, user: null });
   });
 
   router.post('/magic-link', authLimiter, async (req, res, next) => {
@@ -25,12 +25,24 @@ function authRouter(db) {
       if (user) {
         const { token } = await createLoginToken(db, user.id, req.ip, req.get('user-agent'));
         const link = `${baseUrl}/auth/verify?token=${token}`;
-        await sendMagicLink(email, link);
+        try {
+          await sendMagicLink(email, link);
+        } catch (sendError) {
+          // Keep response generic for security; delivery failures are server-side only.
+          console.error('[auth] magic_link_send_failed', {
+            userId: Number(user.id),
+            error: sendError?.message || String(sendError)
+          });
+        }
       }
 
       return res.render('auth/login', { title: 'Sign In', sent: true, user: null, error: null });
     } catch (error) {
-      return next(error);
+      // Keep response generic for security/UX and avoid client-side failures.
+      console.error('[auth] magic_link_request_failed', {
+        error: error?.message || String(error)
+      });
+      return res.render('auth/login', { title: 'Sign In', sent: true, user: null, error: null });
     }
   });
 

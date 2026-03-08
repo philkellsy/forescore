@@ -1,4 +1,4 @@
-app = "legends-scoring"
+app = "legends"
 primary_region = "syd"
 
 [build]

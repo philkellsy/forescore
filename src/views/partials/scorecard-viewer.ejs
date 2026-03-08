@@ -1,0 +1,132 @@
+<article class="card border-0 shadow-sm scorecard-viewer-card">
+  <%
+    function grossDiscClass(hole) {
+      const gross = Number(hole?.gross);
+      const par = Number(hole?.par);
+      if (!Number.isFinite(gross) || gross <= 0 || !Number.isFinite(par) || par <= 0) return '';
+      if (gross === 1) return 'scorecard-gross-disc scorecard-gross-disc-hio';
+      if (gross <= par - 2) return 'scorecard-gross-disc scorecard-gross-disc-eagle';
+      if (gross === par - 1) return 'scorecard-gross-disc scorecard-gross-disc-birdie';
+      return '';
+    }
+  %>
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+      <div>
+        <h2 class="h6 mb-1"><%= model.roundLabel %> - <%= model.dayLabel %></h2>
+        <div class="fw-semibold"><%= model.title %></div>
+        <% if (model.subtitle) { %><div class="text-muted small"><%= model.subtitle %></div><% } %>
+      </div>
+      <div class="text-md-end">
+        <div class="text-muted small">Result</div>
+        <div class="fw-semibold"><%= model.resultLabel %></div>
+      </div>
+    </div>
+
+    <div class="d-none d-md-block">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 scorecard-grid-table">
+          <thead>
+            <tr class="scorecard-hole-row">
+              <th class="sticky-col">Hole</th>
+              <% model.front9.forEach((hole) => { %><th><%= hole.holeNumber %></th><% }) %>
+              <th class="scorecard-total-col">OUT</th>
+              <% model.back9.forEach((hole) => { %><th><%= hole.holeNumber %></th><% }) %>
+              <th class="scorecard-total-col">IN</th>
+              <th class="scorecard-total-col">TOT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="scorecard-hole-row">
+              <th class="sticky-col">Par</th>
+              <% model.front9.forEach((hole) => { %><td><%= hole.par %></td><% }) %>
+              <td class="scorecard-total-col"><%= model.front9.reduce((a, h) => a + Number(h.par || 0), 0) %></td>
+              <% model.back9.forEach((hole) => { %><td><%= hole.par %></td><% }) %>
+              <td class="scorecard-total-col"><%= model.back9.reduce((a, h) => a + Number(h.par || 0), 0) %></td>
+              <td class="scorecard-total-col"><%= model.holes.reduce((a, h) => a + Number(h.par || 0), 0) %></td>
+            </tr>
+            <tr class="scorecard-index-row">
+              <th class="sticky-col">Index</th>
+              <% model.front9.forEach((hole) => { %><td><%= hole.siPrimary %></td><% }) %>
+              <td class="scorecard-total-col">-</td>
+              <% model.back9.forEach((hole) => { %><td><%= hole.siPrimary %></td><% }) %>
+              <td class="scorecard-total-col">-</td>
+              <td class="scorecard-total-col">-</td>
+            </tr>
+            <tr>
+              <th class="sticky-col">Gross</th>
+              <% model.front9.forEach((hole) => { %><td><% if (hole.gross == null) { %>-<% } else { %><span class="<%= grossDiscClass(hole) %>"><%= hole.gross %></span><% } %></td><% }) %>
+              <td class="scorecard-total-col"><%= model.showStablefordTotals ? '-' : model.totals.grossFront %></td>
+              <% model.back9.forEach((hole) => { %><td><% if (hole.gross == null) { %>-<% } else { %><span class="<%= grossDiscClass(hole) %>"><%= hole.gross %></span><% } %></td><% }) %>
+              <td class="scorecard-total-col"><%= model.showStablefordTotals ? '-' : model.totals.grossBack %></td>
+              <td class="scorecard-total-col fw-semibold"><%= model.showStablefordTotals ? '-' : model.totals.grossTotal %></td>
+            </tr>
+            <% if (!model.showStablefordTotals) { %>
+              <tr>
+                <th class="sticky-col">Net</th>
+                <% model.front9.forEach((hole) => { %><td><%= hole.net == null ? '-' : hole.net %></td><% }) %>
+                <td class="scorecard-total-col"><%= model.showGrossOnlyTotals ? '-' : model.totals.netFront %></td>
+                <% model.back9.forEach((hole) => { %><td><%= hole.net == null ? '-' : hole.net %></td><% }) %>
+                <td class="scorecard-total-col"><%= model.showGrossOnlyTotals ? '-' : model.totals.netBack %></td>
+                <td class="scorecard-total-col fw-semibold"><%= model.showGrossOnlyTotals ? '-' : model.totals.netTotal %></td>
+              </tr>
+            <% } %>
+            <% if (model.showStablefordTotals) { %>
+              <tr>
+                <th class="sticky-col">Stableford</th>
+                <% model.front9.forEach((hole) => { %><td><%= hole.stableford == null ? '-' : hole.stableford %></td><% }) %>
+                <td class="scorecard-total-col"><%= model.totals.stablefordFront %></td>
+                <% model.back9.forEach((hole) => { %><td><%= hole.stableford == null ? '-' : hole.stableford %></td><% }) %>
+                <td class="scorecard-total-col"><%= model.totals.stablefordBack %></td>
+                <td class="scorecard-total-col fw-semibold"><%= model.totals.stablefordTotal %></td>
+              </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="d-md-none">
+      <div class="small text-muted mb-2">Front 9</div>
+      <div class="table-responsive mb-3">
+        <table class="table table-sm align-middle mb-0 scorecard-grid-table">
+          <thead>
+            <tr class="scorecard-hole-row">
+              <th>Info</th>
+              <% model.front9.forEach((hole) => { %><th><%= hole.holeNumber %></th><% }) %>
+              <th class="scorecard-total-col">OUT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="scorecard-hole-row"><th>Par</th><% model.front9.forEach((hole) => { %><td><%= hole.par %></td><% }) %><td class="scorecard-total-col"><%= model.front9.reduce((a, h) => a + Number(h.par || 0), 0) %></td></tr>
+            <tr class="scorecard-index-row"><th>Index</th><% model.front9.forEach((hole) => { %><td><%= hole.siPrimary %></td><% }) %><td class="scorecard-total-col">-</td></tr>
+            <tr><th>G</th><% model.front9.forEach((hole) => { %><td><% if (hole.gross == null) { %>-<% } else { %><span class="<%= grossDiscClass(hole) %>"><%= hole.gross %></span><% } %></td><% }) %><td class="scorecard-total-col"><%= model.showStablefordTotals ? '-' : model.totals.grossFront %></td></tr>
+            <% if (!model.showStablefordTotals) { %><tr><th>Net</th><% model.front9.forEach((hole) => { %><td><%= hole.net == null ? '-' : hole.net %></td><% }) %><td class="scorecard-total-col"><%= model.showGrossOnlyTotals ? '-' : model.totals.netFront %></td></tr><% } %>
+            <% if (model.showStablefordTotals) { %><tr><th>S</th><% model.front9.forEach((hole) => { %><td><%= hole.stableford == null ? '-' : hole.stableford %></td><% }) %><td class="scorecard-total-col"><%= model.totals.stablefordFront %></td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="small text-muted mb-2">Back 9</div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 scorecard-grid-table">
+          <thead>
+            <tr class="scorecard-hole-row">
+              <th>Info</th>
+              <% model.back9.forEach((hole) => { %><th><%= hole.holeNumber %></th><% }) %>
+              <th class="scorecard-total-col">IN</th>
+              <th class="scorecard-total-col">TOT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="scorecard-hole-row"><th>Par</th><% model.back9.forEach((hole) => { %><td><%= hole.par %></td><% }) %><td class="scorecard-total-col"><%= model.back9.reduce((a, h) => a + Number(h.par || 0), 0) %></td><td class="scorecard-total-col"><%= model.holes.reduce((a, h) => a + Number(h.par || 0), 0) %></td></tr>
+            <tr class="scorecard-index-row"><th>Index</th><% model.back9.forEach((hole) => { %><td><%= hole.siPrimary %></td><% }) %><td class="scorecard-total-col">-</td><td class="scorecard-total-col">-</td></tr>
+            <tr><th>G</th><% model.back9.forEach((hole) => { %><td><% if (hole.gross == null) { %>-<% } else { %><span class="<%= grossDiscClass(hole) %>"><%= hole.gross %></span><% } %></td><% }) %><td class="scorecard-total-col"><%= model.showStablefordTotals ? '-' : model.totals.grossBack %></td><td class="scorecard-total-col fw-semibold"><%= model.showStablefordTotals ? '-' : model.totals.grossTotal %></td></tr>
+            <% if (!model.showStablefordTotals) { %><tr><th>Net</th><% model.back9.forEach((hole) => { %><td><%= hole.net == null ? '-' : hole.net %></td><% }) %><td class="scorecard-total-col"><%= model.showGrossOnlyTotals ? '-' : model.totals.netBack %></td><td class="scorecard-total-col fw-semibold"><%= model.showGrossOnlyTotals ? '-' : model.totals.netTotal %></td></tr><% } %>
+            <% if (model.showStablefordTotals) { %><tr><th>S</th><% model.back9.forEach((hole) => { %><td><%= hole.stableford == null ? '-' : hole.stableford %></td><% }) %><td class="scorecard-total-col"><%= model.totals.stablefordBack %></td><td class="scorecard-total-col fw-semibold"><%= model.totals.stablefordTotal %></td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</article>

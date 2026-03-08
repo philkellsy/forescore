@@ -1,17 +1,24 @@
 <nav class="navbar navbar-expand-lg navbar-dark legends-nav">
   <div class="container">
-    <a class="navbar-brand fw-bold" href="/">Legends</a>
+    <a class="navbar-brand fw-bold" href="/"><i class="fa-solid fa-golf-ball-tee fa-fw me-1" aria-hidden="true"></i>Legends</a>
     <% if (user) { %>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+      <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#navMenu" aria-controls="navMenu">
         <span class="navbar-toggler-icon"></span>
       </button>
-      <div class="collapse navbar-collapse" id="navMenu">
+      <div class="offcanvas offcanvas-end text-bg-dark" tabindex="-1" id="navMenu" aria-labelledby="navMenuLabel">
+        <div class="offcanvas-header">
+          <h5 class="offcanvas-title" id="navMenuLabel"><i class="fa-solid fa-golf-ball-tee fa-fw me-2" aria-hidden="true"></i>Legends</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
         <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-          <li class="nav-item"><a class="nav-link" href="/player/dashboard">Player</a></li>
-          <li class="nav-item"><a class="nav-link" href="/scoring">Scoring</a></li>
-          <li class="nav-item"><a class="nav-link" href="/leaderboards">Leaderboards</a></li>
+          <li class="nav-item"><a class="nav-link" href="/player/dashboard"><i class="fa-solid fa-user fa-fw me-1" aria-hidden="true"></i>Player</a></li>
+          <li class="nav-item"><a class="nav-link" href="/scoring"><i class="fa-solid fa-pen-to-square fa-fw me-1" aria-hidden="true"></i>Scoring</a></li>
+          <li class="nav-item"><a class="nav-link" href="/leaderboards"><i class="fa-solid fa-trophy fa-fw me-1" aria-hidden="true"></i>Leaderboards</a></li>
           <% if (user.role === 'admin') { %>
-            <li class="nav-item"><a class="nav-link" href="/admin/dashboard">Admin</a></li>
+            <li class="nav-item"><a class="nav-link" href="/admin/events/active"><i class="fa-solid fa-flag-checkered fa-fw me-1" aria-hidden="true"></i>Active Event</a></li>
+            <li class="nav-item"><a class="nav-link" href="/admin/dashboard"><i class="fa-solid fa-gear fa-fw me-1" aria-hidden="true"></i>Admin</a></li>
+            <li class="nav-item"><a class="nav-link" href="/admin/players"><i class="fa-solid fa-users fa-fw me-1" aria-hidden="true"></i>Players</a></li>
           <% } %>
         </ul>
         <div class="d-flex align-items-center gap-3">
@@ -20,7 +27,18 @@
             <button class="btn btn-sm btn-outline-light" type="submit">Logout</button>
           </form>
         </div>
+        </div>
       </div>
     <% } %>
   </div>
 </nav>
+<% if (legendsChampionBanner && legendsChampionBanner.playerName) { %>
+  <div class="champion-ribbon" role="status" aria-live="polite">
+    <span class="champion-ribbon-emoji" aria-hidden="true">🎉</span>
+    <span>
+      Congratulations to <strong><%= legendsChampionBanner.playerName %></strong> our <%= legendsChampionBanner.year %> Legends Champion with a score of <strong><%= Number(legendsChampionBanner.winningTotal || 0) %></strong>. See you in <%= legendsChampionBanner.nextYear %>
+    </span>
+    <span class="champion-ribbon-emoji" aria-hidden="true">🎉</span>
+  </div>
+<% } %>
+<script src="/js/app.js" defer></script>

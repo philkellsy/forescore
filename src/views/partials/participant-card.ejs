@@ -1,0 +1,25 @@
+<%
+  const safeClassName = (typeof className !== 'undefined' && className) ? className : '';
+  const safeName = typeof name !== 'undefined' && name ? name : '';
+  const safeHandicapText = typeof handicapText !== 'undefined' ? handicapText : '';
+  const safeIsDefendingChampion = typeof isDefendingChampion !== 'undefined' ? Boolean(isDefendingChampion) : false;
+  const safeIsPreviousWinner = typeof isPreviousWinner !== 'undefined' ? Boolean(isPreviousWinner) : false;
+  const safeIsGhost = typeof isGhost !== 'undefined' ? Boolean(isGhost) : false;
+  const wrapperClass = safeClassName || 'border rounded px-2 py-1 bg-light small d-inline-flex align-items-center gap-1';
+  const displayName = String(safeName).trim();
+  const meta = safeHandicapText == null || safeHandicapText === '' ? '' : ` (${safeHandicapText})`;
+%>
+<span class="<%= wrapperClass %>">
+  <span><%= displayName %><%= meta %></span>
+  <% if (safeIsDefendingChampion) { %>
+    <i class="fa-solid fa-medal text-warning" title="Defending Champion" aria-label="Defending Champion"></i>
+  <% } %>
+  <% if (safeIsPreviousWinner) { %>
+    <%- include('./winner-badge', { showText: false, className: '' }) %>
+  <% } %>
+  <% if (safeIsGhost) { %>
+    <span class="d-inline-flex align-items-center justify-content-center rounded-1 bg-dark text-white" style="width:1rem;height:1rem;" title="Swinger" aria-label="Swinger">
+      <i class="fa-solid fa-ghost" style="font-size:.66rem;" aria-hidden="true"></i>
+    </span>
+  <% } %>
+</span>

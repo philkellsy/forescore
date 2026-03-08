@@ -10,6 +10,9 @@ module.exports = {
     connection: {
       filename: dbFile
     },
+    migrations: {
+      directory: path.join(__dirname, 'migrations')
+    },
     useNullAsDefault: true,
     pool: {
       afterCreate: (conn, done) => {
