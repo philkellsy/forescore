@@ -6,7 +6,7 @@ Node.js monolith for the Legends annual golf trip at Bonville International Golf
 - Express 4 + EJS + Bootstrap 5
 - SQLite + Knex
 - Session auth (`express-session`, `connect-sqlite3`)
-- Passwordless magic-link auth
+- Passwordless one-time code auth (email delivery)
 - PWA manifest + service worker
 
 ## Local Run
@@ -38,14 +38,14 @@ Detailed test strategy: `TESTING.md`.
 - Email: phil@kellsy.com
 - Phone: 0404878210
 
-## Magic Link Email (Brevo)
+## Login Code Email (Brevo)
 Set these environment variables:
-- `APP_BASE_URL` (for verify links; use your Fly domain in production)
+- `APP_BASE_URL` (used for absolute logo URLs in emails)
 - `BREVO_API_KEY`
 - `BREVO_SENDER_EMAIL` (must be verified in Brevo)
 - `BREVO_SENDER_NAME` (optional; default `Legends Golf`)
 
-If Brevo vars are missing, magic links are logged to server stdout in development (`[magic-link] ...`).
+If Brevo vars are missing, login codes are logged to server stdout in development (`[login-code] ...`).
 If Brevo send fails, the login page still returns the generic success message and the error is logged server-side.
 
 ### Fly.io secrets

@@ -18,32 +18,94 @@
           <div class="card shadow-sm border-0">
             <div class="card-body p-4">
               <div class="text-center mb-3">
-                <img src="/img/legends.jpeg?v=<%= assetVersion %>" alt="Legends logo" style="width:128px;max-width:38vw;height:auto;" />
+                <img src="/img/legends2.png?v=<%= assetVersion %>" alt="Legends logo" style="width:128px;max-width:38vw;height:auto;" />
               </div>
               <h1 class="h4 mb-3">Sign in to Legends</h1>
-              <p class="text-muted">Enter your email to receive a secure magic link.</p>
 
               <% if (error) { %>
                 <div class="alert alert-danger"><%= error %></div>
               <% } %>
 
-              <% if (sent) { %>
-                <div class="alert alert-success">If your email is registered, a magic link has been sent.</div>
+              <% if (info) { %>
+                <div class="alert alert-success"><%= info %></div>
+              <% } else if (sent) { %>
+                <div class="alert alert-success">If a matching account exists, a sign-in code has been sent.</div>
               <% } %>
 
-              <form action="/auth/magic-link" method="post" class="d-grid gap-3">
-                <div>
-                  <label for="email" class="form-label">Email</label>
-                  <input id="email" name="email" type="email" class="form-control form-control-lg" required />
+              <% if (!codeStage) { %>
+                <p class="text-muted">Enter your email or mobile. We will send a one-time sign-in code to your email address.</p>
+                <form action="/auth/send-code" method="post" class="d-grid gap-3">
+                  <div>
+                    <label for="lookup" class="form-label">Email or mobile</label>
+                    <input
+                      id="lookup"
+                      name="lookup"
+                      type="text"
+                      class="form-control form-control-lg"
+                      value="<%= lookupValue || '' %>"
+                      required
+                      autocomplete="username"
+                    />
+                  </div>
+                  <div class="form-check">
+                    <input
+                      id="rememberMe"
+                      name="rememberMe"
+                      type="checkbox"
+                      class="form-check-input"
+                      <%= rememberMe ? 'checked' : '' %>
+                    />
+                    <label class="form-check-label" for="rememberMe">Remember me</label>
+                  </div>
+                  <button class="btn btn-legends btn-lg" type="submit">Send Sign-In Code</button>
+                </form>
+              <% } else { %>
+                <p class="text-muted">Check your email for the <%= codeLength %>-digit sign-in code. It expires in <%= codeExpiryMinutes %> minutes.</p>
+
+                <form action="/auth/verify-code" method="post" class="d-grid gap-3 mb-3">
+                  <input type="hidden" name="lookup" value="<%= lookupValue || '' %>" />
+                  <div>
+                    <label for="code" class="form-label">One-time code</label>
+                    <input
+                      id="code"
+                      name="code"
+                      type="text"
+                      class="form-control form-control-lg text-center"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      maxlength="<%= codeLength %>"
+                      autocomplete="one-time-code"
+                      placeholder="000000"
+                      required
+                    />
+                  </div>
+                  <button class="btn btn-legends btn-lg" type="submit">Sign In</button>
+                </form>
+
+                <form action="/auth/resend-code" method="post" class="d-grid gap-2 mb-2">
+                  <input type="hidden" name="lookup" value="<%= lookupValue || '' %>" />
+                  <button
+                    id="resendCodeButton"
+                    class="btn btn-outline-success"
+                    type="submit"
+                    data-resend-at="<%= Number(resendAvailableAtMs || 0) %>"
+                  >
+                    Send another code
+                  </button>
+                  <small id="resendCountdownText" class="text-muted text-center"></small>
+                </form>
+
+                <div class="d-grid">
+                  <a class="btn btn-link p-0 text-decoration-none" href="/auth/login">Use a different email or mobile</a>
                 </div>
-                <button class="btn btn-legends btn-lg" type="submit">Send Magic Link</button>
-              </form>
+              <% } %>
             </div>
           </div>
         </div>
       </div>
     </main>
-      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-      <script src="/js/app.js" defer></script>
+    <div class="login-version-tag">v<%= assetVersion %></div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="/js/app.js?v=<%= assetVersion %>" defer></script>
   </body>
 </html>

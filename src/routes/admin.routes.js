@@ -80,6 +80,11 @@ function toWholeShots(raw) {
   return Math.trunc(Number(raw) || 0);
 }
 
+function normalizeMobile(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits || null;
+}
+
 function testSeedEmail(index) {
   return `${TEST_DATA_EMAIL_PREFIX}${String(index).padStart(2, '0')}@example.test`;
 }
@@ -4326,7 +4331,7 @@ function adminRouter(db) {
       const firstName = String(req.body.firstName || '').trim();
       const lastName = String(req.body.lastName || '').trim();
       const email = String(req.body.email || '').trim().toLowerCase();
-      const phoneNumber = String(req.body.phoneNumber || '').trim();
+      const phoneNumber = normalizeMobile(req.body.phoneNumber);
       const role = String(req.body.role || '').trim();
       const isPreviousWinner = parseCheckbox(req.body.isPreviousWinner);
 
@@ -4341,12 +4346,18 @@ function adminRouter(db) {
       if (existing) {
         return res.redirect('/admin/players?error=A%20user%20with%20that%20email%20already%20exists');
       }
+      if (phoneNumber) {
+        const existingMobile = await db('users').where({ phone_number: phoneNumber }).first();
+        if (existingMobile) {
+          return res.redirect('/admin/players?error=A%20user%20with%20that%20mobile%20already%20exists');
+        }
+      }
 
       await db('users').insert({
         first_name: firstName,
         last_name: lastName,
         email,
-        phone_number: phoneNumber || null,
+        phone_number: phoneNumber,
         role,
         is_previous_winner: isPreviousWinner
       });
@@ -4363,7 +4374,7 @@ function adminRouter(db) {
       const firstName = String(req.body.firstName || '').trim();
       const lastName = String(req.body.lastName || '').trim();
       const email = String(req.body.email || '').trim().toLowerCase();
-      const phoneNumber = String(req.body.phoneNumber || '').trim();
+      const phoneNumber = normalizeMobile(req.body.phoneNumber);
       const role = String(req.body.role || '').trim();
       const isPreviousWinner = parseCheckbox(req.body.isPreviousWinner);
 
@@ -4386,12 +4397,21 @@ function adminRouter(db) {
       if (existingEmail) {
         return res.redirect('/admin/players?error=Email%20is%20already%20used%20by%20another%20user');
       }
+      if (phoneNumber) {
+        const existingMobile = await db('users')
+          .where({ phone_number: phoneNumber })
+          .andWhereNot({ id: userId })
+          .first();
+        if (existingMobile) {
+          return res.redirect('/admin/players?error=Mobile%20is%20already%20used%20by%20another%20user');
+        }
+      }
 
       await db('users').where({ id: userId }).update({
         first_name: firstName,
         last_name: lastName,
         email,
-        phone_number: phoneNumber || null,
+        phone_number: phoneNumber,
         role,
         is_previous_winner: isPreviousWinner,
         updated_at: db.fn.now()

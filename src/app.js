@@ -32,36 +32,56 @@ function createApp({ db, sessionStore } = {}) {
   const championBannerCache = {
     value: null,
     loadedAt: 0,
+    key: '',
     pending: null
   };
 
   async function loadChampionBanner() {
-    const now = Date.now();
-    if (championBannerCache.value !== null && now - championBannerCache.loadedAt < 60000) {
-      return championBannerCache.value;
-    }
-    if (championBannerCache.pending) {
-      return championBannerCache.pending;
-    }
-    championBannerCache.pending = (async () => {
-      try {
-        const championEvent = await db('events as e')
-          .join('event_day_statuses as eds', function joinDay4() {
-            this.on('eds.event_id', '=', 'e.id');
-          })
-          .where('e.is_active', 1)
-          .where('eds.day', 4)
-          .andWhere('eds.leaderboard_published', 1)
-          .select('e.id', 'e.year')
-          .first();
+    try {
+      const state = await db('events as e')
+        .leftJoin('event_day_statuses as eds', function joinDay4() {
+          this.on('eds.event_id', '=', 'e.id').andOn('eds.day', '=', db.raw('4'));
+        })
+        .where('e.is_active', 1)
+        .select(
+          'e.id',
+          'e.year',
+          'e.leaderboard_dirty_at',
+          { day4Published: 'eds.leaderboard_published' },
+          { day4UpdatedAt: 'eds.updated_at' }
+        )
+        .first();
 
-        if (!championEvent) {
+      const stateKey = state
+        ? [
+            Number(state.id || 0),
+            String(state.leaderboard_dirty_at || ''),
+            Number(state.day4Published || 0),
+            String(state.day4UpdatedAt || '')
+          ].join('|')
+        : 'no-active-event';
+
+      const now = Date.now();
+      if (
+        championBannerCache.key === stateKey
+        && championBannerCache.value !== null
+        && now - championBannerCache.loadedAt < 60000
+      ) {
+        return championBannerCache.value;
+      }
+      if (championBannerCache.pending && championBannerCache.key === stateKey) {
+        return championBannerCache.pending;
+      }
+
+      championBannerCache.key = stateKey;
+      championBannerCache.pending = (async () => {
+        if (!state || Number(state.day4Published || 0) !== 1) {
           championBannerCache.value = null;
           championBannerCache.loadedAt = Date.now();
           return null;
         }
 
-        const stablefordBoards = await calculateStablefordLeaderboards(db, Number(championEvent.id));
+        const stablefordBoards = await calculateStablefordLeaderboards(db, Number(state.id));
         const winner = stablefordBoards?.championship?.[0];
         if (!winner) {
           championBannerCache.value = null;
@@ -69,24 +89,26 @@ function createApp({ db, sessionStore } = {}) {
           return null;
         }
 
-        const year = Number(championEvent.year || 0);
-        const banner = {
+        const year = Number(state.year || 0);
+        championBannerCache.value = {
           year,
           nextYear: year + 1,
           playerName: String(winner.name || '').trim(),
           winningTotal: Number(winner.total || 0)
         };
-        championBannerCache.value = banner;
-      } catch (_error) {
-        // Banner is non-critical; avoid blocking requests in tests/minimal DB contexts.
-        championBannerCache.value = null;
-      }
+        championBannerCache.loadedAt = Date.now();
+        return championBannerCache.value;
+      })().finally(() => {
+        championBannerCache.pending = null;
+      });
+
+      return championBannerCache.pending;
+    } catch (_error) {
+      // Banner is non-critical; avoid blocking requests in tests/minimal DB contexts.
+      championBannerCache.value = null;
       championBannerCache.loadedAt = Date.now();
-      return championBannerCache.value;
-    })().finally(() => {
-      championBannerCache.pending = null;
-    });
-    return championBannerCache.pending;
+      return null;
+    }
   }
 
   app.set('view engine', 'ejs');

@@ -1,13 +1,27 @@
 <nav class="navbar navbar-expand-lg navbar-dark legends-nav">
   <div class="container">
-    <a class="navbar-brand fw-bold" href="/"><i class="fa-solid fa-golf-ball-tee fa-fw me-1" aria-hidden="true"></i>Legends</a>
+    <a class="navbar-brand fw-bold d-inline-flex align-items-center" href="/">
+      <img
+        src="/img/icons/icon-192.png?v=<%= assetVersion %>"
+        alt="Legends"
+        class="legends-brand-logo me-2"
+      />
+      Legends
+    </a>
     <% if (user) { %>
       <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#navMenu" aria-controls="navMenu">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="offcanvas offcanvas-end text-bg-dark" tabindex="-1" id="navMenu" aria-labelledby="navMenuLabel">
         <div class="offcanvas-header">
-          <h5 class="offcanvas-title" id="navMenuLabel"><i class="fa-solid fa-golf-ball-tee fa-fw me-2" aria-hidden="true"></i>Legends</h5>
+          <h5 class="offcanvas-title d-inline-flex align-items-center" id="navMenuLabel">
+            <img
+              src="/img/icons/icon-192.png?v=<%= assetVersion %>"
+              alt="Legends"
+              class="legends-brand-logo me-2"
+            />
+            Legends
+          </h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
         </div>
         <div class="offcanvas-body">
@@ -41,4 +55,4 @@
     <span class="champion-ribbon-emoji" aria-hidden="true">🎉</span>
   </div>
 <% } %>
-<script src="/js/app.js" defer></script>
+<script src="/js/app.js?v=<%= assetVersion %>" defer></script>

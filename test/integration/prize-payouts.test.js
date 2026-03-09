@@ -7,7 +7,7 @@ const knex = require('knex');
 
 const { bootstrap } = require('../../src/bootstrap');
 const { createApp } = require('../../src/app');
-const { createLoginToken } = require('../../src/services/auth/magic-link.service');
+const { createLoginCode } = require('../../src/services/auth/login-code.service');
 const { ROLES } = require('../../src/config/roles');
 
 async function createDb() {
@@ -25,9 +25,20 @@ function extractSessionCookie(setCookieHeader) {
   return String(setCookieHeader).split(';')[0].trim();
 }
 
-async function loginWithMagicLink(baseUrl, db, userId) {
-  const { token } = await createLoginToken(db, userId, '127.0.0.1', 'integration-test');
-  const res = await fetch(`${baseUrl}/auth/verify?token=${encodeURIComponent(token)}`, { redirect: 'manual' });
+async function loginWithCode(baseUrl, db, userId) {
+  const user = await db('users').where({ id: userId }).first();
+  assert.ok(user, 'expected user for login helper');
+  const { code } = await createLoginCode(db, userId, '127.0.0.1', 'integration-test');
+  const body = new URLSearchParams({
+    lookup: user.email,
+    code
+  });
+  const res = await fetch(`${baseUrl}/auth/verify-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    redirect: 'manual'
+  });
   assert.equal(res.status, 302);
   return extractSessionCookie(res.headers.get('set-cookie'));
 }
@@ -151,7 +162,7 @@ test('player dashboard shows open scorecard chip and published prize winnings', 
     }
     await db('scorecard_holes').insert(day2Rows);
 
-    const cookieA = await loginWithMagicLink(baseUrl, db, Number(userAId));
+    const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
     const res = await fetch(`${baseUrl}/player/dashboard`, { headers: { cookie: cookieA } });
     assert.equal(res.status, 200);
     const html = await res.text();
@@ -257,7 +268,7 @@ test('presentation sheet includes daily payout schedule with configured amounts'
     }
     await db('scorecard_holes').insert(rows);
 
-    const adminCookie = await loginWithMagicLink(baseUrl, db, Number(adminId));
+    const adminCookie = await loginWithCode(baseUrl, db, Number(adminId));
     const res = await fetch(`${baseUrl}/admin/events/${Number(eventId)}/presentation-sheet?day=2`, {
       headers: { cookie: adminCookie }
     });
@@ -306,7 +317,7 @@ test('setup prizes validation uses Owner Daily Winner percent x3 rule', async ()
       { event_id: eventId, day: 4, status: 'draft', leaderboard_published: 0, course_id: courseId, calc_type: 'stableford' }
     ]);
 
-    const adminCookie = await loginWithMagicLink(baseUrl, db, Number(adminId));
+    const adminCookie = await loginWithCode(baseUrl, db, Number(adminId));
 
     const goodRes = await fetch(`${baseUrl}/admin/events/${Number(eventId)}/setup/prizes`, {
       method: 'POST',
@@ -346,4 +357,3 @@ test('setup prizes validation uses Owner Daily Winner percent x3 rule', async ()
     await db.destroy();
   }
 });
-

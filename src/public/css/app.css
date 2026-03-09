@@ -24,6 +24,14 @@ body {
   text-align: center;
 }
 
+.legends-brand-logo {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 0.22rem;
+  object-fit: cover;
+  display: inline-block;
+}
+
 .champion-ribbon {
   background: #d4af37;
   color: #111;
@@ -249,6 +257,21 @@ body {
   background: #f8d7da;
   border: 1px solid #e8b5bd;
   color: #842029;
+}
+
+.login-version-tag {
+  position: fixed;
+  right: 0.65rem;
+  bottom: 0.5rem;
+  z-index: 1500;
+  font-size: 0.74rem;
+  line-height: 1;
+  color: #5f6770;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(95, 103, 112, 0.25);
+  border-radius: 999px;
+  padding: 0.28rem 0.48rem;
+  backdrop-filter: blur(2px);
 }
 
 .live-hole-nav {

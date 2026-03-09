@@ -7,7 +7,7 @@ const knex = require('knex');
 
 const { bootstrap } = require('../../src/bootstrap');
 const { createApp } = require('../../src/app');
-const { createLoginToken } = require('../../src/services/auth/magic-link.service');
+const { createLoginCode } = require('../../src/services/auth/login-code.service');
 const { ROLES } = require('../../src/config/roles');
 
 async function createDb() {
@@ -25,9 +25,20 @@ function extractSessionCookie(setCookieHeader) {
   return String(setCookieHeader).split(';')[0].trim();
 }
 
-async function loginWithMagicLink(baseUrl, db, userId) {
-  const { token } = await createLoginToken(db, userId, '127.0.0.1', 'integration-test');
-  const res = await fetch(`${baseUrl}/auth/verify?token=${encodeURIComponent(token)}`, { redirect: 'manual' });
+async function loginWithCode(baseUrl, db, userId) {
+  const user = await db('users').where({ id: userId }).first();
+  assert.ok(user, 'expected user for login helper');
+  const { code } = await createLoginCode(db, userId, '127.0.0.1', 'integration-test');
+  const body = new URLSearchParams({
+    lookup: user.email,
+    code
+  });
+  const res = await fetch(`${baseUrl}/auth/verify-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+    redirect: 'manual'
+  });
   assert.equal(res.status, 302);
   return extractSessionCookie(res.headers.get('set-cookie'));
 }
@@ -125,7 +136,7 @@ test('confirm submit finalizes all scorecards in the individual group', async ()
     }
     await db('scorecard_holes').insert(holeRows);
 
-    const cookieA = await loginWithMagicLink(baseUrl, db, Number(userAId));
+    const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
 
     const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}`, {
       headers: { cookie: cookieA }
@@ -260,7 +271,7 @@ test('confirm submit rejects when group scores changed after confirmation snapsh
     }
     await db('scorecard_holes').insert(holeRows);
 
-    const cookieA = await loginWithMagicLink(baseUrl, db, Number(userAId));
+    const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
 
     const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}`, {
       headers: { cookie: cookieA }

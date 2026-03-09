@@ -4,35 +4,51 @@ const {
   brevoApiKey,
   brevoSenderEmail,
   brevoSenderName,
-  isProd
+  isProd,
+  baseUrl
 } = require('../../config/env');
+const { LOGIN_CODE_EXPIRY_MINUTES } = require('../../config/constants');
 
-function buildMagicLinkContent(link) {
-  const subject = 'Your Legends Magic Link';
+function buildLoginCodeContent(code) {
+  const logoUrl = `${String(baseUrl || '').replace(/\/+$/, '')}/img/legends2.png`;
+  const subject = 'Your Legends Sign-In Code';
   const htmlContent = `
     <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#1f2937;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:0 0 12px;background:#0e5135;border-radius:8px;">
+        <tr>
+          <td style="padding:10px 12px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td style="padding-right:10px;vertical-align:middle;">
+                  <img src="${logoUrl}" alt="Legends" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:4px;">
+                </td>
+                <td style="vertical-align:middle;color:#ffffff;font-size:16px;font-weight:700;letter-spacing:0.3px;">
+                  Legends
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
       <h2 style="margin:0 0 12px;color:#0e5135;">Legends Sign-In</h2>
-      <p style="margin:0 0 12px;">Use the secure magic link below to sign in:</p>
-      <p style="margin:0 0 16px;">
-        <a href="${link}" style="display:inline-block;background:#0e5135;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600;">
-          Sign in to Legends
-        </a>
-      </p>
-      <p style="margin:0 0 8px;">If the button doesn't work, copy and paste this URL:</p>
-      <p style="margin:0 0 12px;word-break:break-all;"><a href="${link}">${link}</a></p>
+      <p style="margin:0 0 12px;">Use this one-time code to sign in:</p>
+      <div style="display:inline-block;margin:0 0 14px;padding:10px 16px;border:1px solid #d1d5db;border-radius:8px;background:#f9fafb;font-size:28px;font-weight:700;letter-spacing:6px;color:#0e5135;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+        ${code}
+      </div>
+      <p style="margin:0 0 8px;">This code expires in ${LOGIN_CODE_EXPIRY_MINUTES} minutes and can only be used once.</p>
       <p style="margin:0;color:#6b7280;font-size:13px;">
-        This link expires shortly and can only be used once. If you did not request this, you can ignore this email.
+        If you did not request this sign-in code, you can ignore this email.
       </p>
     </div>
   `.trim();
   const textContent = [
     'Legends Sign-In',
     '',
-    'Use this secure magic link to sign in:',
-    link,
+    'Use this one-time code to sign in:',
+    String(code),
     '',
-    'This link expires shortly and can only be used once.',
-    'If you did not request this, you can ignore this email.'
+    `This code expires in ${LOGIN_CODE_EXPIRY_MINUTES} minutes and can only be used once.`,
+    'If you did not request this code, you can ignore this email.'
   ].join('\n');
   return { subject, htmlContent, textContent };
 }
@@ -70,20 +86,20 @@ async function sendWithBrevo(email, subject, htmlContent, textContent) {
   }
 }
 
-async function sendMagicLink(email, link) {
-  const { subject, htmlContent, textContent } = buildMagicLinkContent(link);
+async function sendLoginCode(email, code) {
+  const { subject, htmlContent, textContent } = buildLoginCodeContent(code);
 
   if (!brevoApiKey || !brevoSenderEmail) {
-    // Local/dev fallback while provider credentials are not configured.
-    console.log(`[magic-link] ${email} -> ${link}`);
+    console.log(`[login-code] ${email} -> ${code}`);
     return { delivered: false, provider: 'log' };
   }
 
   await sendWithBrevo(email, subject, htmlContent, textContent);
   if (!isProd) {
-    console.log(`[magic-link] brevo_sent -> ${maskEmail(email)}`);
+    console.log(`[login-code] brevo_sent -> ${maskEmail(email)}`);
   }
   return { delivered: true, provider: 'brevo' };
 }
 
-module.exports = { sendMagicLink };
+module.exports = { sendLoginCode };
+

@@ -7,7 +7,7 @@ const knex = require('knex');
 
 const { bootstrap } = require('../../src/bootstrap');
 const { createApp } = require('../../src/app');
-const { createLoginToken } = require('../../src/services/auth/magic-link.service');
+const { createLoginCode } = require('../../src/services/auth/login-code.service');
 const { ROLES } = require('../../src/config/roles');
 
 async function createDb() {
@@ -26,9 +26,18 @@ function extractSessionCookie(setCookieHeader) {
   return firstPart.trim();
 }
 
-async function loginWithMagicLink(baseUrl, db, userId) {
-  const { token } = await createLoginToken(db, userId, '127.0.0.1', 'integration-test');
-  const res = await fetch(`${baseUrl}/auth/verify?token=${encodeURIComponent(token)}`, {
+async function loginWithCode(baseUrl, db, userId) {
+  const user = await db('users').where({ id: userId }).first();
+  assert.ok(user, 'expected user for login helper');
+  const { code } = await createLoginCode(db, userId, '127.0.0.1', 'integration-test');
+  const body = new URLSearchParams({
+    lookup: user.email,
+    code
+  });
+  const res = await fetch(`${baseUrl}/auth/verify-code`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
     redirect: 'manual'
   });
   assert.equal(res.status, 302);
@@ -128,8 +137,8 @@ async function seedAmbroseFixture({ db, baseUrl, suffix, year }) {
     status: 'draft'
   });
 
-  const philCookie = await loginWithMagicLink(baseUrl, db, Number(philId));
-  const benCookie = await loginWithMagicLink(baseUrl, db, Number(benId));
+  const philCookie = await loginWithCode(baseUrl, db, Number(philId));
+  const benCookie = await loginWithCode(baseUrl, db, Number(benId));
 
   return {
     scorecardId: Number(scorecardId),
