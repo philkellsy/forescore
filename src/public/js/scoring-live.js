@@ -3,15 +3,22 @@
 (function init() {
   const state = window.__SCORECARD_LIVE__;
   const dayStatus = window.__DAY_STATUS__ || 'draft';
+  const offlineTestAllowed = Boolean(window.__OFFLINE_TEST_ALLOWED__);
   if (!state) return;
+  const offlineTestStorageKey = 'legends_scoring_offline_test_mode';
+  const searchParams = new URLSearchParams(window.location.search || '');
+  const requestedOfflineTestMode = searchParams.get('offline_test');
 
   const holeNumberEl = document.getElementById('holeNumber');
   const holeParEl = document.getElementById('holePar');
   const holeSiEl = document.getElementById('holeSi');
   const entriesContainer = document.getElementById('entriesContainer');
   const groupMetaEl = document.getElementById('groupMeta');
+  const offlineCacheStatusEl = document.getElementById('offlineCacheStatus');
   const prevHoleBtn = document.getElementById('prevHoleBtn');
   const nextHoleBtn = document.getElementById('nextHoleBtn');
+  const offlineTestToggleBtn = document.getElementById('offlineTestToggleBtn');
+  let transientStatusEl = null;
 
   let touchStartX = null;
   let currentHole = Number(state.holeNumber || state.startingHole || 1);
@@ -21,8 +28,105 @@
   const localConflicts = new Map();
   const localExpectedGross = new Map();
   let conflictPollTimer = null;
+  let currentHoleData = null;
+  let offlineStore = null;
+  let offlineSync = null;
+  let warmCachePromise = null;
+  const warmedHoles = new Set();
   const holeOrder = holeSequenceFrom(Number(state.startingHole || 1));
   const conflictStorageKey = `scorecardConflictState:${Number(state.scorecardId)}`;
+  let forceOfflineTestMode = false;
+
+  function hydrateOfflineTestMode() {
+    if (!offlineTestAllowed) {
+      forceOfflineTestMode = false;
+      return;
+    }
+    try {
+      if (requestedOfflineTestMode === '1' || requestedOfflineTestMode === 'true') {
+        localStorage.setItem(offlineTestStorageKey, '1');
+      } else if (requestedOfflineTestMode === '0' || requestedOfflineTestMode === 'false') {
+        localStorage.removeItem(offlineTestStorageKey);
+      }
+      forceOfflineTestMode = localStorage.getItem(offlineTestStorageKey) === '1';
+    } catch (_error) {
+      forceOfflineTestMode = false;
+    }
+  }
+
+  function isEffectivelyOnline() {
+    return navigator.onLine && !forceOfflineTestMode;
+  }
+
+  function isEditingEnabled() {
+    return dayStatus === 'open_scoring';
+  }
+
+  function updateOfflineTestModeUi() {
+    if (!offlineTestToggleBtn) return;
+    offlineTestToggleBtn.textContent = forceOfflineTestMode ? 'Disable Offline Test' : 'Enable Offline Test';
+    offlineTestToggleBtn.classList.toggle('btn-outline-secondary', !forceOfflineTestMode);
+    offlineTestToggleBtn.classList.toggle('btn-warning', forceOfflineTestMode);
+  }
+
+  function ensureTransientStatusEl() {
+    if (transientStatusEl || !entriesContainer || !entriesContainer.parentElement) return transientStatusEl;
+    transientStatusEl = document.createElement('div');
+    transientStatusEl.className = 'alert py-2 px-3 small d-none';
+    transientStatusEl.setAttribute('role', 'status');
+    entriesContainer.parentElement.insertBefore(transientStatusEl, entriesContainer);
+    return transientStatusEl;
+  }
+
+  function setTransientStatus(message, variant) {
+    const el = ensureTransientStatusEl();
+    if (!el) return;
+    el.className = `alert alert-${variant || 'warning'} py-2 px-3 small`;
+    el.textContent = String(message || '');
+  }
+
+  function clearTransientStatus() {
+    if (!transientStatusEl) return;
+    transientStatusEl.textContent = '';
+    transientStatusEl.className = 'alert py-2 px-3 small d-none';
+  }
+
+  function updateOfflineCacheStatus(options) {
+    if (!offlineCacheStatusEl) return;
+    const total = holeOrder.length;
+    const cached = warmedHoles.size;
+    const ready = cached >= total;
+    const online = isEffectivelyOnline();
+    const warming = Boolean(options && options.warming);
+
+    if (ready) {
+      offlineCacheStatusEl.textContent = 'offline cache ready';
+      offlineCacheStatusEl.className = 'offline-cache-status is-ready';
+      return;
+    }
+
+    if (warming && online) {
+      offlineCacheStatusEl.textContent = `caching for offline ${cached}/${total}`;
+      offlineCacheStatusEl.className = 'offline-cache-status';
+      return;
+    }
+
+    if (!online && cached > 0) {
+      offlineCacheStatusEl.textContent = `offline cache ${cached}/${total}`;
+      offlineCacheStatusEl.className = 'offline-cache-status';
+      return;
+    }
+
+    offlineCacheStatusEl.textContent = '';
+    offlineCacheStatusEl.className = 'offline-cache-status d-none';
+  }
+
+  function newOpId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return `op_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
 
   function conflictKey(scorecardId, holeNumber) {
     return `${Number(scorecardId)}:${Number(holeNumber)}`;
@@ -156,9 +260,59 @@
   }
 
   async function fetchHoleData(holeNumber) {
-    const res = await fetch(`/scoring/api/live/${state.scorecardId}/hole/${holeNumber}`);
-    if (!res.ok) throw new Error('Failed to load hole data');
-    return res.json();
+    const hole = Number(holeNumber);
+    if (!isEffectivelyOnline()) {
+      if (offlineStore) {
+        const cached = await offlineStore.getSnapshot(state.scorecardId, hole);
+        if (cached) return cached;
+      }
+      throw new Error('Offline');
+    }
+
+    return fetchHoleDataFromServer(hole);
+  }
+
+  async function fetchHoleDataFromServer(holeNumber) {
+    const hole = Number(holeNumber);
+    const res = await fetch(`/scoring/api/live/${state.scorecardId}/hole/${hole}`);
+    if (!res.ok) {
+      if (offlineStore) {
+        const cached = await offlineStore.getSnapshot(state.scorecardId, hole);
+        if (cached) return cached;
+      }
+      throw new Error('Failed to load hole data');
+    }
+    const json = await res.json();
+    if (offlineStore) {
+      offlineStore.saveSnapshot(state.scorecardId, hole, json).catch(() => {});
+    }
+    warmedHoles.add(hole);
+    updateOfflineCacheStatus();
+    return json;
+  }
+
+  function warmOfflineCache(options) {
+    const force = Boolean(options && options.force);
+    if (!offlineStore || !isEffectivelyOnline()) return Promise.resolve();
+    if (warmCachePromise) return warmCachePromise;
+
+    warmCachePromise = (async () => {
+      updateOfflineCacheStatus({ warming: true });
+      for (const hole of holeOrder) {
+        if (!force && warmedHoles.has(Number(hole))) continue;
+        try {
+          await fetchHoleDataFromServer(hole);
+          updateOfflineCacheStatus({ warming: true });
+        } catch (_error) {
+          break;
+        }
+      }
+    })();
+
+    return warmCachePromise.finally(() => {
+      warmCachePromise = null;
+      updateOfflineCacheStatus();
+    });
   }
 
   function entryCard(entry) {
@@ -310,14 +464,52 @@
     `;
   }
 
+  function findEntryForScorecard(scorecardId) {
+    if (!currentHoleData || !Array.isArray(currentHoleData.entries)) return null;
+    return currentHoleData.entries.find((entry) => Number(entry.scorecardId) === Number(scorecardId)) || null;
+  }
+
+  function getCurrentHoleVersion(scorecardId) {
+    const entry = findEntryForScorecard(scorecardId);
+    if (!entry) return 0;
+    const version = Number(entry.holeVersion || 0);
+    return Number.isFinite(version) && version >= 0 ? version : 0;
+  }
+
+  async function enqueueOfflineOp(type, scorecardId, holeNumber, payload) {
+    if (!offlineStore) return null;
+    const op = {
+      type,
+      scorecardId: Number(scorecardId),
+      holeNumber: Number(holeNumber),
+      payload: payload || {},
+      opId: String(payload?.opId || '').trim() || newOpId()
+    };
+    const id = await offlineStore.enqueueOp(op);
+    if (offlineSync) offlineSync.trigger();
+    return { id, opId: op.opId };
+  }
+
+  function updateCurrentHoleEntry(scorecardId, updater) {
+    if (!currentHoleData || !Array.isArray(currentHoleData.entries)) return;
+    currentHoleData.entries = currentHoleData.entries.map((entry) => {
+      if (Number(entry.scorecardId) !== Number(scorecardId)) return entry;
+      return updater({ ...entry });
+    });
+  }
+
   async function render(holeData) {
+    currentHoleData = holeData ? JSON.parse(JSON.stringify(holeData)) : null;
     currentHole = holeData.holeNumber;
+    warmedHoles.add(Number(currentHole));
+    updateOfflineCacheStatus();
     currentPar = Number(holeData.hole?.par || 0);
     currentSiPrimary = Number(holeData.hole?.strokeIndexPrimary || 0);
     currentSiSecondary = Number(holeData.hole?.strokeIndexSecondary || 0);
     holeNumberEl.textContent = String(holeData.holeNumber);
     holeParEl.textContent = String(holeData.hole.par);
     holeSiEl.textContent = `${holeData.hole.strokeIndexPrimary}/${holeData.hole.strokeIndexSecondary}`;
+    clearTransientStatus();
 
     if (groupMetaEl) {
       const isAmbrose = holeData.mode === 'ambrose';
@@ -367,10 +559,13 @@
     bindGrossShortcutHandlers();
     bindConflictHandlers();
     persistConflictState();
+    if (offlineStore) {
+      offlineStore.saveSnapshot(state.scorecardId, currentHole, holeData).catch(() => {});
+    }
   }
 
   async function adjustGross(scorecardId, delta) {
-    if (dayStatus !== 'open_scoring') return;
+    if (!isEditingEnabled()) return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const card = entriesContainer.querySelector(`.score-adjuster[data-scorecard-id="${scorecardId}"]`);
     const grossEl = card ? card.querySelector('.gross-pill') : null;
@@ -384,21 +579,55 @@
   async function setGross(scorecardId, grossScore) {
     if (dayStatus !== 'open_scoring') return;
     if (!Number.isFinite(Number(scorecardId))) return;
+    const normalizedGross = normalizeGross(grossScore);
+    const baseVersion = getCurrentHoleVersion(scorecardId);
+
+    if (!isEffectivelyOnline()) {
+      const queued = await enqueueOfflineOp('gross', scorecardId, currentHole, {
+        scorecardId: Number(scorecardId),
+        holeNumber: Number(currentHole),
+        grossScore: normalizedGross,
+        baseVersion
+      });
+      if (queued && queued.opId) {
+        updateCurrentHoleEntry(scorecardId, (entry) => {
+          const isPlayer = entry.type !== 'team';
+          const playingHandicap = isPlayer ? Number(entry.playingHandicap || 0) : Number(entry.teamHandicap || 0);
+          const nextStableford = stablefordForGross(
+            normalizedGross,
+            currentPar,
+            currentSiPrimary,
+            currentSiSecondary,
+            playingHandicap
+          );
+          entry.grossScore = normalizedGross;
+          entry.stableford = nextStableford;
+          entry.holeVersion = baseVersion;
+          return entry;
+        });
+        if (currentHoleData) await render(currentHoleData);
+      }
+      return;
+    }
+
+    const opId = newOpId();
     const res = await fetch('/scoring/api/live/gross', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scorecardId,
         holeNumber: currentHole,
-        grossScore
+        grossScore: normalizedGross,
+        opId,
+        baseVersion
       })
     });
 
     if (res.status === 409) {
       const data = await res.json().catch(() => ({}));
       if (data?.error === 'conflict') {
-        setExpectedGross(scorecardId, currentHole, grossScore);
-        upsertConflict(scorecardId, currentHole, grossScore, data);
+        setExpectedGross(scorecardId, currentHole, normalizedGross);
+        upsertConflict(scorecardId, currentHole, normalizedGross, data);
         const holeData = await fetchHoleData(currentHole);
         await render(holeData);
       }
@@ -406,8 +635,15 @@
     }
 
     if (!res.ok) return;
-    setExpectedGross(scorecardId, currentHole, grossScore);
+    const successPayload = await res.json().catch(() => ({}));
+    setExpectedGross(scorecardId, currentHole, normalizedGross);
     clearConflict(scorecardId, currentHole);
+    if (successPayload && Number.isFinite(Number(successPayload.holeVersion))) {
+      updateCurrentHoleEntry(scorecardId, (entry) => {
+        entry.holeVersion = Number(successPayload.holeVersion);
+        return entry;
+      });
+    }
     const holeData = await fetchHoleData(currentHole);
     await render(holeData);
   }
@@ -415,6 +651,23 @@
   async function setDrive(scorecardId, driveTakenUserId) {
     if (dayStatus !== 'open_scoring') return;
     if (!Number.isFinite(Number(scorecardId))) return;
+
+    if (!isEffectivelyOnline()) {
+      const queued = await enqueueOfflineOp('drive', scorecardId, currentHole, {
+        scorecardId: Number(scorecardId),
+        holeNumber: Number(currentHole),
+        driveTakenUserId: driveTakenUserId == null ? null : Number(driveTakenUserId)
+      });
+      if (queued) {
+        updateCurrentHoleEntry(scorecardId, (entry) => {
+          entry.selectedDriveUserId = driveTakenUserId == null ? null : Number(driveTakenUserId);
+          return entry;
+        });
+        if (currentHoleData) await render(currentHoleData);
+      }
+      return;
+    }
+
     const res = await fetch('/scoring/api/live/drive', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -431,7 +684,7 @@
 
   function bindAdjustmentHandlers() {
     entriesContainer.querySelectorAll('.adjust-btn').forEach((btn) => {
-      if (dayStatus !== 'open_scoring') btn.setAttribute('disabled', 'disabled');
+      if (!isEditingEnabled()) btn.setAttribute('disabled', 'disabled');
       btn.addEventListener('click', async () => {
         const delta = Number(btn.dataset.delta || 0);
         const scorecardId = Number(btn.closest('.score-adjuster').dataset.scorecardId);
@@ -453,9 +706,9 @@
 
   function bindPickupHandlers() {
     entriesContainer.querySelectorAll('.pickup-btn').forEach((btn) => {
-      if (dayStatus !== 'open_scoring') btn.setAttribute('disabled', 'disabled');
+      if (!isEditingEnabled()) btn.setAttribute('disabled', 'disabled');
       btn.addEventListener('click', async () => {
-        if (dayStatus !== 'open_scoring') return;
+        if (!isEditingEnabled()) return;
         const scorecardId = Number(btn.dataset.scorecardId);
         const playingHandicap = Number(btn.dataset.playingHandicap || 0);
         if (!Number.isFinite(scorecardId)) return;
@@ -467,7 +720,7 @@
 
   function bindDriveHandlers() {
     entriesContainer.querySelectorAll('.drive-btn').forEach((btn) => {
-      if (dayStatus !== 'open_scoring') btn.setAttribute('disabled', 'disabled');
+      if (!isEditingEnabled()) btn.setAttribute('disabled', 'disabled');
       btn.addEventListener('click', async () => {
         const scorecardId = Number(btn.dataset.scorecardId);
         const userId = Number(btn.dataset.userId);
@@ -482,7 +735,7 @@
       pill.style.cursor = 'pointer';
       pill.title = 'Tap to set par when empty';
       pill.addEventListener('click', async () => {
-        if (dayStatus !== 'open_scoring') return;
+        if (!isEditingEnabled()) return;
         const adjuster = pill.closest('.score-adjuster');
         if (!adjuster) return;
         const scorecardId = Number(adjuster.dataset.scorecardId);
@@ -538,8 +791,16 @@
     }
     if (nextIndex < 0) return;
     const nextHole = holeOrder[nextIndex];
-    const holeData = await fetchHoleData(nextHole);
-    await render(holeData);
+    try {
+      const holeData = await fetchHoleData(nextHole);
+      await render(holeData);
+    } catch (error) {
+      if (error && error.message === 'Offline') {
+        setTransientStatus(`Hole ${nextHole} is not cached for offline yet.`, 'warning');
+      } else {
+        setTransientStatus(`Could not load hole ${nextHole}. Please try again.`, 'danger');
+      }
+    }
   }
 
   prevHoleBtn.addEventListener('click', () => navigateByOffset(-1));
@@ -550,7 +811,7 @@
     conflictPollTimer = setInterval(async () => {
       if (!localConflicts.size) return;
       if (document.hidden) return;
-      if (!navigator.onLine) return;
+      if (!isEffectivelyOnline()) return;
       try {
         const holeData = await fetchHoleData(currentHole);
         await render(holeData);
@@ -569,15 +830,117 @@
     }
   }
 
+  async function sendQueuedGrossOp(op) {
+    const payload = {
+      scorecardId: Number(op.payload?.scorecardId || op.scorecardId),
+      holeNumber: Number(op.payload?.holeNumber || op.holeNumber),
+      grossScore: Number(op.payload?.grossScore || 0),
+      opId: String(op.opId || op.payload?.opId || ''),
+      baseVersion: Number(op.payload?.baseVersion || 0)
+    };
+    const res = await fetch('/scoring/api/live/gross', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) return { ok: true, payload: body, status: res.status };
+    if (res.status === 409) return { ok: false, status: 409, payload: body, error: 'conflict' };
+    return { ok: false, status: res.status, payload: body, error: body?.error || 'request_failed' };
+  }
+
+  async function sendQueuedDriveOp(op) {
+    const payload = {
+      scorecardId: Number(op.payload?.scorecardId || op.scorecardId),
+      holeNumber: Number(op.payload?.holeNumber || op.holeNumber),
+      driveTakenUserId:
+        op.payload?.driveTakenUserId === null || op.payload?.driveTakenUserId === undefined
+          ? null
+          : Number(op.payload.driveTakenUserId)
+    };
+    const res = await fetch('/scoring/api/live/drive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) return { ok: true, payload: body, status: res.status };
+    return { ok: false, status: res.status, payload: body, error: body?.error || 'request_failed' };
+  }
+
+  function initializeOfflineSync() {
+    if (!window.LegendsOfflineStore || typeof window.LegendsOfflineStore.create !== 'function') return;
+    offlineStore = window.LegendsOfflineStore.create();
+    if (!window.LegendsOfflineSync || typeof window.LegendsOfflineSync.create !== 'function') return;
+    offlineSync = window.LegendsOfflineSync.create({
+      store: offlineStore,
+      scorecardId: Number(state.scorecardId),
+      isEffectivelyOnline,
+      sendGross: sendQueuedGrossOp,
+      sendDrive: sendQueuedDriveOp,
+      onAck: async (op) => {
+        if (Number(op.holeNumber) === Number(currentHole)) {
+          await refreshCurrentHole();
+        }
+      },
+      onConflict: async (op, payload) => {
+        if (op.type === 'gross') {
+          upsertConflict(
+            Number(op.scorecardId),
+            Number(op.holeNumber),
+            Number(op.payload?.grossScore || 0),
+            payload || {}
+          );
+        }
+        if (Number(op.holeNumber) === Number(currentHole)) {
+          await refreshCurrentHole();
+        }
+      }
+    });
+    offlineSync.start();
+  }
+
   window.addEventListener('focus', () => {
+    updateOfflineCacheStatus();
     if (!localConflicts.size) return;
+    if (!isEffectivelyOnline()) return;
     refreshCurrentHole();
   });
 
   window.addEventListener('online', () => {
+    updateOfflineCacheStatus();
     if (!localConflicts.size) return;
+    if (!isEffectivelyOnline()) return;
     refreshCurrentHole();
   });
+
+  window.addEventListener('online', () => {
+    updateOfflineCacheStatus();
+    if (offlineSync) offlineSync.trigger();
+    warmOfflineCache({ force: true }).catch(() => {});
+  });
+
+  window.addEventListener('offline', () => {
+    updateOfflineCacheStatus();
+  });
+
+  if (offlineTestToggleBtn && offlineTestAllowed) {
+    offlineTestToggleBtn.addEventListener('click', async () => {
+      forceOfflineTestMode = !forceOfflineTestMode;
+      try {
+        if (forceOfflineTestMode) {
+          localStorage.setItem(offlineTestStorageKey, '1');
+        } else {
+          localStorage.removeItem(offlineTestStorageKey);
+        }
+      } catch (_error) {
+        // no-op
+      }
+      updateOfflineTestModeUi();
+      await refreshCurrentHole();
+      if (offlineSync) offlineSync.trigger();
+    });
+  }
 
   document.addEventListener('touchstart', (event) => {
     touchStartX = event.changedTouches[0].clientX;
@@ -596,12 +959,17 @@
     }
   });
 
+  hydrateOfflineTestMode();
+  updateOfflineTestModeUi();
+  updateOfflineCacheStatus();
+  initializeOfflineSync();
   hydrateConflictState();
 
   (async () => {
     try {
       const holeData = await fetchHoleData(currentHole);
       await render(holeData);
+      warmOfflineCache().catch(() => {});
     } catch (_error) {
       await render({
         mode: state.mode,
@@ -611,6 +979,7 @@
         ambroseContext: state.ambroseContext || null,
         individualContext: state.individualContext || null
       });
+      warmOfflineCache().catch(() => {});
     }
   })();
 })();

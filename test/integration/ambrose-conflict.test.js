@@ -308,7 +308,7 @@ test('ambrose confirmation displays fractional handicap and fractional net total
     }
     await db('scorecard_holes').insert(holeRows);
 
-    const res = await fetch(`${baseUrl}/scoring/confirm/${scorecardId}`, {
+    const res = await fetch(`${baseUrl}/scoring/confirm/${scorecardId}/final`, {
       headers: { cookie: philCookie }
     });
     assert.equal(res.status, 200);

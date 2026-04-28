@@ -12,5 +12,6 @@ module.exports = {
   dbFile: process.env.DB_FILE || './data/legends.sqlite',
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
-  brevoSenderName: process.env.BREVO_SENDER_NAME || 'Legends Golf'
+  brevoSenderName: process.env.BREVO_SENDER_NAME || 'Legends Golf',
+  golfCourseApiKey: process.env.GOLF_COURSE_API_KEY || 'CPS6U7RHIJNYVP7LE5RENWJZDU'
 };

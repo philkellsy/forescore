@@ -385,6 +385,31 @@ async function buildGroupSnapshot(db, scorecardIds) {
   return crypto.createHash('sha256').update(normalized.join('|')).digest('hex');
 }
 
+async function getHoleSummariesByCard(db, scorecardIds) {
+  const ids = (scorecardIds || []).map(Number).filter((id) => Number.isFinite(id));
+  const summaries = new Map();
+  if (!ids.length) return summaries;
+
+  const rows = await db('scorecard_holes')
+    .whereIn('scorecard_id', ids)
+    .select('scorecard_id', 'hole_number', 'gross_score', 'stableford_points')
+    .orderBy([{ column: 'hole_number', order: 'asc' }, { column: 'scorecard_id', order: 'asc' }]);
+
+  for (const row of rows) {
+    const scorecardId = Number(row.scorecard_id);
+    if (!summaries.has(scorecardId)) summaries.set(scorecardId, new Map());
+    summaries.get(scorecardId).set(Number(row.hole_number), {
+      grossScore: Number(row.gross_score),
+      stablefordPoints:
+        row.stableford_points === null || row.stableford_points === undefined
+          ? null
+          : Number(row.stableford_points)
+    });
+  }
+
+  return summaries;
+}
+
 async function buildConfirmationData(db, scorecard) {
   const holeConfig = await getHoleConfig(db, scorecard.event_id, scorecard.day, 1);
   if (!holeConfig) return { mode: scorecard.type === 'team' ? 'ambrose' : 'individual', entries: [], hasMissing: true };
@@ -400,6 +425,7 @@ async function buildConfirmationData(db, scorecard) {
     .filter((id) => Number.isFinite(id));
   const totalsByCard = await getScoreTotalsByCard(db, scorecardIds);
   const missingByCard = await getMissingHolesByCard(db, scorecardIds);
+  const holeSummariesByCard = await getHoleSummariesByCard(db, scorecardIds);
 
   const entries = entryCards.map((entry) => {
     const scorecardId = Number(entry.scorecardId);
@@ -430,9 +456,33 @@ async function buildConfirmationData(db, scorecard) {
   });
 
   const hasMissing = entries.some((entry) => (entry.missingHoles || []).length > 0);
+  const holes = [];
+  for (let holeNumber = 1; holeNumber <= 18; holeNumber += 1) {
+    holes.push({
+      holeNumber,
+      cells: entries.map((entry) => {
+        const scorecardId = Number(entry.scorecardId);
+        const holeSummary = holeSummariesByCard.get(scorecardId)?.get(holeNumber) || null;
+        const grossScore = holeSummary ? Number(holeSummary.grossScore) : null;
+        const stablefordPoints =
+          holeSummary && holeSummary.stablefordPoints !== null && holeSummary.stablefordPoints !== undefined
+            ? Number(holeSummary.stablefordPoints)
+            : null;
+        return {
+          scorecardId,
+          grossScore,
+          stablefordPoints,
+          missing: !holeSummary,
+          displayScore: holeSummary ? String(grossScore) : '–'
+        };
+      })
+    });
+  }
+
   return {
     mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
     entries,
+    holes,
     hasMissing
   };
 }
@@ -492,6 +542,7 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig) {
           playingHandicap,
           handicapDisplay: formatHandicapDisplay(playingHandicap),
           grossScore,
+          holeVersion: saved ? Number(saved.version || 1) : 0,
           stableford,
           stablefordTotal: stableford === null ? 0 : stableford,
           stablefordRelative: stableford === null ? 0 : stableford - 2
@@ -525,7 +576,7 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig) {
       'sh.hole_number': holeConfig.hole_number
     })
     .whereIn('s.user_id', playerIds)
-    .select('s.user_id', 'sh.gross_score', 'sh.stableford_points');
+    .select('s.user_id', 'sh.gross_score', 'sh.stableford_points', 'sh.version');
   const holeScoreByUser = new Map(holeScores.map((row) => [row.user_id, row]));
   const scorecardIds = [...scorecardByUser.values()].filter((v) => Number.isFinite(Number(v))).map(Number);
   const parByHole = await getParByHole(db, scorecard.event_id, scorecard.day);
@@ -568,6 +619,7 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig) {
         playingHandicap,
         handicapDisplay: formatHandicapDisplay(playingHandicap),
         grossScore,
+        holeVersion: saved ? Number(saved.version || 1) : 0,
         stableford,
         stablefordTotal,
         stablefordRelative
@@ -646,7 +698,7 @@ async function getAmbroseEntriesForHole(db, scorecard, holeConfig) {
     ? await db('scorecard_holes')
         .whereIn('scorecard_id', scorecardIds)
         .andWhere({ hole_number: holeConfig.hole_number })
-        .select('scorecard_id', 'gross_score', 'stableford_points')
+        .select('scorecard_id', 'gross_score', 'stableford_points', 'version')
     : [];
   const holeScoreByScorecard = new Map(holeScores.map((r) => [Number(r.scorecard_id), r]));
 
@@ -710,6 +762,7 @@ async function getAmbroseEntriesForHole(db, scorecard, holeConfig) {
       teamHandicapAllowance: allowance,
       teamHandicapDisplay: formatAmbroseHandicap(rawTeamHandicap, allowance),
       grossScore: savedHole ? Number(savedHole.gross_score) : null,
+      holeVersion: savedHole ? Number(savedHole.version || 1) : 0,
       stableford: savedHole && savedHole.stableford_points !== null ? Number(savedHole.stableford_points) : null,
       grossToPar,
       selectedDriveUserId: sId ? driveByScorecard.get(sId) || null : null,
@@ -1046,6 +1099,30 @@ function scoringRouter(db) {
   router.get('/confirm/:scorecardId', requireAuth, async (req, res, next) => {
     try {
       const scorecardId = Number(req.params.scorecardId);
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard) return res.status(404).send('Scorecard not found');
+
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      if (!permitted) return res.status(403).send('Not allowed');
+
+      const confirmation = await buildConfirmationData(db, scorecard);
+
+      return res.render('scorer/confirm', {
+        title: 'Review Scores',
+        user: req.session.user,
+        scorecard,
+        confirmation,
+        canSubmit: scorecard.status !== 'submitted' && !confirmation.hasMissing,
+        submitError: null
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/confirm/:scorecardId/final', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.params.scorecardId);
       const errorCode = String(req.query.error || '').trim();
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
@@ -1054,6 +1131,10 @@ function scoringRouter(db) {
       if (!permitted) return res.status(403).send('Not allowed');
 
       const confirmation = await buildConfirmationData(db, scorecard);
+      if (scorecard.status !== 'submitted' && confirmation.hasMissing) {
+        return res.redirect(`/scoring/confirm/${scorecardId}`);
+      }
+
       const canSubmit = scorecard.status !== 'submitted' && !confirmation.hasMissing;
       const groupScorecardIds = [...new Set(
         (confirmation.entries || [])
@@ -1062,7 +1143,7 @@ function scoringRouter(db) {
       )];
       const submitSnapshot = await buildGroupSnapshot(db, groupScorecardIds);
 
-      return res.render('scorer/confirm', {
+      return res.render('scorer/confirm-final', {
         title: 'Submit Scorecard',
         user: req.session.user,
         scorecard,
@@ -1190,9 +1271,17 @@ function scoringRouter(db) {
       const scorecardId = Number(req.body.scorecardId);
       const holeNumber = Number(req.body.holeNumber);
       const grossScore = Number(req.body.grossScore);
+      const opId = String(req.body.opId || '').trim();
+      const rawBaseVersion = req.body.baseVersion;
+      const hasBaseVersion = rawBaseVersion !== undefined && rawBaseVersion !== null && rawBaseVersion !== '';
+      const baseVersion = hasBaseVersion ? Number(rawBaseVersion) : null;
       if (holeNumber < 1 || holeNumber > 18) return res.status(400).json({ error: 'Invalid hole' });
       if (!Number.isFinite(grossScore) || grossScore < 0 || grossScore > 20) {
         return res.status(400).json({ error: 'Invalid gross score' });
+      }
+      if (opId && opId.length > 120) return res.status(400).json({ error: 'Invalid operation id' });
+      if (hasBaseVersion && (!Number.isFinite(baseVersion) || baseVersion < 0)) {
+        return res.status(400).json({ error: 'Invalid base version' });
       }
 
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
@@ -1229,10 +1318,18 @@ function scoringRouter(db) {
         playingHandicap,
         scorecardEventId: scorecard.event_id,
         requesterUserId: req.session.user.id,
-        force: canEditAllScores(req.session.user)
+        force: canEditAllScores(req.session.user),
+        opId,
+        baseVersion
       });
 
-      return res.json({ ok: true, stableford: result.points, grossScore: result.grossScore });
+      return res.json({
+        ok: true,
+        stableford: result.points,
+        grossScore: result.grossScore,
+        holeVersion: Number(result.version || 0),
+        opId: result.opId || null
+      });
     } catch (error) {
       if (error instanceof ScoreConflictError) {
         return res.status(409).json({

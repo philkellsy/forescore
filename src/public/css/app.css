@@ -212,6 +212,10 @@ body {
   border-radius: 999px;
   background: #fff;
   border: 1px solid #d3ddd6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   font-weight: 600;
 }
 
@@ -279,6 +283,19 @@ body {
   grid-template-columns: 2.6rem 1fr 2.6rem;
   align-items: center;
   gap: 0.5rem;
+}
+
+.offline-cache-status {
+  min-height: 1rem;
+  margin: 0.15rem 0 0.45rem;
+  text-align: center;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: #6b756f;
+}
+
+.offline-cache-status.is-ready {
+  color: #557764;
 }
 
 .live-hole-nav-btn {
@@ -379,14 +396,9 @@ body {
 }
 
 .gross-pill-disc {
-  min-width: 2rem;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
 }
 
 .score-summary-chip {
@@ -473,6 +485,73 @@ body {
   background: #eef4f1;
 }
 
+.confirm-review-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #21543e;
+  background: #e3f2e8;
+}
+
+.confirm-score-grid th,
+.confirm-score-grid td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.confirm-score-grid thead th {
+  background: #eef4f1;
+  font-size: 0.82rem;
+}
+
+.confirm-score-grid-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 5.5rem;
+}
+
+.confirm-hole-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: #f3f6f4;
+  border: 1px solid #d6e0db;
+  font-size: 0.78rem;
+}
+
+.confirm-score-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 3.4rem;
+}
+
+.confirm-score-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.confirm-score-meta {
+  font-size: 0.72rem;
+  color: #6c757d;
+}
+
+.confirm-score-grid td.is-missing {
+  background: #fff8e8;
+}
+
+.confirm-score-grid td.is-missing .confirm-score-value {
+  color: #9a6700;
+}
+
 @media (max-width: 576px) {
   .table {
     font-size: 0.9rem;
@@ -501,6 +580,11 @@ body {
   .live-hole-nav {
     grid-template-columns: 2.25rem 1fr 2.25rem;
     gap: 0.35rem;
+  }
+
+  .offline-cache-status {
+    margin-bottom: 0.4rem;
+    font-size: 0.68rem;
   }
 
   .live-hole-nav-btn {
@@ -609,6 +693,22 @@ body {
 
   .scorecard-grid-table .scorecard-total-col {
     width: 2.1rem;
+  }
+
+  .confirm-score-grid {
+    font-size: 0.82rem;
+  }
+
+  .confirm-score-grid-header {
+    min-width: 4.3rem;
+  }
+
+  .confirm-score-cell {
+    min-width: 2.8rem;
+  }
+
+  .confirm-score-meta {
+    font-size: 0.66rem;
   }
 
 }

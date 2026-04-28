@@ -138,7 +138,7 @@ test('confirm submit finalizes all scorecards in the individual group', async ()
 
     const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
 
-    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}`, {
+    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/final`, {
       headers: { cookie: cookieA }
     });
     assert.equal(confirmRes.status, 200);
@@ -273,7 +273,7 @@ test('confirm submit rejects when group scores changed after confirmation snapsh
 
     const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
 
-    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}`, {
+    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/final`, {
       headers: { cookie: cookieA }
     });
     assert.equal(confirmRes.status, 200);

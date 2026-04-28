@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/authorize');
 const { ROLES } = require('../config/roles');
 const { CALC_TYPES, defaultCalcTypeForDay } = require('../config/calc-types');
+const { golfCourseApiKey } = require('../config/env');
 const { dayLabel } = require('../services/events/day-label.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
 const { calculateAmbroseLeaderboard } = require('../services/scoring/ambrose.service');
@@ -410,7 +411,7 @@ async function listSeedUsers(db) {
 async function listSeedPlayerIdsForEvent(db, eventId) {
   const rows = await db('event_players as ep')
     .join('users as u', 'u.id', 'ep.user_id')
-    .where({ 'ep.event_id': eventId })
+    .where({ 'ep.event_id': eventId, 'ep.status': 'active' })
     .where((q) => {
       q.where('u.id', TEST_DATA_OWNER_USER_ID).orWhere('u.email', 'like', `${TEST_DATA_EMAIL_PREFIX}%`);
     })
@@ -425,7 +426,7 @@ async function buildEventPlayersWithProfile(db, eventId) {
     .leftJoin('player_handicaps as ph', function joinPh() {
       this.on('ph.user_id', '=', 'u.id').andOnVal('ph.event_id', '=', eventId);
     })
-    .where({ 'ep.event_id': eventId })
+    .where({ 'ep.event_id': eventId, 'ep.status': 'active' })
     .where((q) => q.where('u.id', TEST_DATA_OWNER_USER_ID).orWhere('u.email', 'like', `${TEST_DATA_EMAIL_PREFIX}%`))
     .orderBy([{ column: 'u.last_name', order: 'asc' }, { column: 'u.first_name', order: 'asc' }])
     .select('u.id', 'u.first_name', 'u.last_name', 'ph.playing_handicap');
@@ -629,6 +630,7 @@ async function seedDay1Scores(db, eventId) {
     .where({ event_id: eventId, day: 1, competition_type: 'ambrose' })
     .orderBy('id', 'asc')
     .select('id', 'name');
+  const participatingUserIds = new Set();
   let created = 0;
   for (let tIdx = 0; tIdx < teams.length; tIdx += 1) {
     const team = teams[tIdx];
@@ -685,13 +687,49 @@ async function seedDay1Scores(db, eventId) {
         });
       }
     }
+    members.forEach((m) => participatingUserIds.add(Number(m.user_id)));
     await db('scorecards').where({ id: scorecard.id }).update({ status: 'submitted', updated_at: db.fn.now() });
     created += 1;
   }
+
+  await seedNoveltyResultsForDay(db, eventId, 1, [...participatingUserIds]);
+
   await db('event_day_statuses')
     .where({ event_id: eventId, day: 1 })
     .update({ status: 'open_scoring', updated_at: db.fn.now() });
   await markLeaderboardDirty(db, eventId);
+  return created;
+}
+
+async function seedNoveltyResultsForDay(db, eventId, day, eligibleUserIds) {
+  const noveltyRows = await db('novelty_events')
+    .where({ event_id: eventId, day })
+    .orderBy('id', 'asc')
+    .select('id', 'hole_number');
+  if (!noveltyRows.length) return 0;
+
+  const participants = [...new Set((eligibleUserIds || [])
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0))];
+
+  await db('novelty_results').where({ event_id: eventId, day }).del();
+
+  let created = 0;
+  for (let idx = 0; idx < noveltyRows.length; idx += 1) {
+    const novelty = noveltyRows[idx];
+    const winnerUserId = participants.length
+      ? participants[seededRoll(eventId, day, novelty.id, novelty.hole_number, idx) % participants.length]
+      : null;
+    await db('novelty_results').insert({
+      event_id: eventId,
+      day,
+      novelty_event_id: Number(novelty.id),
+      winner_user_id: winnerUserId,
+      winner_team_id: null,
+      is_no_winner: winnerUserId ? 0 : 1
+    });
+    created += 1;
+  }
   return created;
 }
 
@@ -772,6 +810,8 @@ async function seedIndividualDayScores(db, eventId, day, players) {
     created += 1;
   }
 
+  await seedNoveltyResultsForDay(db, eventId, day, usersInGroups);
+
   await db('event_day_statuses')
     .where({ event_id: eventId, day })
     .update({ status: 'open_scoring', updated_at: db.fn.now() });
@@ -780,7 +820,12 @@ async function seedIndividualDayScores(db, eventId, day, players) {
 }
 
 async function seedCalcuttaDetails(db, eventId, playerIds) {
-  const ids = [...new Set((playerIds || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  const requestedIds = [...new Set((playerIds || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  const activeEventPlayerRows = await db('event_players')
+    .where({ event_id: eventId, status: 'active' })
+    .whereIn('user_id', requestedIds)
+    .select('user_id');
+  const ids = activeEventPlayerRows.map((row) => Number(row.user_id));
   if (!ids.length) return 0;
 
   const drawOrder = shuffleArray(ids);
@@ -2157,7 +2202,7 @@ function adminRouter(db) {
   router.post('/test-data/day-1-scores', requireAuth, requireRole([ROLES.ADMIN]), ensureSeedToolUser, async (req, res, next) => {
     try {
       const created = await seedDay1Scores(db, TEST_DATA_EVENT_ID);
-      return res.redirect(`/admin/test-data?message=Day%201%20created%20scores%20for%20${created}%20teams`);
+      return res.redirect(`/admin/test-data?message=Day%201%20created%20scores%20for%20${created}%20teams%20and%20seeded%20novelty%20winners`);
     } catch (error) {
       return next(error);
     }
@@ -2167,7 +2212,7 @@ function adminRouter(db) {
     try {
       const players = await buildEventPlayersWithProfile(db, TEST_DATA_EVENT_ID);
       const created = await seedIndividualDayScores(db, TEST_DATA_EVENT_ID, 2, players);
-      return res.redirect(`/admin/test-data?message=Day%202%20created%20scores%20for%20${created}%20players`);
+      return res.redirect(`/admin/test-data?message=Day%202%20created%20scores%20for%20${created}%20players%20and%20seeded%20novelty%20winners`);
     } catch (error) {
       return next(error);
     }
@@ -2177,7 +2222,7 @@ function adminRouter(db) {
     try {
       const players = await buildEventPlayersWithProfile(db, TEST_DATA_EVENT_ID);
       const created = await seedIndividualDayScores(db, TEST_DATA_EVENT_ID, 3, players);
-      return res.redirect(`/admin/test-data?message=Day%203%20created%20scores%20for%20${created}%20players`);
+      return res.redirect(`/admin/test-data?message=Day%203%20created%20scores%20for%20${created}%20players%20and%20seeded%20novelty%20winners`);
     } catch (error) {
       return next(error);
     }
@@ -2187,7 +2232,7 @@ function adminRouter(db) {
     try {
       const players = await buildEventPlayersWithProfile(db, TEST_DATA_EVENT_ID);
       const created = await seedIndividualDayScores(db, TEST_DATA_EVENT_ID, 4, players);
-      return res.redirect(`/admin/test-data?message=Day%204%20created%20scores%20for%20${created}%20players`);
+      return res.redirect(`/admin/test-data?message=Day%204%20created%20scores%20for%20${created}%20players%20and%20seeded%20novelty%20winners`);
     } catch (error) {
       return next(error);
     }
@@ -2525,6 +2570,103 @@ function adminRouter(db) {
     });
   });
 
+  // ── Course API Importer ──────────────────────────────────────────────────
+
+  const GOLF_API_BASE = 'https://api.golfcourseapi.com/v1';
+
+  async function golfApiGet(path) {
+    const res = await fetch(`${GOLF_API_BASE}${path}`, {
+      headers: { Authorization: `Key ${golfCourseApiKey}` }
+    });
+    if (!res.ok) throw Object.assign(new Error(`Golf API ${res.status}`), { status: res.status });
+    return res.json();
+  }
+
+  router.get('/courses/import', requireAuth, requireRole([ROLES.ADMIN]), (req, res) => {
+    const error = req.query.error ? String(req.query.error) : null;
+    return res.render('admin/course-import', {
+      title: 'Import Course',
+      user: req.session.user,
+      error
+    });
+  });
+
+  router.get('/courses/import/search', requireAuth, requireRole([ROLES.ADMIN]), async (req, res, next) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      if (!q) return res.json({ courses: [] });
+      if (!golfCourseApiKey) return res.status(503).json({ error: 'API key not configured' });
+      const data = await golfApiGet(`/search?search_query=${encodeURIComponent(q)}`);
+      return res.json({ courses: data.courses || [] });
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.get('/courses/import/course/:id(\\d+)', requireAuth, requireRole([ROLES.ADMIN]), async (req, res, next) => {
+    try {
+      if (!golfCourseApiKey) return res.status(503).json({ error: 'API key not configured' });
+      const data = await golfApiGet(`/courses/${req.params.id}`);
+      return res.json(data);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  router.post('/courses/import', requireAuth, requireRole([ROLES.ADMIN]), async (req, res, next) => {
+    try {
+      const apiCourseId = Number(req.body.apiCourseId);
+      const apiTeeName = String(req.body.apiTeeName || '').trim();
+      const teeName = String(req.body.teeName || '').trim();
+      const gender = String(req.body.gender || 'male');
+      const courseName = String(req.body.courseName || '').trim();
+
+      if (!apiCourseId || !apiTeeName || !teeName || !courseName) {
+        return res.redirect('/admin/courses/import?error=Missing+required+fields');
+      }
+
+      let holes;
+      try {
+        holes = JSON.parse(String(req.body.holesJson || '[]'));
+      } catch {
+        return res.redirect('/admin/courses/import?error=Invalid+hole+data');
+      }
+      if (!Array.isArray(holes) || holes.length < 18) {
+        return res.redirect('/admin/courses/import?error=Tee+box+does+not+have+18+holes');
+      }
+
+      const apiTeeKey = `${gender}:${apiTeeName}`;
+      const existing = await db('courses')
+        .where({ api_course_id: apiCourseId, api_tee_key: apiTeeKey })
+        .first();
+      if (existing) {
+        return res.redirect(`/admin/courses/import?error=${encodeURIComponent(`This tee has already been imported as "${existing.course_name} — ${existing.tee_name}"`)}`);
+      }
+
+      const ids = await db('courses').insert({ course_name: courseName, tee_name: teeName, api_course_id: apiCourseId, api_tee_key: apiTeeKey });
+      const newCourseId = Number(Array.isArray(ids) ? ids[0] : ids);
+
+      for (let i = 0; i < 18; i++) {
+        const h = holes[i];
+        const siPrimary = Number(h.handicap) || (i + 1);
+        await db('holes').insert({
+          course_id: newCourseId,
+          hole_number: i + 1,
+          par: Number(h.par) || 4,
+          length_meters: h.yardage ? Math.round(Number(h.yardage) * 0.9144) : null,
+          stroke_index_primary: siPrimary,
+          stroke_index_secondary: siPrimary + 18
+        });
+      }
+
+      return res.redirect(`/admin/courses?message=${encodeURIComponent('Course imported — please review and adjust SI secondary values')}`);
+    } catch (err) {
+      return next(err);
+    }
+  });
+
+  // ── Courses list / CRUD ──────────────────────────────────────────────────
+
   router.get('/courses', requireAuth, requireRole([ROLES.ADMIN]), async (req, res) => {
     const courses = await db('courses')
       .leftJoin('holes', 'holes.course_id', 'courses.id')
@@ -2533,12 +2675,22 @@ function adminRouter(db) {
       .count({ holes_count: 'holes.id' })
       .orderBy([{ column: 'courses.course_name', order: 'asc' }, { column: 'courses.tee_name', order: 'asc' }]);
 
+    const scoredCourseRows = await db('event_day_statuses as eds')
+      .join('scorecards as s', function joinS() {
+        this.on('s.event_id', '=', 'eds.event_id').andOn('s.day', '=', 'eds.day');
+      })
+      .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
+      .groupBy('eds.course_id')
+      .select('eds.course_id')
+      .count({ score_count: 'sh.id' });
+    const scoredCourseIds = new Set(scoredCourseRows.filter(r => Number(r.score_count) > 0).map(r => Number(r.course_id)));
+
     const message = req.query.message ? String(req.query.message) : null;
     const error = req.query.error ? String(req.query.error) : null;
     return res.render('admin/courses', {
       title: 'Courses',
       user: req.session.user,
-      courses,
+      courses: courses.map(c => ({ ...c, has_scores: scoredCourseIds.has(Number(c.id)) })),
       message,
       error
     });
@@ -3683,7 +3835,7 @@ function adminRouter(db) {
         day: 1,
         group_number: groupNumber,
         tee_time: teeTime,
-        tee_location: null,
+        tee_location: formatTeeLocationFromStartingHole(startingHole),
         starting_hole: startingHole
       });
 
@@ -4110,6 +4262,52 @@ function adminRouter(db) {
       }
 
       return res.redirect(`/admin/courses/${courseId}?message=Course%20updated`);
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/courses/:courseId(\\d+)/delete', requireAuth, requireRole([ROLES.ADMIN]), async (req, res, next) => {
+    try {
+      const courseId = Number(req.params.courseId);
+      const course = await db('courses').where({ id: courseId }).first();
+      if (!course) return res.redirect('/admin/courses?error=Course%20not%20found');
+
+      const usageCount = await db('event_day_statuses').where({ course_id: courseId }).count({ c: '*' }).first();
+      if (Number(usageCount.c) > 0) {
+        return res.redirect('/admin/courses?error=Cannot%20delete%20course%3A%20it%20is%20assigned%20to%20one%20or%20more%20event%20days');
+      }
+
+      await db('holes').where({ course_id: courseId }).del();
+      await db('courses').where({ id: courseId }).del();
+      return res.redirect('/admin/courses?message=Course%20deleted');
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/courses/:courseId(\\d+)/seed-holes', requireAuth, requireRole([ROLES.ADMIN]), async (req, res, next) => {
+    try {
+      const courseId = Number(req.params.courseId);
+      const course = await db('courses').where({ id: courseId }).first();
+      if (!course) return res.redirect('/admin/courses?error=Course%20not%20found');
+
+      const existing = await db('holes').where({ course_id: courseId }).count({ c: '*' }).first();
+      if (Number(existing.c) > 0) {
+        return res.redirect(`/admin/courses/${courseId}?error=Course%20already%20has%20holes`);
+      }
+
+      for (let i = 1; i <= 18; i++) {
+        await db('holes').insert({
+          course_id: courseId,
+          hole_number: i,
+          par: 4,
+          length_meters: 350,
+          stroke_index_primary: i,
+          stroke_index_secondary: i + 18
+        });
+      }
+      return res.redirect(`/admin/courses/${courseId}?message=18%20holes%20added%20%E2%80%93%20update%20par%2C%20meters%20and%20stroke%20indices%20below`);
     } catch (error) {
       return next(error);
     }
