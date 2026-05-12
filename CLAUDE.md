@@ -18,7 +18,7 @@ Each golf tour operator is a **tenant**. Players can participate across multiple
 | Session store | connect-pg-simple (Postgres-backed sessions table) |
 | Auth | Passwordless 6-digit one-time codes (SHA-256 hashed, emailed via Brevo) |
 | Email | Brevo transactional API |
-| Hosting | Fly.io |
+| Hosting | Railway |
 
 ## Routing model
 
@@ -384,27 +384,58 @@ This app deploys to Railway. When working on deployment tasks:
    not public URLs, for service-to-service calls.
 3. The database is Railway-managed Postgres (usage-based billing). Do not suggest
    migrating to or adding any external database service.
-4. Backups will ultimaely run via the Railway postgres-s3-backups template to Cloudflare R2. They are not yet set-up
+4. Backups will ultimately run via the Railway postgres-s3-backups template to Cloudflare R2. They are not yet set up.
    Do not modify backup config without flagging it explicitly.
 
 ### Environment variables
-- `DATABASE_URL` is injected by Railway at runtime — never hardcode it.
-- All other secrets live in Railway environment variables, not in .env files
-  committed to the repo.
+
+Railway's Postgres plugin does **not** expose a pre-built `DATABASE_URL` that can be referenced from the app service — its internal `DATABASE_URL` is itself a nested template that Railway will not recursively resolve. Instead, the app is configured to build the database URL from individual PG variables.
+
+**App service variables (set in Railway dashboard):**
+| Variable | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `SESSION_SECRET` | strong random hex (generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`) |
+| `APP_BASE_URL` | `https://forescore-production.up.railway.app` |
+| `PGHOST` | `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}` |
+| `PGUSER` | `${{Postgres.PGUSER}}` |
+| `PGPASSWORD` | `${{Postgres.PGPASSWORD}}` |
+| `PGDATABASE` | `${{Postgres.PGDATABASE}}` |
+| `PGPORT` | `5432` |
+| `BREVO_API_KEY` | from Brevo dashboard |
+| `BREVO_SENDER_EMAIL` | verified Brevo sender |
+| `BREVO_SENDER_NAME` | `ForeScore` |
+| `GOLF_COURSE_API_KEY` | optional |
+
+Do **not** set `DATABASE_URL` or `TEST_DATABASE_URL` in the Railway app service — the app builds the connection string from the PG* vars above. `TEST_DATABASE_URL` is only for local test runs.
+
+The app builds `DATABASE_URL` at runtime in `src/config/env.js` and `knexfile.js` using:
+```js
+`postgresql://${PGUSER}:${encodeURIComponent(PGPASSWORD)}@${PGHOST}:${PGPORT}/${PGDATABASE}`
+```
 
 ### Local development
-- Use a `.env` file locally pointing to a local Postgres instance (or a Neon
-  free-tier branch) — not the production Railway database.
+- Use a `.env` file locally with `DATABASE_URL=postgresql://localhost:5432/forescore_dev`.
 - Never run migrations against the production database from a local machine.
 
 ### Deploying
 - Railway auto-deploys on push to `main`.
-- Run migrations as a Railway deploy command, not a separate service.
-- If adding a new service or environment variable, note it here.
+- Start command (in `railway.json`): `node scripts/check-db.js && npm run migrate && npm start`
+- `scripts/check-db.js` validates the DB connection and exits cleanly before migrations run.
+- Migrations run via `npm run migrate` before the server starts.
+
+### First deployment status — **IN PROGRESS** (paused 2026-05-12)
+The initial Railway deployment has not yet completed successfully. The last known state:
+- ✅ DB connection works (`postgres.railway.internal` via PG* vars)
+- ✅ `check-db.js` connects and exits cleanly (fix: added `process.exit(0)` — not yet verified in production)
+- ⏳ Migrations have not yet been confirmed to run
+- ⏳ Health check at `/health` has not yet passed
+- ⏳ App has not yet started in production
+
+**Next step when resuming:** push the latest code (including `process.exit(0)` fix in `scripts/check-db.js`) and verify the full deploy log shows migration output and server startup.
 
 ### Versioning and cache-busting
 - App version lives in `package.json` (`version` field) — this is the single source of truth.
 - `src/app.js` reads `package.json` at boot and uses it as `assetVersion` for CSS/JS/image cache-busting (`?v=1.0.0`).
 - Semver convention: patch (`1.0.x`) for fixes/tweaks, minor (`1.x.0`) for new features, major (`x.0.0`) for breaking changes.
 - **A deploy script is planned but not yet built.** When created, it must include a `package.json` version bump (via `npm version patch|minor|major`) before pushing to main, so every production deploy gets a fresh cache-bust string automatically.
-```
