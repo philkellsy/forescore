@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %> | Legends</title>
+    <title><%= title %> | ForeScore</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
-    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <meta name="theme-color" content="#215463" />
+    <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
     <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
@@ -14,352 +14,186 @@
   </head>
   <body>
     <%- include('../partials/nav') %>
-    <main class="container py-3">
-      <section class="mb-4">
-        <h1 class="h4 mb-1">Player Dashboard</h1>
-        <p class="text-muted mb-0">Mobile-first score access for your rounds and standings.</p>
-      </section>
+    <main class="container py-3 py-md-4" style="max-width:680px">
+      <%
+        const TYPE_META = {
+          accommodation: { label: 'Accommodation', icon: 'fa-bed' },
+          transfer:      { label: 'Transfer',       icon: 'fa-van-shuttle' },
+          meal:          { label: 'Meal',            icon: 'fa-utensils' },
+          activity:      { label: 'Activity',        icon: 'fa-person-hiking' },
+          note:          { label: 'Note',            icon: 'fa-circle-info' },
+          flight:        { label: 'Flight',          icon: 'fa-plane-departure' },
+        };
+        const CALC_LABELS = {
+          stableford:   'Stableford',
+          ambrose_nett: 'Ambrose',
+          stroke:       'Stroke Play',
+        };
+        function fmtDate(d) {
+          if (!d) return '';
+          return new Date(d).toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+        }
+        function fmtTime(t) {
+          if (!t) return '';
+          return String(t).slice(0, 5);
+        }
+        // Compute once, used for default tab selection and in each tab
+        const todayItems    = (byDate[todayKey]    || []).filter(e => e._kind === 'item');
+        const tomorrowEntries = byDate[tomorrowKey] || [];
+        const defaultTab = (openRound || todayItems.length || tomorrowEntries.length) ? 'today' : 'tomorrow';
+      %>
 
-      <% if (openScorecards && openScorecards.length) { %>
-        <section class="card border-0 shadow-sm mb-3">
-          <div class="card-body">
-            <h2 class="h6 mb-2">Open Scorecards</h2>
-            <div class="d-flex flex-wrap gap-2">
-              <% openScorecards.forEach((item) => { %>
-                <a class="btn btn-sm btn-success" href="/scoring/live/<%= item.id %>">
-                  <i class="fa-solid fa-pen-to-square me-1"></i><%= dayLabel(item.day) %> · <%= item.label %>
-                </a>
-              <% }) %>
-            </div>
-          </div>
-        </section>
-      <% } %>
+      <% if (!activeTour) { %>
+        <div class="alert alert-info">No active tour at the moment. Check back soon.</div>
+      <% } else { %>
 
-      <section class="card border-0 shadow-sm mb-3">
-        <div class="card-body">
-          <div class="row g-3 align-items-start">
-            <div class="col-12 col-md-8">
-              <h2 class="h6 mb-3">Profile</h2>
-              <div class="row g-2 small">
-                <div class="col-12">
-                  <span class="text-muted">Name</span>
-                  <div class="d-inline-flex align-items-center gap-1">
-                    <span><%= profile.first_name %> <%= profile.last_name %></span>
-                    <% if (Number(profile.is_previous_winner) === 1) { %>
-                      <%- include('../partials/winner-badge', { showText: false, className: '' }) %>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h1 class="h5 mb-0"><%= activeTour.label %></h1>
+          <a href="<%= tenantPath('/itinerary') %>" class="btn btn-sm btn-outline-secondary">
+            <i class="fa-solid fa-calendar-days me-1"></i>Itinerary
+          </a>
+        </div>
+
+        <div class="d-flex align-items-end mb-3">
+          <ul class="nav nav-tabs flex-grow-1" id="dashTabs" role="tablist" style="border-bottom:0">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link <%= defaultTab === 'today' ? 'active' : '' %>" id="tab-today-btn"
+                data-bs-toggle="tab" data-bs-target="#tab-today" type="button" role="tab"
+                aria-controls="tab-today" aria-selected="<%= defaultTab === 'today' %>">Today</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link <%= defaultTab === 'tomorrow' ? 'active' : '' %>" id="tab-tomorrow-btn"
+                data-bs-toggle="tab" data-bs-target="#tab-tomorrow" type="button" role="tab"
+                aria-controls="tab-tomorrow" aria-selected="<%= defaultTab === 'tomorrow' %>">Tomorrow</button>
+            </li>
+          </ul>
+        </div>
+        <div style="border-top:1px solid var(--bs-border-color);margin-top:-1px;margin-bottom:1rem"></div>
+
+        <div class="tab-content" id="dashTabContent">
+
+          <%# ── TODAY TAB ── %>
+          <div class="tab-pane fade <%= defaultTab === 'today' ? 'show active' : '' %>"
+               id="tab-today" role="tabpanel" aria-labelledby="tab-today-btn">
+
+            <%# Open round golf section %>
+            <% if (openRound) { %>
+              <section class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                  <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">
+                    Today &middot; <%= dayLabel(openRound.round_number) %>
+                  </h2>
+                  <% if (todayGroup) { %>
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                      <div>
+                        <div class="fw-semibold">Group <%= todayGroup.groupNumber %></div>
+                        <div class="small text-muted">
+                          Tee <%= todayGroup.startingHole || '-' %>
+                          <% if (todayGroup.teeLocation) { %> &middot; <%= todayGroup.teeLocation %><% } %>
+                        </div>
+                      </div>
+                      <div class="text-end">
+                        <div class="fs-5 fw-bold"><%= todayGroup.teeTime || '-' %></div>
+                        <% if (todayHandicap !== null) { %>
+                          <div class="small text-muted">Hcp <%= todayHandicap %></div>
+                        <% } %>
+                      </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                      <% todayGroup.players.forEach((p) => { %>
+                        <span class="badge <%= p.isMe ? 'text-bg-dark' : 'text-bg-light border' %>"><%= p.name %></span>
+                      <% }) %>
+                    </div>
+                    <% if (todayGroup.scorecard) { %>
+                      <% if (todayGroup.scorecard.status === 'submitted') { %>
+                        <span class="badge text-bg-secondary">Submitted</span>
+                      <% } else { %>
+                        <a href="<%= tenantPath(`/scoring/live/${todayGroup.scorecard.id}`) %>" class="btn btn-success btn-sm">
+                          <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                        </a>
+                      <% } %>
+                    <% } else { %>
+                      <p class="small text-muted mb-0">Scorecard not yet available.</p>
+                    <% } %>
+                  <% } else { %>
+                    <p class="text-muted small mb-0">You are not in a tee group for today.</p>
+                  <% } %>
+                </div>
+              </section>
+            <% } %>
+
+            <%# Standings %>
+            <% if (championshipStanding || skinsSummary) { %>
+              <section class="card border-0 shadow-sm mb-3">
+                <div class="card-body">
+                  <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">Standings</h2>
+                  <div class="row g-3">
+                    <% if (championshipStanding) { %>
+                      <div class="col">
+                        <div class="border rounded p-3 text-center h-100">
+                          <div class="text-muted small mb-1">Championship</div>
+                          <div class="display-6 fw-bold lh-1">#<%= championshipStanding.place %></div>
+                          <div class="fw-semibold mt-1"><%= championshipStanding.points %> pts</div>
+                          <div class="small text-muted mt-1">
+                            <%= championshipStanding.pointsFromLeader === 0 ? 'Leader' : `${championshipStanding.pointsFromLeader} from lead` %>
+                          </div>
+                        </div>
+                      </div>
+                    <% } %>
+                    <% if (skinsSummary) { %>
+                      <div class="col">
+                        <div class="border rounded p-3 text-center h-100">
+                          <div class="text-muted small mb-1">Skins</div>
+                          <div class="display-6 fw-bold lh-1"><%= skinsSummary.totalSkins %></div>
+                          <div class="fw-semibold text-success mt-1">$<%= skinsSummary.totalPayout.toFixed(2) %></div>
+                          <div class="small text-muted mt-1">$<%= skinsSummary.baseSkinPot.toFixed(2) %> / skin</div>
+                        </div>
+                      </div>
                     <% } %>
                   </div>
                 </div>
-                <div class="col-6"><span class="text-muted">Email</span><div><%= profile.email %></div></div>
-                <div class="col-6"><span class="text-muted">Phone</span><div><%= profile.phone_number || '-' %></div></div>
-              </div>
-            </div>
-            <div class="col-12 col-md-4">
-              <div class="border rounded p-2 p-md-3 bg-light text-md-end">
-                <div class="small text-muted">Championship</div>
-                <% if (championshipStanding) { %>
-                  <div class="fs-4 fw-bold lh-1 mt-1">#<%= championshipStanding.place %></div>
-                  <div class="fw-semibold mt-1"><%= Number(championshipStanding.points || 0) %> pts</div>
-                  <div class="small text-muted mt-1">
-                    <%= Number(championshipStanding.pointsFromLeader || 0) === 0 ? 'Leader' : `${Number(championshipStanding.pointsFromLeader || 0)} from leader` %>
-                  </div>
-                <% } else { %>
-                  <div class="small text-muted mt-2">No published championship score yet</div>
-                <% } %>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+              </section>
+            <% } %>
 
-      <section class="card border-0 shadow-sm">
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Day</th>
-                  <th>Entry</th>
-                  <th>Status</th>
-                  <th>Gross</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                <% if (!recentScores.length) { %>
-                  <tr><td colspan="5" class="text-muted px-3 py-3">No scorecards yet.</td></tr>
-                <% } %>
-                <% recentScores.forEach((score) => { %>
-                  <tr>
-                    <td><%= dayLabel(score.day) %></td>
-                    <td><%= score.entryLabel || '-' %></td>
-                    <td><span class="badge text-bg-secondary"><%= score.status %></span></td>
-                    <td><%= score.showGross ? Number(score.totalGross || 0) : '-' %></td>
-                    <td><%= score.resultDisplay || '-' %></td>
-                  </tr>
+            <%# Today's non-golf itinerary items %>
+            <% if (todayItems.length) { %>
+              <section class="card border-0 shadow-sm mb-3">
+                <% todayItems.forEach((entry, i) => { %>
+                  <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
                 <% }) %>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+              </section>
+            <% } %>
 
-      <% if (calcuttaSummary) { %>
-        <section class="card border-0 shadow-sm mt-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Calcutta Summary (<%= calcuttaSummary.event.year %>)</h2>
-            <div class="row g-2 mb-3">
-              <div class="col-12 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Purchases Owed</div>
-                  <div class="fw-semibold text-danger">$<%= Number(calcuttaSummary.purchasesOwed || 0).toFixed(2) %></div>
-                </div>
-              </div>
-              <div class="col-12 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Ownership Receivable</div>
-                  <div class="fw-semibold text-success">$<%= Number(calcuttaSummary.ownershipReceivable || 0).toFixed(2) %></div>
-                </div>
-              </div>
-              <div class="col-12 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Net Balance</div>
-                  <div class="fw-semibold <%= Number(calcuttaSummary.netBalance || 0) < 0 ? 'text-danger' : (Number(calcuttaSummary.netBalance || 0) > 0 ? 'text-success' : '') %>">$<%= Number(calcuttaSummary.netBalance || 0).toFixed(2) %></div>
-                </div>
-              </div>
-            </div>
-            <% if (calcuttaSummary.payoutsAvailable) { %>
-              <div class="row g-2 mb-3">
-                <div class="col-12 col-md-6">
-                  <div class="border rounded p-2 bg-light">
-                    <div class="small text-muted">Personal Payout</div>
-                    <div class="fw-semibold text-success">$<%= Number(calcuttaSummary.personalPayout || 0).toFixed(2) %></div>
-                  </div>
-                </div>
-                <div class="col-12 col-md-6">
-                  <div class="border rounded p-2 bg-light">
-                    <div class="small text-muted">Net After Payout</div>
-                    <div class="fw-semibold <%= Number(calcuttaSummary.netAfterPayout || 0) < 0 ? 'text-danger' : (Number(calcuttaSummary.netAfterPayout || 0) > 0 ? 'text-success' : '') %>">$<%= Number(calcuttaSummary.netAfterPayout || 0).toFixed(2) %></div>
-                  </div>
-                </div>
-              </div>
-
-              <h3 class="h6 mb-2">Calcutta Payouts</h3>
-              <div class="table-responsive mb-3">
-                <table class="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr><th>Category</th><th>Player</th><th>Owner</th><th>%</th><th>Amount</th></tr>
-                  </thead>
-                  <tbody>
-                    <% (calcuttaSummary.payouts || []).forEach((row) => { %>
-                      <tr>
-                        <td><%= row.category %></td>
-                        <td><%= row.basisName %></td>
-                        <td>
-                          <%= row.recipientName %>
-                          <% if (Number(row.recipientUserId || 0) === Number(user.id)) { %><span class="badge text-bg-success ms-1">You</span><% } %>
-                        </td>
-                        <td><%= Number(row.percent || 0).toFixed(2) %>%</td>
-                        <td><strong class="text-success">$<%= Number(row.amount || 0).toFixed(2) %></strong></td>
-                      </tr>
-                    <% }) %>
-                  </tbody>
-                </table>
+            <%# Empty state %>
+            <% if (!openRound && !championshipStanding && !skinsSummary && !todayItems.length) { %>
+              <div class="text-center py-5 text-muted">
+                <i class="fa-solid fa-calendar-days fa-3x mb-3 opacity-25"></i>
+                <p class="mb-0">Nothing scheduled for today.</p>
               </div>
             <% } %>
 
-            <div class="row g-3">
-              <div class="col-12 col-lg-6">
-                <h3 class="h6 mb-2">Bought</h3>
-                <% if (!(calcuttaSummary.boughtRows || []).length) { %>
-                  <p class="small text-muted mb-0">No purchases.</p>
-                <% } else { %>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                      <thead>
-                        <tr><th>Draw</th><th>Player</th><th>Owner</th><th>Price</th></tr>
-                      </thead>
-                      <tbody>
-                        <% (calcuttaSummary.boughtRows || []).forEach((row) => { %>
-                          <tr>
-                            <td><%= Number(row.draw_order || 0) %></td>
-                            <td><%= row.auctioned_first_name %> <%= row.auctioned_last_name %></td>
-                            <td><%= row.owner_first_name ? `${row.owner_first_name} ${row.owner_last_name}` : '-' %></td>
-                            <td class="text-danger">$<%= Number(row.auction_bid_amount || 0).toFixed(2) %></td>
-                          </tr>
-                        <% }) %>
-                      </tbody>
-                    </table>
-                  </div>
-                <% } %>
-              </div>
-              <div class="col-12 col-lg-6">
-                <h3 class="h6 mb-2">Sold (Owned)</h3>
-                <% if (!(calcuttaSummary.soldRows || []).length) { %>
-                  <p class="small text-muted mb-0">No owned sales.</p>
-                <% } else { %>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                      <thead>
-                        <tr><th>Draw</th><th>Player</th><th>Buyer</th><th>Share</th></tr>
-                      </thead>
-                      <tbody>
-                        <% (calcuttaSummary.soldRows || []).forEach((row) => { %>
-                          <tr>
-                            <td><%= Number(row.draw_order || 0) %></td>
-                            <td><%= row.auctioned_first_name %> <%= row.auctioned_last_name %></td>
-                            <td><%= row.buyer_first_name %> <%= row.buyer_last_name %></td>
-                            <td class="text-success">$<%= (Number(row.auction_bid_amount || 0) * 0.5).toFixed(2) %></td>
-                          </tr>
-                        <% }) %>
-                      </tbody>
-                    </table>
-                  </div>
-                <% } %>
-              </div>
-            </div>
           </div>
-        </section>
-      <% } %>
 
-      <% if (skinsSummary) { %>
-        <section class="card border-0 shadow-sm mt-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Skins Summary (<%= skinsSummary.event.year %>)</h2>
-            <div class="row g-2 mb-3">
-              <div class="col-6 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Total Skins</div>
-                  <div class="fw-semibold"><%= Number(skinsSummary.totalSkins || 0) %></div>
-                </div>
+          <%# ── TOMORROW TAB ── %>
+          <div class="tab-pane fade" id="tab-tomorrow" role="tabpanel" aria-labelledby="tab-tomorrow-btn">
+            <% if (!tomorrowEntries.length) { %>
+              <div class="text-center py-5 text-muted">
+                <i class="fa-solid fa-calendar-check fa-3x mb-3 opacity-25"></i>
+                <p class="mb-0">Nothing scheduled for tomorrow.</p>
               </div>
-              <div class="col-6 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Value Per Skin</div>
-                  <div class="fw-semibold">$<%= Number(skinsSummary.baseSkinPot || 0).toFixed(2) %></div>
-                </div>
-              </div>
-              <div class="col-12 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Total Payout</div>
-                  <div class="fw-semibold text-success">$<%= Number(skinsSummary.totalPayout || 0).toFixed(2) %></div>
-                </div>
-              </div>
-            </div>
-
-            <% if (!(skinsSummary.wins || []).length) { %>
-              <p class="small text-muted mb-0">No skins won yet on published rounds.</p>
             <% } else { %>
-              <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr><th>Day</th><th>Hole</th><th>Score</th><th>Skins</th><th>Payout</th></tr>
-                  </thead>
-                  <tbody>
-                    <% (skinsSummary.wins || []).forEach((row) => { %>
-                      <tr>
-                        <td><%= dayLabel(row.day) %></td>
-                        <td><%= Number(row.holeNumber || 0) %></td>
-                        <td><%= row.stableford == null ? '-' : Number(row.stableford) %> nett <%= row.gross == null ? '-' : Number(row.gross) %></td>
-                        <td><strong><%= Number(row.skinsCount || 0) %></strong></td>
-                        <td>$<%= (Number(row.skinsCount || 0) * Number(skinsSummary.baseSkinPot || 0)).toFixed(2) %></td>
-                      </tr>
-                    <% }) %>
-                  </tbody>
-                </table>
+              <h2 class="h6 text-muted text-uppercase small fw-semibold mb-2 ps-1"><%= fmtDate(tomorrowKey) %></h2>
+              <div class="card border-0 shadow-sm mb-3">
+                <% tomorrowEntries.forEach((entry, i) => { %>
+                  <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
+                <% }) %>
               </div>
             <% } %>
           </div>
-        </section>
-      <% } %>
 
-      <% if (noveltySummary) { %>
-        <section class="card border-0 shadow-sm mt-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">NTP &amp; Long Drive Wins (<%= noveltySummary.event.year %>)</h2>
-            <div class="row g-2 mb-3">
-              <div class="col-6 col-md-3">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Total</div>
-                  <div class="fw-semibold"><%= Number(noveltySummary.totalWins || 0) %></div>
-                </div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">NTP</div>
-                  <div class="fw-semibold"><%= Number(noveltySummary.ntpWins || 0) %></div>
-                </div>
-              </div>
-              <div class="col-6 col-md-3">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Long Drive</div>
-                  <div class="fw-semibold"><%= Number(noveltySummary.longDriveWins || 0) %></div>
-                </div>
-              </div>
-            </div>
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-0">
-                <thead>
-                  <tr><th>Day</th><th>Hole</th><th>Type</th><th>Label</th></tr>
-                </thead>
-                <tbody>
-                  <% (noveltySummary.wins || []).forEach((row) => { %>
-                    <tr>
-                      <td><%= dayLabel(row.day) %></td>
-                      <td><%= Number(row.hole_number || 0) %></td>
-                      <td><%= row.novelty_type %></td>
-                      <td><%= row.label %></td>
-                    </tr>
-                  <% }) %>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      <% } %>
-
-      <% if (prizeSummary) { %>
-        <section class="card border-0 shadow-sm mt-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Prize Winnings (<%= prizeSummary.event.year %>)</h2>
-            <div class="row g-2 mb-3">
-              <div class="col-12 col-md-4">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted">Total Won</div>
-                  <div class="fw-semibold">$<%= Number(prizeSummary.totalWon || 0).toFixed(2) %></div>
-                </div>
-              </div>
-              <div class="col-12 col-md-8">
-                <div class="border rounded p-2 bg-light">
-                  <div class="small text-muted mb-1">By Category</div>
-                  <div class="d-flex flex-wrap gap-2 small">
-                    <% Object.keys(prizeSummary.byCategory || {}).sort().forEach((key) => { %>
-                      <span class="badge text-bg-light border"><%= key.replace('_', ' ') %>: $<%= Number(prizeSummary.byCategory[key] || 0).toFixed(2) %></span>
-                    <% }) %>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-0">
-                <thead>
-                  <tr><th>Day</th><th>Prize</th><th>Amount</th></tr>
-                </thead>
-                <tbody>
-                  <% (prizeSummary.items || []).forEach((row) => { %>
-                    <tr>
-                      <td><%= dayLabel(row.day) %></td>
-                      <td><%= row.label %></td>
-                      <td><strong>$<%= Number(row.amount || 0).toFixed(2) %></strong></td>
-                    </tr>
-                  <% }) %>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+        </div>
       <% } %>
     </main>
-      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   </body>
 </html>

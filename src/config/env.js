@@ -6,12 +6,12 @@ const isProd = nodeEnv === 'production';
 module.exports = {
   nodeEnv,
   isProd,
-  port: Number(process.env.PORT || 5050),
-  baseUrl: process.env.APP_BASE_URL || process.env.BASE_URL || (isProd ? 'https://app.example.com' : 'http://localhost:5050'),
+  port: Number(process.env.PORT || 2080),
+  databaseUrl: process.env.DATABASE_URL || 'postgresql://localhost:5432/forescore_dev',
+  baseUrl: process.env.APP_BASE_URL || (isProd ? 'https://app.forescore.golf' : 'http://localhost:5050'),
   sessionSecret: process.env.SESSION_SECRET || 'development-secret-change-me',
-  dbFile: process.env.DB_FILE || './data/legends.sqlite',
   brevoApiKey: process.env.BREVO_API_KEY || '',
   brevoSenderEmail: process.env.BREVO_SENDER_EMAIL || '',
-  brevoSenderName: process.env.BREVO_SENDER_NAME || 'Legends Golf',
-  golfCourseApiKey: process.env.GOLF_COURSE_API_KEY || 'CPS6U7RHIJNYVP7LE5RENWJZDU'
+  brevoSenderName: process.env.BREVO_SENDER_NAME || 'ForeScore',
+  golfCourseApiKey: process.env.GOLF_COURSE_API_KEY || '',
 };

@@ -3,114 +3,32 @@
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
-const SQLiteStoreFactory = require('connect-sqlite3');
+const PgSession = require('connect-pg-simple')(session);
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
 
 const { authRouter } = require('./routes/auth.routes');
-const { indexRouter } = require('./routes/index.routes');
-const { playerRouter } = require('./routes/player.routes');
 const { adminRouter } = require('./routes/admin.routes');
+const { superAdminRouter } = require('./routes/super-admin.routes');
 const { scoringRouter } = require('./routes/scoring.routes');
 const { leaderboardRouter } = require('./routes/leaderboard.routes');
-const { isProd, nodeEnv, sessionSecret } = require('./config/env');
+const { playerRouter } = require('./routes/player.routes');
+const { isProd, nodeEnv, sessionSecret, databaseUrl } = require('./config/env');
 const { SESSION_MAX_AGE_MS } = require('./config/constants');
-const { dayLabel } = require('./services/events/day-label.service');
-const { calculateStablefordLeaderboards } = require('./services/scoring/stableford-leaderboard.service');
+const { tenantMiddleware } = require('./middleware/tenant');
+const { requireAuth } = require('./middleware/auth');
 
-const SQLiteStore = SQLiteStoreFactory(session);
 const upload = multer();
 
 function createApp({ db, sessionStore } = {}) {
   if (!db) throw new Error('createApp requires a db instance');
 
   const app = express();
-  const assetVersion = process.env.APP_VERSION || (nodeEnv === 'development' ? String(Date.now()) : 'prod');
-  // Required behind Fly proxy so req.ip and X-Forwarded-For are handled correctly.
+  const { version } = require('../package.json');
+  const assetVersion = process.env.APP_VERSION || (nodeEnv === 'development' ? String(Date.now()) : version);
+
   app.set('trust proxy', 1);
-  const championBannerCache = {
-    value: null,
-    loadedAt: 0,
-    key: '',
-    pending: null
-  };
-
-  async function loadChampionBanner() {
-    try {
-      const state = await db('events as e')
-        .leftJoin('event_day_statuses as eds', function joinDay4() {
-          this.on('eds.event_id', '=', 'e.id').andOn('eds.day', '=', db.raw('4'));
-        })
-        .where('e.is_active', 1)
-        .select(
-          'e.id',
-          'e.year',
-          'e.leaderboard_dirty_at',
-          { day4Published: 'eds.leaderboard_published' },
-          { day4UpdatedAt: 'eds.updated_at' }
-        )
-        .first();
-
-      const stateKey = state
-        ? [
-            Number(state.id || 0),
-            String(state.leaderboard_dirty_at || ''),
-            Number(state.day4Published || 0),
-            String(state.day4UpdatedAt || '')
-          ].join('|')
-        : 'no-active-event';
-
-      const now = Date.now();
-      if (
-        championBannerCache.key === stateKey
-        && championBannerCache.value !== null
-        && now - championBannerCache.loadedAt < 60000
-      ) {
-        return championBannerCache.value;
-      }
-      if (championBannerCache.pending && championBannerCache.key === stateKey) {
-        return championBannerCache.pending;
-      }
-
-      championBannerCache.key = stateKey;
-      championBannerCache.pending = (async () => {
-        if (!state || Number(state.day4Published || 0) !== 1) {
-          championBannerCache.value = null;
-          championBannerCache.loadedAt = Date.now();
-          return null;
-        }
-
-        const stablefordBoards = await calculateStablefordLeaderboards(db, Number(state.id));
-        const winner = stablefordBoards?.championship?.[0];
-        if (!winner) {
-          championBannerCache.value = null;
-          championBannerCache.loadedAt = Date.now();
-          return null;
-        }
-
-        const year = Number(state.year || 0);
-        championBannerCache.value = {
-          year,
-          nextYear: year + 1,
-          playerName: String(winner.name || '').trim(),
-          winningTotal: Number(winner.total || 0)
-        };
-        championBannerCache.loadedAt = Date.now();
-        return championBannerCache.value;
-      })().finally(() => {
-        championBannerCache.pending = null;
-      });
-
-      return championBannerCache.pending;
-    } catch (_error) {
-      // Banner is non-critical; avoid blocking requests in tests/minimal DB contexts.
-      championBannerCache.value = null;
-      championBannerCache.loadedAt = Date.now();
-      return null;
-    }
-  }
-
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, 'views'));
 
@@ -121,50 +39,68 @@ function createApp({ db, sessionStore } = {}) {
   app.use(upload.none());
   app.use(express.static(path.join(__dirname, 'public')));
 
-  app.use(
-    session({
-      store: sessionStore || new SQLiteStore({ db: 'sessions.sqlite', dir: path.resolve('./data') }),
-      secret: sessionSecret,
-      resave: false,
-      saveUninitialized: false,
-      rolling: true,
-      cookie: {
-        maxAge: SESSION_MAX_AGE_MS,
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: isProd
-      }
-    })
-  );
-
-  app.use(async (req, res, next) => {
-    try {
-      res.locals.user = req.session?.user || null;
-      res.locals.dayLabel = dayLabel;
-      res.locals.assetVersion = assetVersion;
-      res.locals.legendsChampionBanner = await loadChampionBanner();
-      return next();
-    } catch (error) {
-      return next(error);
-    }
+  const store = sessionStore || new PgSession({
+    conObject: {
+      connectionString: databaseUrl,
+      ssl: isProd ? { rejectUnauthorized: false } : false,
+    },
+    tableName: 'sessions',
+    createTableIfMissing: true,
   });
 
-  app.use('/auth', authRouter(db));
-  app.use('/', indexRouter());
-  app.use('/player', playerRouter(db));
-  app.use('/admin', adminRouter(db));
-  app.use('/scoring', scoringRouter(db));
-  app.use('/leaderboards', leaderboardRouter(db));
+  app.use(session({
+    store,
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+      maxAge: SESSION_MAX_AGE_MS,
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProd,
+    },
+  }));
+
+  // Global locals — tenantPath is overridden per-request by tenantMiddleware
+  app.use((req, res, next) => {
+    res.locals.user = req.session?.user || null;
+    res.locals.assetVersion = assetVersion;
+    res.locals.tenantPath = (p) => p;
+    res.locals.isSuperAdmin = Boolean(req.session?.user?.isSuperAdmin);
+    next();
+  });
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
+  // Global routes: root picker + tenant create (no tenant slug)
+  app.use('/', superAdminRouter(db));
+
+  // All application routes live under /:tenantSlug
+  const tenantRouter = express.Router({ mergeParams: true });
+  tenantRouter.use(tenantMiddleware(db));
+  tenantRouter.use('/auth', authRouter(db));
+  tenantRouter.use('/admin', adminRouter(db));
+  tenantRouter.use('/scoring', scoringRouter(db));
+  tenantRouter.use('/leaderboards', leaderboardRouter(db));
+  tenantRouter.use('/', playerRouter(db));
+
+  app.use('/:tenantSlug', tenantRouter);
+
+  app.use((_req, res) => res.status(404).send('Not found'));
+
   app.use((err, _req, res, _next) => {
     console.error(err);
-    res.status(500).render('auth/error', {
-      title: 'Error',
-      error: isProd ? 'Unexpected server error' : err.message,
-      user: null
-    });
+    if (res.headersSent) return;
+    try {
+      res.status(500).render('auth/error', {
+        title: 'Error',
+        error: isProd ? 'Unexpected server error' : err.message,
+        user: null,
+      });
+    } catch {
+      res.status(500).send(isProd ? 'Server error' : err.message);
+    }
   });
 
   return app;

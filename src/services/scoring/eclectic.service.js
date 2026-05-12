@@ -1,16 +1,13 @@
 'use strict';
 
-async function calculateEclecticLeaderboard(db, eventId, days = [2, 3, 4]) {
-  const scopedDays = (Array.isArray(days) ? days : [2, 3, 4])
-    .map((d) => Number(d))
-    .filter((d) => [2, 3, 4].includes(d));
-  if (!scopedDays.length) return [];
+async function calculateEclecticLeaderboard(db, tourId, roundNumbers = []) {
+  if (!roundNumbers.length) return [];
 
   const rows = await db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
     .join('users as u', 'u.id', 's.user_id')
-    .where('s.event_id', eventId)
-    .whereIn('s.day', scopedDays)
+    .where('s.tour_id', tourId)
+    .whereIn('s.round_number', roundNumbers)
     .andWhere('s.type', 'individual')
     .select(
       's.user_id',

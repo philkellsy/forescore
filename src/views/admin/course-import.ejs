@@ -1,245 +1,252 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %> | Legends</title>
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
-    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
-    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
-    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
-  </head>
-  <body>
-    <%- include('../partials/nav') %>
-    <main class="container py-3 py-md-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4 mb-0">Import Course from API</h1>
-        <a class="btn btn-outline-dark" href="/admin/courses">Back to Courses</a>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="h4 mb-0">Import Course from API</h1>
+      <a class="btn btn-outline-secondary btn-sm" href="<%= tenantPath('/admin/courses') %>">Back to Courses</a>
+    </div>
+
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+    <% if (!hasApiKey) { %>
+      <div class="alert alert-warning">
+        <strong>API key not configured.</strong>
+        Set the <code>GOLF_COURSE_API_KEY</code> environment variable to enable course search.
+        You can still <a href="<%= tenantPath('/admin/courses') %>" class="alert-link">add courses manually</a>.
       </div>
+    <% } %>
 
-      <% if (error) { %>
-        <div class="alert alert-danger"><%= error %></div>
-      <% } %>
-
-      <!-- Step 1: Search -->
-      <section class="card border-0 shadow-sm mb-3">
-        <div class="card-body">
-          <h2 class="h6 text-muted mb-3">Step 1 — Search for a course</h2>
-          <div class="input-group">
-            <input type="text" id="searchInput" class="form-control" placeholder="e.g. Royal Melbourne" />
-            <button class="btn btn-legends" id="searchBtn" type="button">Search</button>
-          </div>
-          <div id="searchSpinner" class="text-muted small mt-2 d-none">Searching...</div>
-          <div id="searchError" class="alert alert-danger mt-2 d-none"></div>
+    <section class="card border-0 shadow-sm mb-3 <%= !hasApiKey ? 'opacity-50 pe-none' : '' %>">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-3">Step 1 — Search for a course</h2>
+        <div class="input-group">
+          <input type="text" id="searchInput" class="form-control" placeholder="e.g. Royal Melbourne" />
+          <button class="btn btn-legends" id="searchBtn" type="button">Search</button>
         </div>
-      </section>
+        <div id="searchSpinner" class="text-muted small mt-2 d-none">Searching…</div>
+        <div id="searchError" class="alert alert-danger mt-2 d-none"></div>
+      </div>
+    </section>
 
-      <!-- Step 2: Pick a course from results -->
-      <section class="card border-0 shadow-sm mb-3 d-none" id="resultsSection">
-        <div class="card-body">
-          <h2 class="h6 text-muted mb-3">Step 2 — Select a course</h2>
-          <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
+    <section class="card border-0 shadow-sm mb-3 d-none" id="resultsSection">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-3">Step 2 — Select a course</h2>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr><th>Club</th><th>Course</th><th>Location</th><th></th></tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-3 d-none" id="teesSection">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-3">Step 3 — Select a tee</h2>
+        <div class="row g-2" id="teesGrid"></div>
+      </div>
+    </section>
+
+    <section class="card border-0 shadow-sm d-none" id="previewSection">
+      <div class="card-body">
+        <h2 class="h6 text-muted mb-3">Step 4 — Preview &amp; confirm</h2>
+        <form method="post" action="<%= tenantPath('/admin/courses/import') %>" id="importForm">
+          <input type="hidden" name="apiCourseId" id="fApiCourseId" />
+          <input type="hidden" name="apiTeeName" id="fApiTeeName" />
+          <input type="hidden" name="gender" id="fGender" />
+          <input type="hidden" name="holesJson" id="fHolesJson" />
+          <input type="hidden" name="courseRating" id="fCourseRating" />
+          <input type="hidden" name="slopeRating" id="fSlopeRating" />
+
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-semibold">Course Name</label>
+              <input type="text" name="courseName" id="fCourseName" class="form-control" required />
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label fw-semibold">Tee Name</label>
+              <input type="text" name="teeName" id="previewTee" class="form-control" required />
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label fw-semibold">Gender</label>
+              <input type="text" id="previewGender" class="form-control" disabled />
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label fw-semibold">Par</label>
+              <input type="text" id="previewPar" class="form-control" disabled />
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label fw-semibold">Course Rating</label>
+              <input type="text" id="previewCourseRating" class="form-control" disabled />
+            </div>
+            <div class="col-4 col-md-2">
+              <label class="form-label fw-semibold">Slope</label>
+              <input type="text" id="previewSlopeRating" class="form-control" disabled />
+            </div>
+          </div>
+
+          <p class="text-muted small mb-2">Yardage converted to metres. SI Secondary defaults to SI Primary + 18 — edit after import if needed.</p>
+
+          <div class="table-responsive mb-3">
+            <table class="table table-sm align-middle mb-0">
               <thead>
-                <tr>
-                  <th>Club</th>
-                  <th>Course</th>
-                  <th>Location</th>
-                  <th></th>
-                </tr>
+                <tr><th>Hole</th><th>Par</th><th>Metres</th><th>SI Primary</th><th>SI Secondary</th></tr>
               </thead>
-              <tbody id="resultsBody"></tbody>
+              <tbody id="previewBody"></tbody>
             </table>
           </div>
-        </div>
-      </section>
 
-      <!-- Step 3: Pick a tee -->
-      <section class="card border-0 shadow-sm mb-3 d-none" id="teesSection">
-        <div class="card-body">
-          <h2 class="h6 text-muted mb-3">Step 3 — Select a tee</h2>
-          <div class="row g-2" id="teesGrid"></div>
-        </div>
-      </section>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-legends">Import Course</button>
+            <button type="button" class="btn btn-outline-secondary" id="resetBtn">Start Over</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
 
-      <!-- Step 4: Preview & confirm -->
-      <section class="card border-0 shadow-sm d-none" id="previewSection">
-        <div class="card-body">
-          <h2 class="h6 text-muted mb-3">Step 4 — Preview &amp; confirm</h2>
-          <form method="post" action="/admin/courses/import" id="importForm">
-            <input type="hidden" name="apiCourseId" id="fApiCourseId" />
-            <input type="hidden" name="apiTeeName" id="fApiTeeName" />
-            <input type="hidden" name="gender" id="fGender" />
-            <input type="hidden" name="holesJson" id="fHolesJson" />
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script>
+    const SEARCH_URL = '<%= tenantPath("/admin/courses/import/search") %>';
+    const COURSE_URL = '<%= tenantPath("/admin/courses/import/course/") %>';
+    let selectedCourse = null;
 
-            <div class="row g-3 mb-3">
-              <div class="col-md-6">
-                <label class="form-label fw-semibold">Course Name <span class="text-muted fw-normal">(as it will appear in Legends)</span></label>
-                <input type="text" name="courseName" id="fCourseName" class="form-control" required />
-              </div>
-              <div class="col-md-3">
-                <label class="form-label fw-semibold">Tee Name</label>
-                <input type="text" name="teeName" id="previewTee" class="form-control" required />
-              </div>
-              <div class="col-md-3">
-                <label class="form-label fw-semibold">Par Total</label>
-                <input type="text" id="previewPar" class="form-control" disabled />
-              </div>
-            </div>
+    document.getElementById('searchBtn').addEventListener('click', runSearch);
+    document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
 
-            <p class="text-muted small mb-2">Yardage is converted to metres. Stroke Index secondary defaults to SI primary + 18 — edit after import if needed.</p>
-
-            <div class="table-responsive mb-3">
-              <table class="table table-sm align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Hole</th>
-                    <th>Par</th>
-                    <th>Metres</th>
-                    <th>SI Primary</th>
-                    <th>SI Secondary</th>
-                  </tr>
-                </thead>
-                <tbody id="previewBody"></tbody>
-              </table>
-            </div>
-
-            <div class="d-flex gap-2">
-              <button type="submit" class="btn btn-legends">Import Course</button>
-              <button type="button" class="btn btn-outline-secondary" id="resetBtn">Start Over</button>
-            </div>
-          </form>
-        </div>
-      </section>
-    </main>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-    <script>
-      let selectedCourse = null;
-
-      // ── Search ──────────────────────────────────────────────────────────
-      document.getElementById('searchBtn').addEventListener('click', runSearch);
-      document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
-
-      async function runSearch() {
-        const q = document.getElementById('searchInput').value.trim();
-        if (!q) return;
-        setStep(1);
-        document.getElementById('searchSpinner').classList.remove('d-none');
-        document.getElementById('searchError').classList.add('d-none');
-        try {
-          const res = await fetch(`/admin/courses/import/search?q=${encodeURIComponent(q)}`);
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Search failed');
-          renderResults(data.courses || []);
-        } catch (err) {
-          showSearchError(err.message);
-        } finally {
-          document.getElementById('searchSpinner').classList.add('d-none');
-        }
+    async function runSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+      setStep(1);
+      document.getElementById('searchSpinner').classList.remove('d-none');
+      document.getElementById('searchError').classList.add('d-none');
+      try {
+        const res = await fetch(SEARCH_URL + '?q=' + encodeURIComponent(q));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Search failed');
+        renderResults(data.courses || []);
+      } catch (err) {
+        showSearchError(err.message);
+      } finally {
+        document.getElementById('searchSpinner').classList.add('d-none');
       }
+    }
 
-      function renderResults(courses) {
-        const tbody = document.getElementById('resultsBody');
-        tbody.innerHTML = '';
-        if (!courses.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No courses found.</td></tr>';
-        } else {
-          courses.forEach(c => {
-            const loc = [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ');
-            const tr = document.createElement('tr');
-            tr.style.cursor = 'pointer';
-            tr.innerHTML = `<td>${esc(c.club_name)}</td><td>${esc(c.course_name)}</td><td>${esc(loc)}</td><td><button class="btn btn-sm btn-outline-dark">Select</button></td>`;
-            tr.querySelector('button').addEventListener('click', () => selectCourse(c));
-            tbody.appendChild(tr);
-          });
-        }
-        document.getElementById('resultsSection').classList.remove('d-none');
-      }
-
-      // ── Tee selection ────────────────────────────────────────────────────
-      function selectCourse(course) {
-        selectedCourse = course;
-        const grid = document.getElementById('teesGrid');
-        grid.innerHTML = '';
-        document.getElementById('previewSection').classList.add('d-none');
-        const allTees = [
-          ...((course.tees?.male || []).map(t => ({ ...t, gender: 'male' }))),
-          ...((course.tees?.female || []).map(t => ({ ...t, gender: 'female' })))
-        ];
-        if (!allTees.length) {
-          grid.innerHTML = '<div class="col text-muted">No tee data available for this course.</div>';
-        } else {
-          allTees.forEach(tee => {
-            const col = document.createElement('div');
-            col.className = 'col-12 col-sm-6 col-md-4 col-lg-3';
-            const label = tee.gender === 'female' ? ` <span class="badge bg-secondary">Ladies</span>` : '';
-            col.innerHTML = `
-              <button type="button" class="btn btn-outline-dark w-100 text-start" style="white-space:normal">
-                <strong>${esc(tee.tee_name)}</strong>${label}<br>
-                <span class="text-muted small">Par ${tee.par_total} &bull; ${tee.total_meters}m &bull; CR ${tee.course_rating} / ${tee.slope_rating}</span>
-              </button>`;
-            col.querySelector('button').addEventListener('click', () => selectTee(tee));
-            grid.appendChild(col);
-          });
-        }
-        document.getElementById('teesSection').classList.remove('d-none');
-        document.getElementById('teesSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-
-      // ── Preview ──────────────────────────────────────────────────────────
-      function selectTee(tee) {
-        document.getElementById('fApiCourseId').value = selectedCourse.id;
-        document.getElementById('fApiTeeName').value = tee.tee_name;
-        document.getElementById('fGender').value = tee.gender;
-        document.getElementById('fHolesJson').value = JSON.stringify(tee.holes || []);
-        document.getElementById('fCourseName').value = selectedCourse.club_name;
-        document.getElementById('previewTee').value = tee.tee_name;
-        document.getElementById('previewPar').value = tee.par_total || '';
-
-        const tbody = document.getElementById('previewBody');
-        tbody.innerHTML = '';
-        (tee.holes || []).slice(0, 18).forEach((h, i) => {
-          const metres = h.yardage ? Math.round(h.yardage * 0.9144) : '—';
-          const siP = h.handicap || (i + 1);
-          const siS = siP + 18;
+    function renderResults(courses) {
+      const tbody = document.getElementById('resultsBody');
+      tbody.innerHTML = '';
+      if (!courses.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No courses found.</td></tr>';
+      } else {
+        courses.forEach(c => {
+          const loc = [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ');
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${i + 1}</td><td>${h.par}</td><td>${metres}</td><td>${siP}</td><td>${siS}</td>`;
+          tr.style.cursor = 'pointer';
+          tr.innerHTML = `<td>${esc(c.club_name)}</td><td>${esc(c.course_name)}</td><td>${esc(loc)}</td><td><button class="btn btn-sm btn-outline-dark">Select</button></td>`;
+          tr.querySelector('button').addEventListener('click', () => selectCourse(c));
           tbody.appendChild(tr);
         });
-
-        document.getElementById('previewSection').classList.remove('d-none');
-        document.getElementById('previewSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+      document.getElementById('resultsSection').classList.remove('d-none');
+    }
 
-      // ── Helpers ──────────────────────────────────────────────────────────
-      function setStep(step) {
-        if (step <= 1) {
-          document.getElementById('resultsSection').classList.add('d-none');
-          document.getElementById('teesSection').classList.add('d-none');
-          document.getElementById('previewSection').classList.add('d-none');
-          selectedCourse = null;
-        }
+    function selectCourse(course) {
+      selectedCourse = course;
+      const grid = document.getElementById('teesGrid');
+      grid.innerHTML = '';
+      document.getElementById('previewSection').classList.add('d-none');
+      const allTees = [
+        ...((course.tees?.male || []).map(t => ({ ...t, gender: 'male' }))),
+        ...((course.tees?.female || []).map(t => ({ ...t, gender: 'female' })))
+      ];
+      if (!allTees.length) {
+        grid.innerHTML = '<div class="col text-muted">No tee data available.</div>';
+      } else {
+        allTees.forEach(tee => {
+          const col = document.createElement('div');
+          col.className = 'col-12 col-sm-6 col-md-4 col-lg-3';
+          const badge = tee.gender === 'female' ? ' <span class="badge bg-secondary">Ladies</span>' : '';
+          const ratings = tee.course_rating ? ` &bull; CR ${tee.course_rating} / ${tee.slope_rating}` : '';
+          col.innerHTML = `
+            <button type="button" class="btn btn-outline-dark w-100 text-start" style="white-space:normal">
+              <strong>${esc(tee.tee_name)}</strong>${badge}<br>
+              <span class="text-muted small">Par ${tee.par_total} &bull; ${tee.total_meters}m${ratings}</span>
+            </button>`;
+          col.querySelector('button').addEventListener('click', () => selectTee(tee));
+          grid.appendChild(col);
+        });
       }
+      document.getElementById('teesSection').classList.remove('d-none');
+      document.getElementById('teesSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
-      function showSearchError(msg) {
-        const el = document.getElementById('searchError');
-        el.textContent = msg;
-        el.classList.remove('d-none');
-      }
+    function selectTee(tee) {
+      document.getElementById('fApiCourseId').value = selectedCourse.id;
+      document.getElementById('fApiTeeName').value = tee.tee_name;
+      document.getElementById('fGender').value = tee.gender;
+      document.getElementById('fHolesJson').value = JSON.stringify(tee.holes || []);
+      document.getElementById('fCourseRating').value = tee.course_rating || '';
+      document.getElementById('fSlopeRating').value = tee.slope_rating || '';
+      document.getElementById('fCourseName').value = selectedCourse.club_name;
+      document.getElementById('previewTee').value = tee.tee_name;
+      document.getElementById('previewGender').value = tee.gender === 'female' ? 'Female' : 'Male';
+      document.getElementById('previewPar').value = tee.par_total || '';
+      document.getElementById('previewCourseRating').value = tee.course_rating || '—';
+      document.getElementById('previewSlopeRating').value = tee.slope_rating || '—';
 
-      function esc(str) {
-        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      }
-
-      document.getElementById('resetBtn').addEventListener('click', () => {
-        setStep(1);
-        document.getElementById('searchInput').value = '';
-        document.getElementById('searchInput').focus();
+      const tbody = document.getElementById('previewBody');
+      tbody.innerHTML = '';
+      (tee.holes || []).slice(0, 18).forEach((h, i) => {
+        const metres = h.yardage ? Math.round(h.yardage * 0.9144) : '—';
+        const siP = h.handicap || (i + 1);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${i + 1}</td><td>${h.par}</td><td>${metres}</td><td>${siP}</td><td>${siP + 18}</td>`;
+        tbody.appendChild(tr);
       });
-    </script>
-  </body>
+
+      document.getElementById('previewSection').classList.remove('d-none');
+      document.getElementById('previewSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function setStep(step) {
+      if (step <= 1) {
+        document.getElementById('resultsSection').classList.add('d-none');
+        document.getElementById('teesSection').classList.add('d-none');
+        document.getElementById('previewSection').classList.add('d-none');
+        selectedCourse = null;
+      }
+    }
+
+    function showSearchError(msg) {
+      const el = document.getElementById('searchError');
+      el.textContent = msg;
+      el.classList.remove('d-none');
+    }
+
+    function esc(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      setStep(1);
+      document.getElementById('searchInput').value = '';
+      document.getElementById('searchInput').focus();
+    });
+  </script>
+</body>
 </html>

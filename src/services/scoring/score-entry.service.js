@@ -120,7 +120,6 @@ async function upsertHoleScore(
     if (
       normalizedBaseVersion !== null
       && (schemaSupport.hasVersion ? Number(existing.version || 1) : 1) !== normalizedBaseVersion
-      && !canMutateExisting(existing, requesterUserId, force)
     ) {
       const canonical = await getCanonicalPayload(db, { scorecardId, holeNumber, existing });
       throw new ScoreConflictError(canonical);

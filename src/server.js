@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config();
+
 const db = require('./db/knex');
 const { bootstrap } = require('./bootstrap');
 const { createApp } = require('./app');
@@ -47,7 +49,7 @@ async function start() {
   const app = createApp({ db });
 
   app.listen(port, () => {
-    console.log(`Legends app listening on http://localhost:${port}`);
+    console.log(`ForeScore listening on http://localhost:${port}`);
     checkBrevoOnStartup();
   });
 }

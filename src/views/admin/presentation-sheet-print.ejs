@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= title %></title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
+    <meta name="theme-color" content="#215463" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -430,29 +430,6 @@
               </div>
             </article>
 
-            <article class="card">
-              <h2>Sultans Of Swing (Top 2)</h2>
-              <div class="card-body">
-                <% if (!sultansTop2 || !sultansTop2.length) { %>
-                  <p class="muted">No sultans results available.</p>
-                <% } else { %>
-                  <table>
-                    <thead>
-                      <tr><th>#</th><th>Team</th><th>Aggregate</th></tr>
-                    </thead>
-                    <tbody>
-                      <% sultansTop2.forEach((row) => { %>
-                        <tr>
-                          <td><%= row.position %></td>
-                          <td><%= row.name %></td>
-                          <td><strong><%= row.aggregate %></strong></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                  </table>
-                <% } %>
-              </div>
-            </article>
           </div>
 
           <article class="card">
@@ -469,17 +446,12 @@
                     <td><%= trophies?.ambrose?.detail || '-' %></td>
                   </tr>
                   <tr>
-                    <td>Sultans of Swing</td>
-                    <td><%= trophies?.sultans?.name || '-' %></td>
-                    <td><%= trophies?.sultans?.detail || '-' %></td>
-                  </tr>
-                  <tr>
                     <td>Eclectic</td>
                     <td><%= trophies?.eclectic?.name || '-' %></td>
                     <td><%= trophies?.eclectic?.detail || '-' %></td>
                   </tr>
                   <tr>
-                    <td>Legends Champion</td>
+                    <td>Champion</td>
                     <td><%= trophies?.legendsChampion?.name || '-' %></td>
                     <td><%= trophies?.legendsChampion?.detail || '-' %></td>
                   </tr>

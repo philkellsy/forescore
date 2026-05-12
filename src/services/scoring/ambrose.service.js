@@ -14,7 +14,7 @@ async function calculateAmbroseLeaderboard(db, eventId) {
   const rows = await db('teams as t')
     .leftJoin('scorecards as s', 's.team_id', 't.id')
     .leftJoin('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-    .where({ 't.event_id': eventId, 't.competition_type': 'ambrose' })
+    .where({ 't.tour_id': eventId, 't.competition_type': 'ambrose' })
     .groupBy('t.id', 't.name')
     .select('t.id', 't.name')
     .sum({ totalGross: 'sh.gross_score' });
@@ -23,7 +23,7 @@ async function calculateAmbroseLeaderboard(db, eventId) {
   const memberRows = teamIds.length
     ? await db('team_members as tm')
         .leftJoin('player_handicaps as ph', function joinPh() {
-          this.on('ph.user_id', '=', 'tm.user_id').andOnVal('ph.event_id', '=', eventId);
+          this.on('ph.user_id', '=', 'tm.user_id').andOnVal('ph.tour_id', '=', eventId);
         })
         .whereIn('tm.team_id', teamIds)
         .select('tm.team_id', 'ph.playing_handicap')

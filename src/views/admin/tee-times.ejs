@@ -1,567 +1,470 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %> | Legends</title>
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
-    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
-    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
-    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
-  </head>
-  <body>
-    <%
-      function capacityBadgeClass(size) {
-        const n = Number(size || 0);
-        if (n >= 4) return 'text-bg-success';
-        if (n === 3) return 'text-bg-warning';
-        if (n === 2) return 'text-bg-danger';
-        if (n === 1) return 'text-bg-danger';
-        return 'text-bg-light';
-      }
-      function capacityLabel(size) {
-        const n = Number(size || 0);
-        if (n >= 4) return 'Full (4)';
-        if (n === 3) return '3-ball';
-        if (n === 2) return '2-ball';
-        if (n === 1) return 'Single';
-        return 'Empty';
-      }
-    %>
-    <%- include('../partials/nav') %>
-    <main class="container py-3 py-md-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1">Tee Times - <%= dayLabel(day) %></h1>
-          <p class="text-muted mb-0">Event <%= event.year %></p>
-        </div>
-        <a class="btn btn-outline-dark" href="/admin/events/<%= event.id %>">Back</a>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4" style="max-width:860px">
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+      <div>
+        <h1 class="h5 mb-0">Tee Times</h1>
+        <p class="text-muted small mb-0"><%= tour.label %></p>
       </div>
+      <a href="<%= tenantPath(`/admin/tours/${tour.id}`) %>" class="btn btn-sm btn-outline-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i>Back
+      </a>
+    </div>
 
-      <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
-      <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
 
-      <section class="card border-0 shadow-sm mb-3">
-        <div class="card-body d-grid gap-3">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <h2 class="h6 mb-0">Controls</h2>
-            <div class="d-flex gap-2 flex-wrap">
-              <a class="btn btn-sm btn-outline-dark" href="/admin/events/<%= event.id %>/ambrose">Day 1 Ambrose</a>
-              <% [2,3,4].forEach((d) => { %>
-                <a class="btn btn-sm <%= d === day ? 'btn-dark' : 'btn-outline-dark' %>" href="/admin/events/<%= event.id %>/tee-times?day=<%= d %>"><%= dayLabel(d) %></a>
-              <% }) %>
-            </div>
-          </div>
+    <%# Round sub-nav %>
+    <ul class="nav nav-pills mb-4 border-bottom pb-2">
+      <% allRoundNumbers.forEach((rn) => { %>
+        <li class="nav-item">
+          <a href="<%= tenantPath(`/admin/tours/${tour.id}/tee-times?round=${rn}`) %>"
+             class="nav-link <%= rn === roundNumber ? 'active' : '' %>">
+            Round <%= rn %>
+          </a>
+        </li>
+      <% }) %>
+      <% if (round && round.status !== 'draft') { %>
+        <li class="nav-item ms-auto">
+          <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/scores`) %>" class="nav-link text-muted">
+            <i class="fa-solid fa-list-ol me-1"></i>Scores
+          </a>
+        </li>
+      <% } %>
+    </ul>
 
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <p class="mb-0 text-muted">
-              Status:
-              <span class="day-status-pill <%= dayStatus.status === 'open_scoring' ? 'status-open' : 'status-draft' %>"><%= dayStatus.status %></span>
-            </p>
-            <div class="d-flex align-items-center gap-2">
-              <a class="btn btn-sm btn-outline-secondary" href="/admin/events/<%= event.id %>/tee-sheet?day=<%= day %>" target="_blank" rel="noopener noreferrer">View Tee Sheet</a>
-              <% if (noveltyEvents && noveltyEvents.length) { %>
-                <button class="btn btn-sm btn-outline-dark" type="button" data-bs-toggle="modal" data-bs-target="#noveltyResultsModal">NTP &amp; Long Drives</button>
-              <% } %>
-              <% if (dayFinalization && dayFinalization.isFinalized) { %>
-                <a class="btn btn-sm btn-outline-success" href="/admin/events/<%= event.id %>/presentation-sheet?day=<%= day %>" target="_blank" rel="noopener noreferrer">View Presentation Sheet</a>
-              <% } %>
-              <form
-                action="/admin/events/<%= event.id %>/day-status"
-                method="post"
-                class="d-flex align-items-center gap-2"
-                data-needs-open-confirm="<%= dayStatus.status === 'draft' ? '1' : '0' %>"
-                data-has-scores="<%= dayStatus.status === 'open_scoring' && Number(dayScoreCount || 0) > 0 ? '1' : '0' %>"
-              >
-              <input type="hidden" name="day" value="<%= day %>" />
-              <input type="hidden" name="returnTo" value="tee-times" />
-              <input type="hidden" name="purgeText" value="" />
-              <input type="hidden" name="openConfirmed" value="" />
-              <select name="status" class="form-select form-select-sm">
-                <option value="draft" <%= dayStatus.status === 'draft' ? 'selected' : '' %>>draft</option>
-                <option value="open_scoring" <%= dayStatus.status === 'open_scoring' ? 'selected' : '' %>>open_scoring</option>
-              </select>
-              <% if (dayStatus.status === 'open_scoring' && Number(dayScoreCount || 0) > 0) { %>
-                
-              <% } %>
-              <button class="btn btn-sm btn-outline-dark" type="submit">Update</button>
-              </form>
-              <% if (dayStatus.leaderboard_published) { %>
-                <form action="/admin/events/<%= event.id %>/day/<%= day %>/unpublish" method="post" class="m-0">
-                  <button class="btn btn-sm btn-outline-danger" type="submit">Unpublish</button>
-                </form>
-              <% } else if (dayFinalization && dayFinalization.isFinalized) { %>
-                <form action="/admin/events/<%= event.id %>/day/<%= day %>/publish" method="post" class="m-0">
-                  <button class="btn btn-sm btn-outline-success" type="submit">Publish</button>
-                </form>
-              <% } %>
-            </div>
-          </div>
-          <% if (day === 2) { %>
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border-top pt-2">
-              <p class="mb-0 text-muted"><%= dayLabel(2) %> can be generated by Finalising the <a href="/admin/events/<%= event.id %>/calcutta">Calcutta</a> draw order (defending champion inserted first).</p>
+    <%
+      const isLocked = round && round.status !== 'draft';
+      const twoBall = round && round.two_ball_enabled;
+      const twoBallLabel = round && round.two_ball_type === 'aggregate' ? 'Aggregate' : 'Best ball';
+    %>
+
+    <% if (!round) { %>
+      <div class="alert alert-warning">Round <%= roundNumber %> is not configured yet.
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}`) %>">Configure it</a> before setting up tee times.</div>
+    <% } else { %>
+
+    <% if (isLocked) { %>
+      <div class="alert alert-info mb-3">
+        <i class="fa-solid fa-lock me-1"></i>Scoring is <strong><%= round.status %></strong> — tee groups are locked.
+      </div>
+    <% } %>
+
+    <% if (tour.id === 1 && round && round.status === 'open') { %>
+      <div class="alert alert-warning py-2 d-flex justify-content-between align-items-center mb-3">
+        <span class="small"><i class="fa-solid fa-flask me-1"></i>Test environment</span>
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/seed-scores`) %>" method="post"
+              onsubmit="return confirm('Seed random scores for all players in this round?')">
+          <button class="btn btn-sm btn-warning">Seed test scores</button>
+        </form>
+      </div>
+    <% } %>
+
+    <%# Course + format strip %>
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-body py-2 d-flex flex-wrap gap-3 small text-muted">
+        <span>
+          <i class="fa-solid fa-golf-ball-tee fa-fw me-1"></i>
+          <% if (course) { %>
+            <strong class="text-body"><%= course.course_name %></strong> &mdash; <%= course.tee_name %>
+            <% if (course.slope_rating) { %>&nbsp; Slope <%= course.slope_rating %> · Rating <%= course.course_rating %> · Par <%= coursePar %><% } %>
+          <% } else { %>No course set<% } %>
+        </span>
+        <span><i class="fa-solid fa-list-check fa-fw me-1"></i><%= round.calc_type %></span>
+        <% if (twoBall) { %>
+          <span><i class="fa-solid fa-people-arrows fa-fw me-1"></i>2-ball: <%= twoBallLabel %></span>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="row g-4">
+
+      <%# ── Tee groups column ────────────────────────────────────────── %>
+      <div class="col-12 col-md-7">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Groups (<%= groups.length %>)</h2>
+          <% if (!isLocked) { %>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#generateModal">
+                <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Generate
+              </button>
+              <button class="btn btn-sm btn-legends" data-bs-toggle="modal" data-bs-target="#addGroupModal">
+                <i class="fa-solid fa-plus me-1"></i>Add group
+              </button>
             </div>
           <% } %>
-
-          <% if (day === 3) { %>
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border-top pt-2">
-              <p class="mb-0 text-muted"><%= dayLabel(3) %> Groups are created here and players added to Groups.</p>
-            </div>
-          <% } %>          
-
-          <% if (day === 4) { %>
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border-top pt-2">
-              <p class="mb-0 text-muted"><%= dayLabel(4) %> uses reverse leaderboard order (Group 1 is the bottom of the leaderboard).</p>
-              <form action="/admin/events/<%= event.id %>/tee-times/day4/generate" method="post" class="m-0">
-                <button class="btn btn-sm btn-outline-dark" type="submit" <%= dayStatus.status !== 'draft' ? 'disabled' : '' %>>Generate from Leaderboard</button>
-              </form>
-            </div>
-          <% } %>
-
-
         </div>
-      </section>
 
-      <% if (dayStatus.status === 'draft') { %>
-        <section class="card border-0 shadow-sm mb-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Create Group</h2>
-            <form action="/admin/events/<%= event.id %>/tee-times?day=<%= day %>" method="post" class="row g-2 align-items-end">
-              <div class="col-6 col-md-4">
-                <label class="form-label">Tee Time</label>
-                <input name="teeTime" type="time" class="form-control" required />
-              </div>
-              <div class="col-6 col-md-4">
-                <label class="form-label">Start Hole</label>
-                <input id="createGroupStartingHole" name="startingHole" type="number" min="1" max="18" class="form-control" value="1" required />
-              </div>
-              <div class="col-12 col-md-4 d-grid">
-                <button class="btn btn-legends" type="submit">Create</button>
-              </div>
-            </form>
-          </div>
-        </section>
-      <% } %>
+        <% if (!groups.length) { %>
+          <p class="text-muted small">No groups yet. Add one manually or use Generate.</p>
+        <% } %>
 
-      <% if (dayStatus.status === 'draft' && groups.length && unassignedPlayers.length) { %>
-        <section class="card border-0 shadow-sm mb-3">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Assign Players To Group</h2>
-            <form action="/admin/events/<%= event.id %>/tee-times/assign?day=<%= day %>" method="post">
-              <div class="row g-2 align-items-end mb-3">
-                <div class="col-12 col-md-5">
-                  <label class="form-label">Group</label>
-                  <select name="groupId" class="form-select" required>
-                    <option value="">Select group</option>
-                    <% groups.forEach((group) => { %>
-                      <% const groupAssigned = playersByGroup.get(group.id) || []; %>
-                      <option value="<%= group.id %>">Group <%= group.group_number %> · <%= group.tee_time %> · Hole <%= group.starting_hole %> · <%= groupAssigned.length %>/4</option>
-                    <% }) %>
-                  </select>
-                </div>
-                <div class="col-12 col-md-7 d-grid d-md-flex justify-content-md-end">
-                  <button class="btn btn-legends" type="submit">Add Selected Players</button>
-                </div>
-              </div>
-
-              <div class="ambrose-player-picker">
-                <div class="row g-3">
-                  <% unassignedPlayers.forEach((p) => { %>
-                    <div class="col-12 col-md-6 col-xl-4">
-                      <label class="ambrose-player-card d-flex align-items-center justify-content-between gap-2">
-                        <span class="d-flex align-items-center gap-2">
-                          <input class="form-check-input mt-0" type="checkbox" name="userIds" value="<%= p.id %>" />
-                          <span>
-                            <%= p.first_name %> <%= p.last_name %> (<%= p.handicap_display %>)
-                            <% if (Number(p.is_previous_year_winner) === 1) { %>
-                              <i class="fa-solid fa-medal text-warning" title="Defending Champion" aria-label="Defending Champion"></i>
-                            <% } %>
-                          </span>
-                        </span>
-                        <% if (Number(p.is_previous_winner) === 1) { %><%- include('../partials/winner-badge', { showText: false, className: '' }) %><% } %>
-                      </label>
-                    </div>
-                  <% }) %>
-                </div>
-                <% if (!unassignedPlayers.length) { %>
-                  <p class="small text-muted mb-0">All players are already assigned to groups.</p>
-                <% } %>
-              </div>
-            </form>
-          </div>
-        </section>
-      <% } %>
-
-      <% groups.forEach((group) => { %>
-        <% const assigned = playersByGroup.get(group.id) || []; %>
-        <section class="card border-0 shadow-sm mb-3">
-          <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-              <div>
-                <h3 class="h6 mb-1">Group <%= group.display_group_label %></h3>
-                <p class="small text-muted mb-0"><%= group.tee_time %> · Hole <%= group.starting_hole %></p>
-              </div>
-              <div class="d-flex align-items-center gap-2">
-                <span class="badge text-bg-light border"><%= assigned.length %> players</span>
-                <span class="badge <%= capacityBadgeClass(assigned.length) %>"><%= capacityLabel(assigned.length) %></span>
-                <% if (dayStatus.status === 'draft') { %>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-dark"
-                    data-edit-group-btn
-                    data-group-id="<%= group.id %>"
-                    data-group-label="<%= group.display_group_label %>"
-                    data-tee-time="<%= String(group.tee_time || '').slice(0, 5) %>"
-                    data-starting-hole="<%= group.starting_hole %>"
-                  >
-                    Edit
+        <% groups.forEach((g) => { %>
+          <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body py-2 px-3 border-bottom d-flex justify-content-between align-items-center gap-2">
+              <span class="fw-semibold small">
+                Group <%= g.group_number %>
+                <span class="text-muted fw-normal">&nbsp;·&nbsp; <%= g.tee_time %> &nbsp;·&nbsp; Hole <%= g.starting_hole %></span>
+              </span>
+              <% if (!isLocked) { %>
+                <div class="d-flex gap-1 flex-shrink-0">
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                    data-bs-toggle="modal" data-bs-target="#editGroupModal"
+                    data-group-id="<%= g.id %>"
+                    data-tee-time="<%= g.tee_time %>"
+                    data-starting-hole="<%= g.starting_hole %>"
+                    data-tee-location="<%= g.tee_location || '' %>">
+                    <i class="fa-solid fa-pen-to-square fa-sm"></i>
                   </button>
-                <% } %>
-                <form action="/admin/events/<%= event.id %>/tee-times/<%= group.id %>/delete?day=<%= day %>" method="post" class="m-0">
-                  <button class="btn btn-sm btn-outline-danger" type="submit" <%= dayStatus.status !== 'draft' ? 'disabled' : '' %>>Delete</button>
-                </form>
-              </div>
+                  <form action="<%= tenantPath(`/admin/tours/${tour.id}/tee-times/${g.id}/delete`) %>" method="post"
+                        onsubmit="return confirm('Delete this group and unassign all players?')">
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2">
+                      <i class="fa-solid fa-trash fa-sm"></i>
+                    </button>
+                  </form>
+                </div>
+              <% } %>
             </div>
-            <% if (assigned.length) { %>
-              <div class="row g-2 mb-2">
-                <% assigned.forEach((a) => { %>
-                  <% const full = eventPlayers.find((p) => p.id === a.id) || a; %>
-                  <% const summary = individualSummaries && individualSummaries.get ? individualSummaries.get(Number(a.id)) : null; %>
-                  <div class="col-12 col-md-6 col-lg-4 col-xl-3">
-                    <div class="border rounded p-2 bg-white">
-                      <div class="d-flex justify-content-between align-items-start gap-2">
-                        <div>
-                          <div class="fw-semibold">
-                            <%= full.first_name %> <%= full.last_name %>
-                            <% if (full.handicap_display) { %>(<%= full.handicap_display %>)<% } %>
-                            <% if (Number(full.is_previous_year_winner) === 1) { %>
-                              <i class="fa-solid fa-medal text-warning" title="Defending Champion" aria-label="Defending Champion"></i>
-                            <% } %>
-                            <% if (Number(full.is_previous_winner) === 1) { %>🏆<% } %>
-                          </div>
-                        </div>
-                        <% if (dayStatus.status === 'draft') { %>
-                          <form action="/admin/events/<%= event.id %>/tee-times/<%= group.id %>/players/<%= a.id %>/remove?day=<%= day %>" method="post" class="m-0">
-                            <button class="btn btn-sm btn-link text-danger p-0 border-0 lh-1" type="submit" title="Remove from group" aria-label="Remove from group">
-                              <i class="fa-solid fa-xmark"></i>
-                            </button>
-                          </form>
+            <ul class="list-group list-group-flush">
+              <% if (!g.players.length) { %>
+                <li class="list-group-item text-muted small py-1 px-3">No players assigned</li>
+              <% } %>
+              <% g.players.forEach((p, idx) => {
+                const pData = players.find((pl) => pl.user_id === Number(p.user_id));
+                const pairBadge = twoBall ? (idx < 2 ? 'A' : 'B') : null;
+              %>
+                <li class="list-group-item py-2 px-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span class="small">
+                      <% if (pairBadge) { %>
+                        <span class="badge text-bg-secondary me-1"><%= pairBadge %></span>
+                      <% } %>
+                      <%= p.first_name %> <%= p.last_name %>
+                      <% if (pData) { %>
+                        <% if (pData.courseHandicap !== null) { %>
+                          <span class="badge text-bg-light border ms-1">Hcp <%= pData.courseHandicap %></span>
+                        <% } else if (pData.effectiveHandicapIndex !== null) { %>
+                          <span class="badge text-bg-light border ms-1">Idx <%= pData.effectiveHandicapIndex %></span>
                         <% } %>
-                      </div>
-
-                      <% if (dayFinalization && dayFinalization.isFinalized && summary) { %>
-                        <div class="score-summary-chip border rounded p-2 bg-light mt-2">
-                          <div>
-                            <div class="small text-muted">Score</div>
-                            <div class="fw-semibold">
-                              <%= String(dayStatus.calc_type || '') === 'stableford' ? `${Number(summary.stablefordTotal || 0)} pts` : `${Number(summary.grossTotal || 0)} gross` %>
-                            </div>
-                          </div>
-                          <div class="score-summary-actions">
-                            <a
-                              class="btn btn-sm btn-outline-secondary"
-                              href="/admin/events/<%= event.id %>/scorecards/individual/<%= summary.scorecardId %>?returnTo=<%= encodeURIComponent(`/admin/events/${event.id}/tee-times?day=${day}`) %>"
-                              title="View scorecard"
-                              aria-label="View scorecard"
-                            >
-                              <i class="fa-solid fa-eye"></i>
-                            </a>
-                            <% if (!dayStatus.leaderboard_published) { %>
-                              <a
-                                class="btn btn-sm btn-outline-dark"
-                                href="/admin/events/<%= event.id %>/scorecards/individual/<%= summary.scorecardId %>?returnTo=<%= encodeURIComponent(`/admin/events/${event.id}/tee-times?day=${day}`) %>#adjustments"
-                                title="Adjust scorecard"
-                                aria-label="Adjust scorecard"
-                              >
-                                <i class="fa-solid fa-pen"></i>
-                              </a>
-                            <% } %>
-                          </div>
-                        </div>
+                        <% if (pData.dayHandicapOverride !== null) { %>
+                          <span class="badge text-bg-warning ms-1" title="Round handicap override">Override</span>
+                        <% } %>
+                        <% if (!isLocked) { %>
+                          <button class="btn btn-link btn-sm py-0 px-1 text-muted"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#hcpEdit<%= p.user_id %>"
+                            aria-expanded="false"
+                            title="Edit round handicap">
+                            <i class="fa-solid fa-pen fa-xs"></i>
+                          </button>
+                        <% } %>
+                      <% } %>
+                    </span>
+                    <% if (!isLocked) { %>
+                      <form action="<%= tenantPath(`/admin/tours/${tour.id}/tee-times/${g.id}/players/${p.user_id}/remove`) %>" method="post">
+                        <button class="btn btn-sm btn-outline-danger border-0 py-0 px-1">
+                          <i class="fa-solid fa-xmark fa-sm"></i>
+                        </button>
+                      </form>
+                    <% } %>
+                  </div>
+                  <% if (!isLocked && pData) { %>
+                    <div class="collapse mt-1" id="hcpEdit<%= p.user_id %>">
+                      <form action="<%= tenantPath(`/admin/tours/${tour.id}/players/${p.user_id}/round-handicap`) %>" method="post"
+                            class="d-flex gap-1 align-items-center flex-wrap mb-1">
+                        <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+                        <input type="number" name="handicapIndex" class="form-control form-control-sm"
+                          style="width:90px" step="0.1" min="-10" max="54"
+                          value="<%= pData.dayHandicapOverride !== null ? pData.dayHandicapOverride : (pData.eventHandicapIndex !== null ? pData.eventHandicapIndex : '') %>"
+                          placeholder="Index" />
+                        <button class="btn btn-sm btn-legends">Save</button>
+                      </form>
+                      <% if (pData.dayHandicapOverride !== null) { %>
+                        <form action="<%= tenantPath(`/admin/tours/${tour.id}/players/${p.user_id}/round-handicap`) %>" method="post">
+                          <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+                          <input type="hidden" name="handicapIndex" value="" />
+                          <button class="btn btn-sm btn-outline-secondary">Remove override</button>
+                        </form>
                       <% } %>
                     </div>
-                  </div>
-                <% }) %>
-              </div>
-            <% } else { %>
-              <p class="small text-muted mb-2">No players assigned yet.</p>
-            <% } %>
+                  <% } %>
+                </li>
+              <% }) %>
+            </ul>
           </div>
-        </section>
-      <% }) %>
+        <% }) %>
+      </div>
 
-      <% if (!groups.length) { %>
-        <div class="alert alert-info mb-0">No groups created for <%= dayLabel(day) %>.</div>
-      <% } %>
-    </main>
+      <%# ── Players column (unassigned + handicap overrides) ──────── %>
+      <div class="col-12 col-md-5">
+        <% const unassigned = players.filter((p) => !p.assigned); %>
+
+        <h2 class="h6 mb-2">Unassigned (<%= unassigned.length %>)</h2>
+        <% if (!unassigned.length) { %>
+          <p class="text-muted small">All players are in a group.</p>
+        <% } %>
+        <% unassigned.forEach((p) => { %>
+          <div class="card border-0 shadow-sm mb-2">
+            <div class="card-body py-2 px-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="small fw-semibold"><%= p.name %></span>
+                <% const availableGroups = groups.filter((g) => g.players.length < 4); %>
+                <% if (!isLocked && availableGroups.length) { %>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                    data-bs-toggle="modal" data-bs-target="#assignModal"
+                    data-user-id="<%= p.user_id %>"
+                    data-player-name="<%= p.name %>">
+                    Assign
+                  </button>
+                <% } else if (!isLocked && groups.length) { %>
+                  <span class="text-muted small">All full</span>
+                <% } %>
+              </div>
+              <%- include('./partials/player-hcp-row', { p, tourId: tour.id, roundNumber, isLocked }) %>
+            </div>
+          </div>
+        <% }) %>
+
+      </div>
+    </div>
+
     <% if (noveltyEvents && noveltyEvents.length) { %>
-      <div class="modal fade" id="noveltyResultsModal" tabindex="-1" aria-labelledby="noveltyResultsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
-          <div class="modal-content">
-            <form action="/admin/events/<%= event.id %>/day/<%= day %>/novelties/results" method="post">
-              <input type="hidden" name="returnTo" value="tee-times" />
-              <div class="modal-header">
-                <h2 class="modal-title fs-5" id="noveltyResultsModalLabel"><%= dayLabel(day) %> · NTP &amp; Long Drives</h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-              </div>
-              <div class="modal-body">
-                <p class="small text-muted">Every novelty requires a selection. Use <strong>No Winner</strong> if applicable.</p>
-                <div class="d-grid gap-2">
-                  <% noveltyEvents.forEach((novelty) => { %>
-                    <% const selectedValue = novelty.isNoWinner ? 'none' : (novelty.winnerTeamId ? `team:${novelty.winnerTeamId}` : (novelty.winnerUserId ? `user:${novelty.winnerUserId}` : '')); %>
-                    <div class="border rounded p-2">
-                      <div class="small text-muted">Hole <%= novelty.holeNumber %> · <%= novelty.noveltyType %></div>
-                      <label class="form-label mb-1 fw-semibold"><%= novelty.label %></label>
-                      <select class="form-select form-select-sm" name="result_<%= novelty.id %>" required>
-                        <option value="">Select winner</option>
-                        <option value="none" <%= selectedValue === 'none' ? 'selected' : '' %>>No Winner</option>
-                        <% noveltyOptions.forEach((opt) => { %>
-                          <option value="<%= opt.value %>" <%= selectedValue === opt.value ? 'selected' : '' %>><%= opt.label %></option>
-                        <% }) %>
-                      </select>
-                    </div>
-                  <% }) %>
-                </div>
-              </div>
-              <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-legends">Save Results</button>
-              </div>
-            </form>
-          </div>
-        </div>
+    <div class="card border-0 shadow-sm mt-4">
+      <div class="card-body border-bottom">
+        <h2 class="h6 mb-0"><i class="fa-solid fa-flag fa-fw me-1 text-muted"></i>Novelty Results</h2>
       </div>
-    <% } %>
-    <% if (dayStatus.status === 'draft') { %>
-      <div class="modal fade" id="editGroupModal" tabindex="-1" aria-labelledby="editGroupModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <form id="editGroupForm" method="post">
-              <div class="modal-header">
-                <h2 class="modal-title fs-5" id="editGroupModalLabel">Edit Group</h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-              </div>
-              <div class="modal-body">
-                <p class="small text-muted mb-3" id="editGroupMeta"></p>
-                <div class="row g-2">
-                  <div class="col-12 col-md-6">
-                    <label class="form-label">Tee Time</label>
-                    <input id="editGroupTeeTime" name="teeTime" type="time" class="form-control" required />
-                  </div>
-                  <div class="col-12 col-md-6">
-                    <label class="form-label">Start Hole</label>
-                    <input id="editGroupStartingHole" name="startingHole" type="number" min="1" max="18" class="form-control" required />
-                  </div>
-                  <div class="col-12">
-                    <div class="form-check mt-1">
-                      <input class="form-check-input" type="checkbox" value="1" id="editGroupCascade" name="cascadeAfterSameTee" />
-                      <label class="form-check-label small" for="editGroupCascade">
-                        Cascade tee-time change to later groups on the same tee
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-legends">Save Changes</button>
-              </div>
-            </form>
-          </div>
-        </div>
+      <div class="card-body">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/novelties/results`) %>" method="post">
+          <% noveltyEvents.forEach((ne) => {
+            const result = noveltyResultsByEventId && noveltyResultsByEventId[ne.id];
+            const currentWinnerId = result && !result.is_no_winner ? result.winner_user_id : null;
+          %>
+            <div class="mb-3">
+              <label class="form-label small fw-semibold">
+                <%= ne.label %>
+                <span class="text-muted fw-normal ms-1">Hole <%= ne.hole_number %></span>
+              </label>
+              <select name="winner_<%= ne.id %>" class="form-select form-select-sm">
+                <option value="">— Not yet recorded —</option>
+                <option value="no_winner" <%= result && result.is_no_winner ? 'selected' : '' %>>No winner</option>
+                <% players.forEach((p) => { %>
+                  <option value="<%= p.user_id %>" <%= Number(currentWinnerId) === p.user_id ? 'selected' : '' %>><%= p.name %></option>
+                <% }) %>
+              </select>
+            </div>
+          <% }) %>
+          <button type="submit" class="btn btn-sm btn-legends">Save results</button>
+        </form>
       </div>
+    </div>
     <% } %>
-    <% if (dayStatus.status === 'draft') { %>
-      <div class="modal fade" id="confirmOpenScoringModal" tabindex="-1" aria-labelledby="confirmOpenScoringModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h2 class="modal-title fs-5" id="confirmOpenScoringModalLabel">Open Scoring</h2>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <% } %>
+  </main>
+
+  <%# ── Modals ───────────────────────────────────────────────────────── %>
+
+  <%# Add group %>
+  <div class="modal fade" id="addGroupModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/tee-times`) %>" method="post">
+          <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+          <div class="modal-header">
+            <h5 class="modal-title h6">Add Group</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label small">Tee time</label>
+              <input type="time" name="teeTime" class="form-control form-control-sm" value="08:00" required />
             </div>
-            <div class="modal-body">
-              <p class="mb-0">This will lock the day’s groups. Are you sure you are ready to Open Scoring for this day?</p>
+            <div class="mb-3">
+              <label class="form-label small">Starting hole</label>
+              <select name="startingHole" class="form-select form-select-sm">
+                <% for (let h = 1; h <= 18; h++) { %>
+                  <option value="<%= h %>" <%= h === 1 ? 'selected' : '' %>><%= h %></option>
+                <% } %>
+              </select>
             </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-              <button id="openScoringConfirmSubmitBtn" type="button" class="btn btn-success">Open Scoring</button>
+            <div>
+              <label class="form-label small">Location label <span class="text-muted">(optional, e.g. 1A)</span></label>
+              <input type="text" name="teeLocation" class="form-control form-control-sm" />
             </div>
           </div>
-        </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-legends">Add</button>
+          </div>
+        </form>
       </div>
-    <% } %>
-    <% if (dayStatus.status === 'open_scoring' && Number(dayScoreCount || 0) > 0) { %>
-      <div class="modal fade" id="confirmPurgeModal" tabindex="-1" aria-labelledby="confirmPurgeModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h2 class="modal-title fs-5" id="confirmPurgeModalLabel">Confirm Score Purge</h2>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+  </div>
+
+  <%# Edit group %>
+  <div class="modal fade" id="editGroupModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <form id="editGroupForm" method="post">
+          <div class="modal-header">
+            <h5 class="modal-title h6">Edit Group</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label small">Tee time</label>
+              <input type="time" name="teeTime" id="editTeeTime" class="form-control form-control-sm" required />
             </div>
-            <div class="modal-body">
-              <p class="mb-2 text-danger">This will delete <strong><%= Number(dayScoreCount || 0) %></strong> recorded scores for this day.</p>
-              <p class="mb-2">Type <code>PURGE</code> to continue.</p>
-              <input id="purgeConfirmInput" type="text" class="form-control" autocomplete="off" />
+            <div class="mb-3">
+              <label class="form-label small">Starting hole</label>
+              <select name="startingHole" id="editStartingHole" class="form-select form-select-sm">
+                <% for (let h = 1; h <= 18; h++) { %>
+                  <option value="<%= h %>"><%= h %></option>
+                <% } %>
+              </select>
             </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-              <button id="purgeConfirmSubmitBtn" type="button" class="btn btn-danger" disabled>Purge And Revert</button>
+            <div>
+              <label class="form-label small">Location label</label>
+              <input type="text" name="teeLocation" id="editTeeLocation" class="form-control form-control-sm" />
             </div>
           </div>
-        </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-legends">Save</button>
+          </div>
+        </form>
       </div>
-    <% } %>
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-      (() => {
-        const modalEl = document.getElementById('editGroupModal');
-        const form = document.getElementById('editGroupForm');
-        const metaEl = document.getElementById('editGroupMeta');
-        const teeTimeEl = document.getElementById('editGroupTeeTime');
-        const startingHoleEl = document.getElementById('editGroupStartingHole');
-        const cascadeEl = document.getElementById('editGroupCascade');
-        if (!modalEl || !form || !teeTimeEl || !startingHoleEl || !window.bootstrap) return;
+    </div>
+  </div>
 
-        const modal = new bootstrap.Modal(modalEl);
+  <%# Assign player to group %>
+  <div class="modal fade" id="assignModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/tee-times/assign`) %>" method="post">
+          <div class="modal-header">
+            <h5 class="modal-title h6">Assign <span id="assignPlayerName"></span></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="userIds" id="assignUserId" />
+            <label class="form-label small">Group</label>
+            <select name="groupId" class="form-select form-select-sm">
+              <% groups.filter((g) => g.players.length < 4).forEach((g) => { %>
+                <option value="<%= g.id %>">
+                  Group <%= g.group_number %> — <%= g.tee_time %>, Hole <%= g.starting_hole %> (<%= g.players.length %>/4)
+                </option>
+              <% }) %>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-legends">Assign</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
-        document.querySelectorAll('[data-edit-group-btn]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const groupId = btn.getAttribute('data-group-id');
-            const groupLabel = btn.getAttribute('data-group-label') || '';
-            const teeTime = btn.getAttribute('data-tee-time') || '';
-            const startingHole = btn.getAttribute('data-starting-hole') || '1';
+  <%# Generate groups %>
+  <% if (round && !isLocked) { %>
+  <div class="modal fade" id="generateModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/tee-times/generate`) %>" method="post"
+          onsubmit="return !<%= groups.length %> || confirm('This will replace all existing groups for Round <%= roundNumber %>. Continue?')">
+          <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+          <div class="modal-header">
+            <h5 class="modal-title h6">Generate Groups — Round <%= roundNumber %></h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-4">
+              <label class="form-label fw-semibold">Strategy</label>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" name="strategy" id="strategyDistribute" value="distribute" checked />
+                <label class="form-check-label" for="strategyDistribute">
+                  <strong>Mix up partners</strong>
+                  <span class="d-block small text-muted">Minimise repeat playing partners from all previous days</span>
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="strategy" id="strategyLeaderboard" value="leaderboard" />
+                <label class="form-check-label" for="strategyLeaderboard">
+                  <strong>Reverse leaderboard</strong>
+                  <span class="d-block small text-muted">Lowest-placed players go out first, leaders go out last</span>
+                </label>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-4">
+                <label class="form-label small">First tee time</label>
+                <input type="time" name="startTime" class="form-control form-control-sm" value="08:00" />
+              </div>
+              <div class="col-4">
+                <label class="form-label small">Starting hole</label>
+                <select name="startingHole" class="form-select form-select-sm">
+                  <% for (let h = 1; h <= 18; h++) { %>
+                    <option value="<%= h %>" <%= h === 1 ? 'selected' : '' %>><%= h %></option>
+                  <% } %>
+                </select>
+              </div>
+              <div class="col-4">
+                <label class="form-label small">Gap (mins)</label>
+                <input type="number" name="gapMinutes" class="form-control form-control-sm" value="10" min="5" max="60" />
+              </div>
+            </div>
+            <%
+              const genSizes = groupSizes(players.length);
+              const genSummary = genSizes.join(' + ') || '—';
+            %>
+            <p class="text-muted small mt-3 mb-0">
+              <%= players.length %> players → <%= genSizes.length %> groups (<%= genSummary %>)
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-legends">Generate</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <% } %>
 
-            form.action = `/admin/events/<%= event.id %>/tee-times/${encodeURIComponent(groupId)}/update?day=<%= day %>`;
-            metaEl.textContent = groupLabel ? `Group ${groupLabel}` : '';
-            teeTimeEl.value = teeTime;
-            startingHoleEl.value = startingHole;
-            if (cascadeEl) cascadeEl.checked = false;
-            modal.show();
-          });
-        });
-      })();
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script>
+    document.getElementById('editGroupModal').addEventListener('show.bs.modal', function (e) {
+      const btn = e.relatedTarget;
+      const form = document.getElementById('editGroupForm');
+      form.action = '<%= tenantPath(`/admin/tours/${tour.id}/tee-times/`) %>' + btn.dataset.groupId + '/update';
+      document.getElementById('editTeeTime').value = btn.dataset.teeTime;
+      document.getElementById('editStartingHole').value = btn.dataset.startingHole;
+      document.getElementById('editTeeLocation').value = btn.dataset.teeLocation || '';
+    });
 
-      (() => {
-        const form = document.querySelector('form[action="/admin/events/<%= event.id %>/day-status"]');
-        if (!form) return;
-        const statusSelect = form.querySelector('select[name="status"]');
-        const purgeTextInput = form.querySelector('input[name="purgeText"]');
-        const openConfirmedInput = form.querySelector('input[name="openConfirmed"]');
-        const needsOpenConfirm = String(form.dataset.needsOpenConfirm || '') === '1';
-        const hasScores = String(form.dataset.hasScores || '') === '1';
-        if (!statusSelect || !purgeTextInput || !openConfirmedInput) return;
-
-        let pendingOpenSubmit = false;
-        const openModalEl = document.getElementById('confirmOpenScoringModal');
-        const openSubmitBtn = document.getElementById('openScoringConfirmSubmitBtn');
-        let openModal = null;
-        const getOpenModal = () => {
-          if (!window.bootstrap || !openModalEl) return null;
-          if (!openModal) openModal = new bootstrap.Modal(openModalEl);
-          return openModal;
-        };
-
-        openSubmitBtn?.addEventListener('click', () => {
-          openConfirmedInput.value = 'yes';
-          pendingOpenSubmit = true;
-          const m = getOpenModal();
-          if (m) m.hide();
-          else form.submit();
-        });
-        openModalEl?.addEventListener('hidden.bs.modal', () => {
-          if (pendingOpenSubmit) {
-            pendingOpenSubmit = false;
-            form.submit();
-          } else {
-            openConfirmedInput.value = '';
-            statusSelect.value = 'draft';
-          }
-        });
-
-        if (hasScores) {
-          const purgeModalEl = document.getElementById('confirmPurgeModal');
-          if (!purgeModalEl) return;
-          let purgeModal = null;
-          const getPurgeModal = () => {
-            if (!window.bootstrap) return null;
-            if (!purgeModal) purgeModal = new bootstrap.Modal(purgeModalEl);
-            return purgeModal;
-          };
-          const purgeInput = document.getElementById('purgeConfirmInput');
-          const purgeSubmitBtn = document.getElementById('purgeConfirmSubmitBtn');
-          let pendingPurgeSubmit = false;
-
-          const syncState = () => {
-            const ok = String(purgeInput?.value || '').trim().toUpperCase() === 'PURGE';
-            if (purgeSubmitBtn) purgeSubmitBtn.disabled = !ok;
-          };
-
-          purgeInput?.addEventListener('input', syncState);
-          purgeModalEl.addEventListener('shown.bs.modal', () => {
-            if (purgeInput) purgeInput.value = '';
-            if (purgeTextInput) purgeTextInput.value = '';
-            syncState();
-            purgeInput?.focus();
-          });
-
-          purgeSubmitBtn?.addEventListener('click', () => {
-            const value = String(purgeInput?.value || '').trim().toUpperCase();
-            if (value !== 'PURGE') return;
-            purgeTextInput.value = 'PURGE';
-            pendingPurgeSubmit = true;
-            if (purgeSubmitBtn) {
-              purgeSubmitBtn.disabled = true;
-              purgeSubmitBtn.textContent = 'Purging...';
-            }
-            const m = getPurgeModal();
-            if (m) m.hide();
-          });
-
-          purgeModalEl.addEventListener('hidden.bs.modal', () => {
-            if (pendingPurgeSubmit) {
-              pendingPurgeSubmit = false;
-              if (purgeSubmitBtn) {
-                purgeSubmitBtn.disabled = true;
-                purgeSubmitBtn.textContent = 'Purging...';
-              }
-              form.submit();
-            } else {
-              if (purgeSubmitBtn) purgeSubmitBtn.textContent = 'Purge And Revert';
-              statusSelect.value = 'open_scoring';
-            }
-          });
-        }
-
-        form.addEventListener('submit', (event) => {
-          const selected = String(statusSelect.value || '');
-          if (needsOpenConfirm && selected === 'open_scoring') {
-            const alreadyConfirmed = String(openConfirmedInput.value || '').trim() === 'yes';
-            if (!alreadyConfirmed) {
-              event.preventDefault();
-              const m = getOpenModal();
-              if (m) m.show();
-            }
-            return;
-          }
-          if (selected === 'draft' && hasScores) {
-            const alreadyConfirmed = String(purgeTextInput.value || '').trim().toUpperCase() === 'PURGE';
-            if (!alreadyConfirmed) {
-              event.preventDefault();
-              const m = window.bootstrap && document.getElementById('confirmPurgeModal')
-                ? new bootstrap.Modal(document.getElementById('confirmPurgeModal'))
-                : null;
-              if (m) m.show();
-            }
-          } else {
-            purgeTextInput.value = '';
-          }
-        });
-      })();
+    const assignModal = document.getElementById('assignModal');
+    if (assignModal) {
+      assignModal.addEventListener('show.bs.modal', function (e) {
+        const btn = e.relatedTarget;
+        document.getElementById('assignPlayerName').textContent = btn.dataset.playerName;
+        document.getElementById('assignUserId').value = btn.dataset.userId;
       });
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-  </body>
+    }
+  </script>
+</body>
 </html>

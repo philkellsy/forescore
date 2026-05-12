@@ -1,8 +1,8 @@
 'use strict';
 
-if (!window.__LEGENDS_APP_INIT__) {
-  window.__LEGENDS_APP_INIT__ = true;
-  const AUTH_MARKER_COOKIE = 'legends_auth=1';
+if (!window.__FORESCORE_APP_INIT__) {
+  window.__FORESCORE_APP_INIT__ = true;
+  const AUTH_MARKER_COOKIE = 'forescore_auth=1';
   const AUTH_MARKER_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
   if ('serviceWorker' in navigator) {
@@ -12,10 +12,10 @@ if (!window.__LEGENDS_APP_INIT__) {
   }
 
   function ensureToastContainer() {
-    let container = document.getElementById('legendsToastContainer');
+    let container = document.getElementById('fsToastContainer');
     if (container) return container;
     container = document.createElement('div');
-    container.id = 'legendsToastContainer';
+    container.id = 'fsToastContainer';
     container.className = 'legends-toast-container';
     document.body.appendChild(container);
     return container;

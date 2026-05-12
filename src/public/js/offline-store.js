@@ -1,7 +1,7 @@
 'use strict';
 
 (function initOfflineStore(global) {
-  const DB_NAME = 'legends-offline-scoring';
+  const DB_NAME = 'forescore-offline-scoring';
   const DB_VERSION = 1;
   const SNAPSHOT_STORE = 'scorecard_snapshots';
   const OP_STORE = 'score_ops_queue';
@@ -146,6 +146,6 @@
     };
   }
 
-  global.LegendsOfflineStore = { create };
+  global.ForeScoreOfflineStore = { create };
 })(window);
 

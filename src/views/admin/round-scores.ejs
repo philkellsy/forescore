@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4" style="max-width:720px">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h1 class="h5 mb-0">Round Scores</h1>
+        <p class="text-muted small mb-0"><%= tour.label %></p>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/results`) %>" class="btn btn-sm btn-outline-primary">
+          <i class="fa-solid fa-chart-bar me-1"></i>Results
+        </a>
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}`) %>" class="btn btn-sm btn-outline-secondary">
+          <i class="fa-solid fa-arrow-left me-1"></i>Back
+        </a>
+      </div>
+    </div>
+
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+    <%# Round sub-nav %>
+    <ul class="nav nav-pills mb-4 border-bottom pb-2">
+      <% allRoundNumbers.forEach((rn) => { %>
+        <li class="nav-item">
+          <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${rn}/scores`) %>"
+             class="nav-link <%= rn === roundNumber ? 'active' : '' %>">
+            Round <%= rn %>
+          </a>
+        </li>
+      <% }) %>
+    </ul>
+
+    <% if (!round || round.status === 'draft') { %>
+      <div class="alert alert-warning">Round <%= roundNumber %> hasn't been opened yet — no scores to show.</div>
+    <% } else if (!rows.length) { %>
+      <div class="alert alert-info">No scorecards found for Round <%= roundNumber %>.</div>
+    <% } else { %>
+      <%
+        const submitted = rows.filter((r) => r.status === 'submitted').length;
+        const total = rows.length;
+        const isStableford = !round || round.calc_type === 'stableford';
+      %>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <p class="text-muted small mb-0">
+          <%= submitted %> of <%= total %> submitted
+          <% if (round) { %> &nbsp;·&nbsp; <%= round.status %><% } %>
+        </p>
+      </div>
+
+      <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Pos</th>
+                <th>Player</th>
+                <th class="text-end"><%= isStableford ? 'Pts' : 'Gross' %></th>
+                <% if (isStableford) { %><th class="text-end text-muted">Gross</th><% } %>
+                <th class="text-center">Holes</th>
+                <th class="text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% rows.forEach((row, i) => { %>
+                <tr>
+                  <td class="text-muted"><%= row.holesEntered > 0 ? i + 1 : '—' %></td>
+                  <td>
+                    <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/scores/${row.userId}`) %>" class="text-body text-decoration-none">
+                      <%= row.name %>
+                    </a>
+                  </td>
+                  <td class="text-end">
+                    <% if (row.holesEntered > 0) { %>
+                      <strong><a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/scores/${row.userId}`) %>" class="text-body text-decoration-none">
+                        <%= isStableford ? row.stableford : row.gross %>
+                      </a></strong>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                  <% if (isStableford) { %>
+                    <td class="text-end text-muted small"><%= row.holesEntered > 0 ? row.gross : '—' %></td>
+                  <% } %>
+                  <td class="text-center text-muted small"><%= row.holesEntered %>/18</td>
+                  <td class="text-center">
+                    <% if (row.status === 'submitted') { %>
+                      <span class="badge text-bg-success">Submitted</span>
+                    <% } else { %>
+                      <span class="badge text-bg-secondary">In progress</span>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    <% } %>
+
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+</body>
+</html>

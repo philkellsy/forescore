@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4">
+
+    <%# Header %>
+    <div class="d-flex justify-content-between align-items-start mb-3 gap-2 flex-wrap">
+      <div>
+        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+          <h1 class="h4 mb-0"><%= tour.label %></h1>
+          <% if (tour.status === 'active') { %>
+            <span class="badge text-bg-success">Active</span>
+          <% } else if (tour.status === 'completed') { %>
+            <span class="badge text-bg-dark">Completed</span>
+          <% } else { %>
+            <span class="badge text-bg-secondary">Draft</span>
+          <% } %>
+          <% if (tour.gender === 'womens') { %>
+            <span class="badge text-bg-light border">Women's</span>
+          <% } else if (tour.gender === 'mixed') { %>
+            <span class="badge text-bg-light border">Mixed</span>
+          <% } %>
+        </div>
+        <p class="text-muted small mb-0"><%= tour.location %></p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="<%= tenantPath('/admin?list=1') %>" class="btn btn-sm btn-outline-secondary">
+          <i class="fa-solid fa-arrow-left me-1"></i>Tours
+        </a>
+        <% if (tour.status === 'draft') { %>
+          <% if (tour.is_paid) { %>
+            <form action="<%= tenantPath(`/admin/tours/${tour.id}/activate`) %>" method="post">
+              <button class="btn btn-sm btn-outline-success" type="submit">Set Active</button>
+            </form>
+          <% } else { %>
+            <span class="badge text-bg-warning text-dark align-self-center" title="A super admin must approve this tour before it can be activated">
+              <i class="fa-solid fa-clock me-1"></i>Awaiting Approval
+            </span>
+          <% } %>
+        <% } else if (tour.status === 'active') { %>
+          <form action="<%= tenantPath(`/admin/tours/${tour.id}/complete`) %>" method="post"
+            onsubmit="return confirm('Mark this tour as completed? Scoring will be locked.')">
+            <button class="btn btn-sm btn-outline-dark" type="submit">Mark Completed</button>
+          </form>
+        <% } %>
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/setup`) %>" class="btn btn-sm btn-outline-dark">
+          <i class="fa-solid fa-sliders me-1"></i>Setup
+        </a>
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/tee-times`) %>" class="btn btn-sm btn-outline-dark">
+          <i class="fa-solid fa-clock me-1"></i>Tee Times
+        </a>
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/itinerary`) %>" class="btn btn-sm btn-outline-dark">
+          <i class="fa-solid fa-calendar-days me-1"></i>Itinerary
+        </a>
+        <% if (tour.status !== 'completed') { %>
+          <button type="button" class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#editTourModal">
+            <i class="fa-solid fa-pen me-1"></i>Edit
+          </button>
+        <% } %>
+        <a href="<%= tenantPath('/admin') %>" class="btn btn-sm btn-outline-secondary">
+          <i class="fa-solid fa-arrow-left me-1"></i>Back
+        </a>
+      </div>
+    </div>
+
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+    <%# Rounds %>
+    <section class="card border-0 shadow-sm mb-3">
+      <div class="card-body border-bottom d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0">
+          Rounds
+          <span class="badge text-bg-light border ms-1"><%= rounds.length %> rounds</span>
+        </h2>
+        <% if (courses.length) { %>
+          <%
+            const nextRound = rounds.length
+              ? Math.max(...rounds.map(r => r.roundNumber)) + 1
+              : 1;
+          %>
+          <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${nextRound}`) %>" class="btn btn-sm btn-outline-dark">
+            <i class="fa-solid fa-plus me-1"></i>Add Round
+          </a>
+        <% } %>
+      </div>
+      <div class="card-body">
+        <% if (!courses.length) { %>
+          <div class="alert alert-warning mb-0">
+            No courses configured for this tour. <a href="<%= tenantPath('/admin/courses') %>">Add a course</a> before configuring rounds.
+          </div>
+        <% } else if (!rounds.length) { %>
+          <div class="alert alert-info mb-0">
+            No rounds configured yet — use the Add Round button above.
+          </div>
+        <% } else { %>
+          <div class="row g-3">
+            <% rounds.forEach(({ roundNumber, round, course, date, teeGroupCount, firstTeeTime }) => { %>
+              <%
+                const dateLabel = date
+                  ? date.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+                  : null;
+              %>
+              <div class="col-12 col-md-6 col-xl-3">
+                <div class="border rounded p-3 h-100">
+                  <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                      <h3 class="h6 mb-0">Round <%= roundNumber %></h3>
+                      <% if (dateLabel) { %><p class="small text-muted mb-0"><%= dateLabel %></p><% } %>
+                    </div>
+                    <% if (round) { %>
+                      <%
+                        const statusBadge = round.status === 'open' ? 'text-bg-success'
+                          : round.status === 'closed' ? 'text-bg-secondary'
+                          : 'text-bg-warning';
+                      %>
+                      <span class="badge <%= statusBadge %>"><%= round.status %></span>
+                    <% } else { %>
+                      <span class="badge text-bg-light border">Not configured</span>
+                    <% } %>
+                  </div>
+                  <% if (round && course) { %>
+                    <p class="small text-muted mb-1">
+                      <i class="fa-solid fa-flag me-1"></i><%= course.course_name %> (<%= course.tee_name %>)
+                    </p>
+                    <p class="small text-muted mb-2">
+                      <i class="fa-solid fa-calculator me-1"></i><%= calcTypeLabels[round.calc_type] || round.calc_type %>
+                    </p>
+                    <% if (round.two_ball_enabled) { %>
+                      <p class="small text-muted mb-2">
+                        <i class="fa-solid fa-user-group me-1"></i>2-ball <%= round.two_ball_type === 'aggregate' ? 'Aggregate' : 'Best Ball' %>
+                      </p>
+                    <% } %>
+                    <% if (round.leaderboard_published) { %>
+                      <span class="badge text-bg-info text-dark mb-2">Leaderboard Published</span>
+                    <% } %>
+                  <% } else if (round) { %>
+                    <p class="small text-muted mb-2">Configure course and format for this round.</p>
+                  <% } %>
+                  <p class="small mb-2">
+                    <i class="fa-solid fa-clock me-1 text-muted"></i>
+                    <% if (teeGroupCount > 0) { %>
+                      <%
+                        const teeDisplay = firstTeeTime
+                          ? firstTeeTime.slice(0, 5).replace(/^0/, '')
+                          : null;
+                      %>
+                      <% if (teeDisplay) { %><span class="fw-medium"><%= teeDisplay %></span> &middot; <% } %>
+                      <span class="fw-medium"><%= teeGroupCount %></span> tee <%= teeGroupCount === 1 ? 'group' : 'groups' %>
+                    <% } else { %>
+                      <span class="text-muted">No tee times</span>
+                    <% } %>
+                  </p>
+                  <div class="d-flex gap-2 mt-auto">
+                    <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}`) %>" class="btn btn-sm btn-legends flex-fill">
+                      Configure
+                    </a>
+                    <a href="<%= tenantPath(`/admin/tours/${tour.id}/tee-times?round=${roundNumber}`) %>" class="btn btn-sm btn-outline-dark" title="Tee times">
+                      <i class="fa-solid fa-clock"></i>
+                    </a>
+                    <% if (round && round.status !== 'draft') { %>
+                      <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/scores`) %>" class="btn btn-sm btn-outline-dark" title="View scores">
+                        <i class="fa-solid fa-list-ol"></i>
+                      </a>
+                    <% } %>
+                  </div>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+        <% } %>
+      </div>
+    </section>
+
+    <%# Players %>
+    <section class="card border-0 shadow-sm">
+      <div class="card-body border-bottom d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0">Players <span class="badge text-bg-light border ms-1"><%= tourPlayers.length %></span></h2>
+        <% if (hasAnyScores) { %>
+          <span class="small text-muted">Roster locked after scoring starts</span>
+        <% } else { %>
+          <button type="button" class="btn btn-sm btn-legends" data-bs-toggle="modal" data-bs-target="#enrollPlayerModal">
+            <i class="fa-solid fa-user-plus me-1"></i>Enroll Player
+          </button>
+        <% } %>
+      </div>
+
+      <div class="card-body pb-0">
+        <p class="text-muted small mb-3">All players can score during rounds. Scorers can make admin updates to scores after submission.</p>
+      </div>
+
+      <div class="card-body">
+        <% if (tourPlayers.length) { %>
+          <%
+            const tourAdminSet = new Set(tourAdmins.map(a => a.user_id));
+          %>
+          <div class="row g-3">
+            <% tourPlayers.forEach((p) => { %>
+              <div class="col-12 col-md-6 col-xl-4">
+                <article class="border rounded p-3 h-100 bg-white">
+                  <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div>
+                      <h3 class="h6 mb-1">
+                        <%= p.first_name %> <%= p.last_name %>
+                      </h3>
+                      <p class="small text-muted mb-0"><%= p.email %></p>
+                    </div>
+                    <% if (!hasAnyScores) { %>
+                      <div class="d-flex gap-1">
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-outline-dark"
+                          data-edit-player-btn
+                          data-player-id="<%= p.user_id %>"
+                          data-player-name="<%= p.first_name %> <%= p.last_name %>"
+                          data-player-handicap="<%= p.playing_handicap != null ? parseFloat(p.playing_handicap) : '' %>"
+                          data-player-gender="<%= p.gender || 'male' %>"
+                          title="Edit"
+                        >
+                          <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <form action="<%= tenantPath(`/admin/tours/${tour.id}/players/${p.user_id}/delete`) %>" method="post" onsubmit="return confirm('Remove this player from the tour?')">
+                          <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                            <i class="fa-solid fa-trash"></i>
+                          </button>
+                        </form>
+                      </div>
+                    <% } %>
+                  </div>
+                  <div class="mt-2 d-flex flex-wrap gap-2">
+                    <span class="badge text-bg-light border">Handicap: <%= p.playing_handicap != null ? parseFloat(p.playing_handicap) : '—' %></span>
+                    <% if (tour.gender === 'mixed') { %>
+                      <span class="badge <%= p.gender === 'female' ? 'text-bg-warning text-dark' : 'text-bg-info text-dark' %>">
+                        <%= p.gender === 'female' ? 'W' : 'M' %>
+                      </span>
+                    <% } %>
+                    <% if (tourAdminSet.has(p.user_id)) { %>
+                      <span class="badge text-bg-primary">Tour Admin</span>
+                    <% } else if (p.member_role === 'scorer') { %>
+                      <span class="badge text-bg-info text-dark">Scorer</span>
+                    <% } %>
+                    <% if (p.member_role !== 'admin' && p.member_role !== 'owner') { %>
+                      <form action="<%= tenantPath(`/admin/tours/${tour.id}/players/${p.user_id}/set-role`) %>" method="post" class="d-inline">
+                        <input type="hidden" name="role" value="<%= p.member_role === 'scorer' ? 'player' : 'scorer' %>" />
+                        <button type="submit" class="btn btn-link btn-sm p-0 text-decoration-none small">
+                          <%= p.member_role === 'scorer' ? '↓ Make Player' : '↑ Make Scorer' %>
+                        </button>
+                      </form>
+                    <% } %>
+                  </div>
+                </article>
+              </div>
+            <% }) %>
+          </div>
+        <% } else { %>
+          <p class="text-muted mb-0">No players in this tour yet.</p>
+        <% } %>
+      </div>
+    </section>
+
+    <%# Tour Admins — visible to all admins %>
+    <section class="card border-0 shadow-sm mt-3">
+      <div class="card-body border-bottom d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0">Tour Admins <span class="badge text-bg-light border ms-1"><%= tourAdmins.length %></span></h2>
+      </div>
+      <% if (availableTourAdmins.length) { %>
+        <div class="card-body border-bottom">
+          <form action="<%= tenantPath(`/admin/tours/${tour.id}/tour-admins`) %>" method="post" class="row g-2 align-items-end">
+            <div class="col-12 col-md-8">
+              <label class="form-label small mb-1">Add Tour Admin</label>
+              <select name="userId" class="form-select form-select-sm" required>
+                <option value="">Select member...</option>
+                <% availableTourAdmins.forEach((m) => { %>
+                  <option value="<%= m.id %>"><%= m.first_name %> <%= m.last_name %> (<%= m.email %>)</option>
+                <% }) %>
+              </select>
+            </div>
+            <div class="col-12 col-md-4 d-grid">
+              <button class="btn btn-sm btn-legends" type="submit">
+                <i class="fa-solid fa-user-shield me-1"></i>Add Admin
+              </button>
+            </div>
+          </form>
+        </div>
+      <% } %>
+      <div class="card-body">
+        <% if (tourAdmins.length) { %>
+          <ul class="list-unstyled mb-0">
+            <% tourAdmins.forEach((a) => { %>
+              <li class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                <div>
+                  <span class="fw-semibold"><%= a.first_name %> <%= a.last_name %></span>
+                  <span class="text-muted small ms-2"><%= a.email %></span>
+                </div>
+                <form action="<%= tenantPath(`/admin/tours/${tour.id}/tour-admins/${a.user_id}/delete`) %>" method="post"
+                  onsubmit="return confirm('Remove this tour admin?')">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </li>
+            <% }) %>
+          </ul>
+        <% } else { %>
+          <p class="text-muted small mb-0">No tour admins assigned. Players with the tenant admin or owner role always have full access.</p>
+        <% } %>
+      </div>
+    </section>
+
+    <%# Virtual Teams — visible to all admins %>
+    <section class="card border-0 shadow-sm mt-3">
+      <div class="card-body border-bottom d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0">Virtual Teams <span class="badge text-bg-light border ms-1"><%= (virtualTeams || []).length %></span></h2>
+      </div>
+      <div class="card-body border-bottom">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/virtual-teams`) %>" method="post" class="row g-2 align-items-end">
+          <div class="col-12 col-md-8">
+            <label class="form-label small mb-1">New Team Name</label>
+            <input type="text" name="name" class="form-control form-control-sm" placeholder="e.g. Blue" required maxlength="100" />
+          </div>
+          <div class="col-12 col-md-4 d-grid">
+            <button class="btn btn-sm btn-legends" type="submit">
+              <i class="fa-solid fa-plus me-1"></i>Add Team
+            </button>
+          </div>
+        </form>
+      </div>
+      <% if (!virtualTeams || !virtualTeams.length) { %>
+        <div class="card-body">
+          <p class="text-muted small mb-0">No teams yet. Add teams above, then assign players.</p>
+        </div>
+      <% } else { %>
+        <%
+          // Build a map of userId → teamName for quick lookup in the player list
+          const playerTeamMap = {};
+          (virtualTeams || []).forEach((vt) => {
+            vt.players.forEach((p) => { playerTeamMap[p.userId] = vt.name; });
+          });
+          // Players not yet assigned to any team
+          const unassignedPlayers = tourPlayers.filter((p) => !playerTeamMap[p.user_id]);
+        %>
+        <% virtualTeams.forEach((vt) => { %>
+          <div class="card-body border-bottom">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="fw-semibold"><%= vt.name %></span>
+              <div class="d-flex gap-2">
+                <%# Rename inline form %>
+                <form action="<%= tenantPath(`/admin/tours/${tour.id}/virtual-teams/${vt.id}/rename`) %>" method="post" class="d-flex gap-1">
+                  <input type="text" name="name" class="form-control form-control-sm" style="width:120px" value="<%= vt.name %>" required maxlength="100" />
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" title="Rename">
+                    <i class="fa-solid fa-pencil"></i>
+                  </button>
+                </form>
+                <form action="<%= tenantPath(`/admin/tours/${tour.id}/virtual-teams/${vt.id}/delete`) %>" method="post"
+                  onsubmit="return confirm('Delete team <%= vt.name %>? Players will be unassigned.')">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete team">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </div>
+            </div>
+            <%# Players in this team %>
+            <% if (vt.players.length) { %>
+              <ul class="list-unstyled mb-2 ms-1">
+                <% vt.players.forEach((p) => { %>
+                  <li class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <span class="small"><%= p.name %></span>
+                    <form action="<%= tenantPath(`/admin/tours/${tour.id}/virtual-teams/${vt.id}/players/${p.userId}/delete`) %>" method="post">
+                      <button type="submit" class="btn btn-link btn-sm p-0 text-danger" title="Remove from team">
+                        <i class="fa-solid fa-xmark"></i>
+                      </button>
+                    </form>
+                  </li>
+                <% }) %>
+              </ul>
+            <% } else { %>
+              <p class="text-muted small mb-2">No players assigned yet.</p>
+            <% } %>
+            <%# Add player to this team — only players not already in it %>
+            <%
+              const addableToThisTeam = tourPlayers.filter((p) =>
+                !vt.players.some((tp) => tp.userId === p.user_id)
+              );
+            %>
+            <% if (addableToThisTeam.length) { %>
+              <form action="<%= tenantPath(`/admin/tours/${tour.id}/virtual-teams/${vt.id}/players`) %>" method="post" class="d-flex gap-2 mt-1">
+                <select name="userId" class="form-select form-select-sm" style="max-width:220px" required>
+                  <option value="">Add player...</option>
+                  <% addableToThisTeam.forEach((p) => { %>
+                    <option value="<%= p.user_id %>">
+                      <%= p.first_name %> <%= p.last_name %>
+                      <% if (playerTeamMap[p.user_id]) { %>(moves from <%= playerTeamMap[p.user_id] %>)<% } %>
+                    </option>
+                  <% }) %>
+                </select>
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Add</button>
+              </form>
+            <% } %>
+          </div>
+        <% }) %>
+        <% if (unassignedPlayers.length) { %>
+          <div class="card-body">
+            <p class="text-muted small mb-0">
+              <strong><%= unassignedPlayers.length %> player<%= unassignedPlayers.length !== 1 ? 's' : '' %></strong> not assigned to a team:
+              <%= unassignedPlayers.map((p) => `${p.first_name} ${p.last_name}`).join(', ') %>
+            </p>
+          </div>
+        <% } %>
+      <% } %>
+    </section>
+  </main>
+
+  <%# Enroll Player Modal %>
+  <div class="modal fade" id="enrollPlayerModal" tabindex="-1" aria-labelledby="enrollPlayerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5" id="enrollPlayerModalLabel">Enroll Player</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/enroll-player`) %>" method="post">
+          <div class="modal-body">
+            <p class="text-muted small mb-3">Enter the player's email. If they already have an account their name will be used automatically — otherwise fill in their details below.</p>
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Email <span class="text-danger">*</span></label>
+                <input type="email" name="email" class="form-control" required autocomplete="off" />
+              </div>
+              <div class="col-12 col-sm-6">
+                <label class="form-label">First Name <span class="text-muted small">(new players)</span></label>
+                <input type="text" name="firstName" class="form-control" autocomplete="off" />
+              </div>
+              <div class="col-12 col-sm-6">
+                <label class="form-label">Last Name <span class="text-muted small">(new players)</span></label>
+                <input type="text" name="lastName" class="form-control" autocomplete="off" />
+              </div>
+              <div class="col-12 col-sm-6">
+                <label class="form-label">Handicap</label>
+                <input type="number" name="playingHandicap" class="form-control" min="-10" max="54" step="0.1" placeholder="e.g. 18.4" />
+              </div>
+              <div class="col-12 col-sm-6">
+                <label class="form-label">Gender</label>
+                <select name="gender" class="form-select">
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-legends">Enroll Player</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <%# Edit Tour Modal %>
+  <div class="modal fade" id="editTourModal" tabindex="-1" aria-labelledby="editTourModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5" id="editTourModalLabel">Edit Tour</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}`) %>" method="post">
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label">Tour Name</label>
+                <input type="text" name="label" class="form-control" value="<%= tour.label %>" required />
+              </div>
+              <div class="col-12 col-md-2">
+                <label class="form-label">Year</label>
+                <input type="number" name="year" class="form-control" value="<%= tour.year %>" required />
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label">Location</label>
+                <input type="text" name="location" class="form-control" value="<%= tour.location %>" required />
+              </div>
+              <div class="col-12 col-md-4">
+                <label class="form-label">Competition</label>
+                <select name="gender" class="form-select">
+                  <option value="mens" <%= tour.gender === 'mens' ? 'selected' : '' %>>Men's</option>
+                  <option value="womens" <%= tour.gender === 'womens' ? 'selected' : '' %>>Women's</option>
+                  <option value="mixed" <%= tour.gender === 'mixed' ? 'selected' : '' %>>Mixed</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-legends">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <%# Edit Player Modal %>
+  <% if (!hasAnyScores) { %>
+    <div class="modal fade" id="editPlayerModal" tabindex="-1" aria-labelledby="editPlayerModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <form id="editPlayerForm" method="post">
+            <div class="modal-header">
+              <h2 class="modal-title fs-6" id="editPlayerModalLabel">Edit Player</h2>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <p class="small text-muted mb-3" id="editPlayerName"></p>
+              <div class="mb-3">
+                <label class="form-label">Playing Handicap</label>
+                <input type="number" name="playingHandicap" id="editPlayerHandicap" min="-10" max="54" step="0.1" class="form-control" />
+              </div>
+              <div class="mb-0">
+                <label class="form-label">Gender</label>
+                <select name="gender" id="editPlayerGender" class="form-select">
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-legends">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const modal = new bootstrap.Modal(document.getElementById('editPlayerModal'));
+        const form = document.getElementById('editPlayerForm');
+        const nameEl = document.getElementById('editPlayerName');
+        const handicapEl = document.getElementById('editPlayerHandicap');
+        const genderEl = document.getElementById('editPlayerGender');
+        document.querySelectorAll('[data-edit-player-btn]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            const uid = btn.dataset.playerId;
+            nameEl.textContent = btn.dataset.playerName;
+            handicapEl.value = btn.dataset.playerHandicap;
+            genderEl.value = btn.dataset.playerGender || 'male';
+            form.action = '<%= tenantPath(`/admin/tours/${tour.id}/players/`) %>' + uid + '/update';
+            modal.show();
+          });
+        });
+      });
+    </script>
+  <% } %>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+</body>
+</html>

@@ -3,212 +3,124 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { buildLeaderboards } = require('../services/leaderboard/leaderboard.service');
-const { calculateEclecticLeaderboard } = require('../services/scoring/eclectic.service');
-const { calculateSultansLeaderboard } = require('../services/scoring/sultans.service');
-const { CALC_TYPES, defaultCalcTypeForDay } = require('../config/calc-types');
+const { calculateEventSkinsForDays } = require('../services/scoring/skins.service');
+const { calculateVirtualTeamResults } = require('../services/scoring/virtual-teams.service');
+const { CALC_TYPES } = require('../config/calc-types');
 const { strokesForHole } = require('../services/scoring/handicap.service');
 const { ROLES } = require('../config/roles');
 const { dayLabel } = require('../services/events/day-label.service');
 
-function isPrivileged(user) {
-  return user && (user.role === ROLES.ADMIN || user.role === ROLES.SCORER);
-}
-
-function normalizeLeaderboardView(raw) {
-  const allowed = new Set(['championship', 'ambrose', 'eclectic', 'sultans', 'skins', 'calcutta']);
-  const candidate = String(raw || '').trim().toLowerCase();
-  return allowed.has(candidate) ? candidate : 'championship';
-}
-
-async function getCalcuttaSummary(db, eventId, viewerUserId) {
-  const activePlayers = await db('event_players as ep')
-    .join('users as u', 'u.id', 'ep.user_id')
-    .where({ 'ep.event_id': eventId, 'ep.status': 'active' })
-    .orderBy([{ column: 'u.last_name', order: 'asc' }, { column: 'u.first_name', order: 'asc' }])
-    .select('u.id', 'u.first_name', 'u.last_name');
-
-  const participantsById = new Map(
-    activePlayers.map((p) => [Number(p.id), { userId: Number(p.id), name: `${p.first_name || ''} ${p.last_name || ''}`.trim() }])
-  );
-
-  const sales = await db('calcutta_auctions as ca')
-    .join('users as auctioned', 'auctioned.id', 'ca.auctioned_user_id')
-    .join('users as buyer', 'buyer.id', 'ca.buyer_user_id')
-    .leftJoin('users as owner', 'owner.id', 'ca.owner_user_id')
-    .where({ 'ca.event_id': eventId })
-    .orderBy('ca.draw_order', 'asc')
-    .select(
-      'ca.id',
-      'ca.draw_order',
-      'ca.auctioned_user_id',
-      'ca.buyer_user_id',
-      'ca.owner_user_id',
-      'ca.auction_bid_amount',
-      'auctioned.first_name as auctioned_first_name',
-      'auctioned.last_name as auctioned_last_name',
-      'buyer.first_name as buyer_first_name',
-      'buyer.last_name as buyer_last_name',
-      'owner.first_name as owner_first_name',
-      'owner.last_name as owner_last_name'
-    );
-
-  const totalPlayers = activePlayers.length;
-  const drawnPlayers = sales.length;
-  const missingOwnerCount = sales.filter((row) => !row.owner_user_id).length;
-  const finalized = totalPlayers > 0 && drawnPlayers === totalPlayers && missingOwnerCount === 0;
-  const poolTotal = sales.reduce((sum, row) => sum + (Number(row.auction_bid_amount || 0) * 0.5), 0);
-
-  const balanceByUser = new Map();
-  for (const player of activePlayers) {
-    balanceByUser.set(Number(player.id), {
-      userId: Number(player.id),
-      name: `${player.first_name || ''} ${player.last_name || ''}`.trim(),
-      purchasesOwed: 0,
-      ownershipReceivable: 0,
-      netBalance: 0
-    });
-  }
-
-  for (const sale of sales) {
-    const price = Number(sale.auction_bid_amount || 0);
-    const ownerShare = price * 0.5;
-    const buyerId = Number(sale.buyer_user_id || 0);
-    const ownerId = Number(sale.owner_user_id || 0);
-    if (buyerId && balanceByUser.has(buyerId)) {
-      const current = balanceByUser.get(buyerId);
-      current.purchasesOwed += price;
-      current.netBalance -= price;
-    }
-    if (ownerId && balanceByUser.has(ownerId)) {
-      const current = balanceByUser.get(ownerId);
-      current.ownershipReceivable += ownerShare;
-      current.netBalance += ownerShare;
-    }
-  }
-
-  const balances = [...balanceByUser.values()]
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-  const viewerBalance = balances.find((row) => Number(row.userId) === Number(viewerUserId || 0)) || null;
-
-  const rows = sales.map((sale) => ({
-    id: Number(sale.id),
-    drawOrder: Number(sale.draw_order || 0),
-    auctionedUserId: Number(sale.auctioned_user_id || 0),
-    buyerUserId: Number(sale.buyer_user_id || 0),
-    ownerUserId: Number(sale.owner_user_id || 0),
-    playerName: `${sale.auctioned_first_name || ''} ${sale.auctioned_last_name || ''}`.trim(),
-    buyerName: `${sale.buyer_first_name || ''} ${sale.buyer_last_name || ''}`.trim(),
-    ownerName: sale.owner_user_id ? `${sale.owner_first_name || ''} ${sale.owner_last_name || ''}`.trim() : '-',
-    price: Number(sale.auction_bid_amount || 0),
-    ownerShare: Number(sale.auction_bid_amount || 0) * 0.5,
-    poolShare: Number(sale.auction_bid_amount || 0) * 0.5
-  }));
-
-  return {
-    finalized,
-    totalPlayers,
-    drawnPlayers,
-    missingOwnerCount,
-    poolTotal,
-    rows,
-    balances,
-    viewerBalance,
-    participantsById
-  };
-}
-
-function buildCalcuttaPayouts(event, calcuttaSummary, stablefordByDay, championshipTable, publishedDays) {
-  const out = {
-    enabled: false,
-    totalPayout: 0,
-    rows: [],
-    personalPayoutByUserId: new Map()
-  };
-  if (!event || !calcuttaSummary || !calcuttaSummary.finalized) return out;
-  const publishedSet = new Set((publishedDays || []).map(Number));
-  if (!publishedSet.has(4)) return out;
-  const champion = (championshipTable || [])[0];
-  if (!champion || !Number(champion.userId || 0)) return out;
-
-  const byAuctionedUser = new Map(
-    (calcuttaSummary.rows || [])
-      .map((row) => [Number(row.auctionedUserId || 0), row])
-      .filter(([id]) => Number.isInteger(id) && id > 0)
-  );
-  const byUserName = calcuttaSummary.participantsById || new Map();
-  const poolTotal = Number(calcuttaSummary.poolTotal || 0);
-  if (!Number.isFinite(poolTotal) || poolTotal <= 0) return out;
-
-  const ownerDailyWinnerPercent = Number(event.calcutta_owner_daily_winner_percent || 0);
-  const championPercent = Number(event.calcutta_champion_percent || 0);
-  const championOwnerPercent = Number(event.calcutta_champion_owner_percent || 0);
-  const mysteryPlacePercent = Number(event.calcutta_mystery_place_percent || 0);
-  const mysteryPlace = Number(event.calcutta_mystery_place || 0);
-
-  const push = (category, basisPlayerUserId, recipientUserId, pct) => {
-    const percent = Number(pct || 0);
-    if (!Number.isFinite(percent) || percent <= 0) return;
-    const amount = (poolTotal * percent) / 100;
-    const basisName = basisPlayerUserId && byUserName.has(Number(basisPlayerUserId))
-      ? byUserName.get(Number(basisPlayerUserId)).name
-      : '-';
-    const recipientName = recipientUserId && byUserName.has(Number(recipientUserId))
-      ? byUserName.get(Number(recipientUserId)).name
-      : '-';
-    out.rows.push({
-      category,
-      basisName,
-      recipientName,
-      percent,
-      amount
-    });
-    if (Number.isInteger(Number(recipientUserId)) && Number(recipientUserId) > 0) {
-      out.personalPayoutByUserId.set(
-        Number(recipientUserId),
-        Number(out.personalPayoutByUserId.get(Number(recipientUserId)) || 0) + amount
-      );
-    }
-  };
-
-  [2, 3, 4].forEach((day) => {
-    const dailyWinner = (stablefordByDay?.[day] || [])[0];
-    if (!dailyWinner) return;
-    const sale = byAuctionedUser.get(Number(dailyWinner.userId || 0));
-    if (!sale || !Number(sale.buyerUserId || 0)) return;
-    push(`Owner Daily Winner (${dayLabel(day)})`, Number(dailyWinner.userId), Number(sale.buyerUserId), ownerDailyWinnerPercent);
+async function recalculateSkins(db, tour) {
+  const rows = await db('scorecards')
+    .where({ tour_id: tour.id })
+    .groupBy('round_number')
+    .select('round_number')
+    .count({ total: '*' })
+    .sum({ submitted: db.raw(`CASE WHEN status = 'submitted' THEN 1 ELSE 0 END`) });
+  const finalizedRoundNumbers = rows
+    .filter((r) => Number(r.total) > 0 && Number(r.submitted) === Number(r.total))
+    .map((r) => Number(r.round_number));
+  await calculateEventSkinsForDays(db, tour.id, finalizedRoundNumbers, {
+    initialCarryInSkins: tour.skins_carry_in_skins || 0
   });
+}
 
-  const championSale = byAuctionedUser.get(Number(champion.userId || 0));
-  if (championSale) {
-    if (Number(champion.userId || 0) > 0) {
-      push('Champion', Number(champion.userId), Number(champion.userId), championPercent);
-    }
-    if (Number(championSale.buyerUserId || 0) > 0) {
-      push('Champion Owner', Number(champion.userId), Number(championSale.buyerUserId), championOwnerPercent);
-    }
-  }
+async function getNoveltyResults(db, tourId, publishedRoundNumbers) {
+  if (!publishedRoundNumbers.length) return [];
+  const events = await db('novelty_events')
+    .whereIn('round_number', publishedRoundNumbers)
+    .where({ tour_id: tourId })
+    .orderBy(['round_number', 'hole_number']);
+  if (!events.length) return [];
 
-  if (mysteryPlace > 0) {
-    const mysteryRow = (championshipTable || []).find((row) => Number(row.position || 0) === mysteryPlace);
-    if (mysteryRow) {
-      const mysterySale = byAuctionedUser.get(Number(mysteryRow.userId || 0));
-      if (mysterySale && Number(mysterySale.buyerUserId || 0) > 0) {
-        push(`Mystery Place #${mysteryPlace}`, Number(mysteryRow.userId), Number(mysterySale.buyerUserId), mysteryPlacePercent);
+  const results = await db('novelty_results')
+    .whereIn('novelty_event_id', events.map((e) => e.id));
+  const resultByEventId = new Map(results.map((r) => [r.novelty_event_id, r]));
+
+  const winnerIds = results.map((r) => r.winner_user_id).filter(Boolean);
+  const winnerRows = winnerIds.length
+    ? await db('users').whereIn('id', winnerIds).select('id', 'first_name', 'last_name')
+    : [];
+  const winnerById = new Map(winnerRows.map((u) => [u.id, `${u.first_name || ''} ${u.last_name || ''}`.trim()]));
+
+  return events.map((ne) => {
+    const result = resultByEventId.get(ne.id) || null;
+    return {
+      id: ne.id,
+      roundNumber: ne.round_number,
+      holeNumber: ne.hole_number,
+      noveltyType: ne.novelty_type,
+      label: ne.label,
+      result: result ? {
+        isNoWinner: Boolean(result.is_no_winner),
+        winnerName: result.winner_user_id ? (winnerById.get(result.winner_user_id) || null) : null,
+      } : null,
+    };
+  });
+}
+
+function isPrivileged(req) {
+  const role = req.tenantMembership?.role;
+  return role === ROLES.ADMIN || role === ROLES.OWNER || role === ROLES.SCORER
+    || Boolean(req.res?.locals?.hasTourAdminAccess);
+}
+
+function isAdminViewer(req) {
+  const role = req.tenantMembership?.role;
+  return role === ROLES.ADMIN || role === ROLES.OWNER
+    || Boolean(req.res?.locals?.hasTourAdminAccess);
+}
+
+function normalizeLeaderboardView(raw, validDayNumbers, publishedDayNumbers) {
+  const candidate = String(raw || '').trim().toLowerCase();
+  if (['championship', 'skins', 'novelty'].includes(candidate)) return candidate;
+  const dayMatch = candidate.match(/^day-(\d+)$/);
+  if (dayMatch && (validDayNumbers || []).includes(Number(dayMatch[1]))) return candidate;
+  // Default: most recent published day (not just visible — admins shouldn't land on an unreleased day by default)
+  const defaults = publishedDayNumbers && publishedDayNumbers.length ? publishedDayNumbers : (validDayNumbers || []);
+  if (defaults.length) return `day-${defaults[defaults.length - 1]}`;
+  return 'championship';
+}
+
+function buildDayViews(effectiveVisible, boards, skinsDetail, prizes, roundStates, noveltyResults, virtualTeamResultsByRound) {
+  return effectiveVisible.map((rn) => {
+    const dayBoard = boards.stableford?.byDay?.[rn] || [];
+    const skinsForDay = skinsDetail.find((sd) => sd.roundNumber === rn) || null;
+    const roundState = roundStates.find((r) => r.roundNumber === rn);
+
+    const wMap = new Map();
+    if (skinsForDay) {
+      for (const h of skinsForDay.holes) {
+        if (h.status !== 'won' || !h.winnerName) continue;
+        if (!wMap.has(h.winnerName)) wMap.set(h.winnerName, { name: h.winnerName, skinsWon: 0, dollarWon: 0 });
+        wMap.get(h.winnerName).skinsWon += h.skinsAtStake;
+        wMap.get(h.winnerName).dollarWon += h.dollarAmount;
       }
     }
-  }
 
-  out.totalPayout = out.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  out.enabled = out.rows.length > 0;
-  return out;
+    return {
+      roundNumber: rn,
+      label: dayLabel(rn),
+      tourDate: roundState?.tourDate || null,
+      dayBoard,
+      skinsForDay,
+      skinsWinners: [...wMap.values()].sort((a, b) => b.skinsWon - a.skinsWon),
+      prizes,
+      noveltyEvents: (noveltyResults || []).filter((ne) => ne.roundNumber === rn),
+      virtualTeamResults: (virtualTeamResultsByRound || {})[rn] || [],
+    };
+  });
 }
 
-function buildChampionshipTable(stablefordBoards) {
+function buildChampionshipTable(stablefordBoards, stablefordRoundNumbers) {
   const byDay = stablefordBoards?.byDay || {};
   const championshipRows = Array.isArray(stablefordBoards?.championship) ? stablefordBoards.championship : [];
-  const r1ByUser = new Map((byDay[2] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
-  const r2ByUser = new Map((byDay[3] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
-  const r3ByUser = new Map((byDay[4] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
+  const rounds = stablefordRoundNumbers || [];
+
+  const roundMaps = {};
+  rounds.forEach((rn) => {
+    roundMaps[rn] = new Map((byDay[rn] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
+  });
 
   const totalCount = new Map();
   championshipRows.forEach((row) => {
@@ -219,13 +131,15 @@ function buildChampionshipTable(stablefordBoards) {
   return championshipRows.map((row) => {
     const userId = Number(row.userId || 0);
     const total = Number(row.total || 0);
+    const roundScores = {};
+    rounds.forEach((rn) => {
+      roundScores[rn] = Number(roundMaps[rn].get(userId) || 0);
+    });
     return {
       position: Number(row.position || 0),
       userId,
       name: row.name,
-      r1: Number(r1ByUser.get(userId) || 0),
-      r2: Number(r2ByUser.get(userId) || 0),
-      r3: Number(r3ByUser.get(userId) || 0),
+      rounds: roundScores,
       total,
       cb9: Number(row.countbackLast9 || 0),
       cb6: Number(row.countbackLast6 || 0),
@@ -236,25 +150,22 @@ function buildChampionshipTable(stablefordBoards) {
   });
 }
 
-function normalizeSkins(holes, visibleDays) {
-  const daySet = new Set((visibleDays || []).map(Number));
-  const filteredHoles = (holes || []).filter((hole) => daySet.has(Number(hole.day)));
-  const byDay = new Map();
+function normalizeSkins(holes, visibleRounds) {
+  const roundSet = new Set((visibleRounds || []).map(Number));
+  const filteredHoles = (holes || []).filter((hole) => roundSet.has(Number(hole.round_number)));
+  const byRound = new Map();
   for (const hole of filteredHoles) {
-    if (!byDay.has(Number(hole.day))) {
-      byDay.set(Number(hole.day), {
-        day: Number(hole.day),
-        wins: [],
-        winners: []
-      });
+    const rn = Number(hole.round_number);
+    if (!byRound.has(rn)) {
+      byRound.set(rn, { roundNumber: rn, wins: [], winners: [] });
     }
     if (hole.status !== 'won' || !hole.winning_participant_id || !hole.winner_name) continue;
-    const row = byDay.get(Number(hole.day));
+    const row = byRound.get(rn);
     const basePot = Number(hole.base_pot_amount || 0);
     const totalPot = Number(hole.total_pot_amount || 0);
     const skinsCount = basePot > 0 ? Math.round(totalPot / basePot) : 0;
     row.wins.push({
-      day: Number(hole.day),
+      roundNumber: rn,
       holeNumber: Number(hole.hole_number),
       name: hole.winner_name,
       participantType: hole.participant_type,
@@ -264,8 +175,8 @@ function normalizeSkins(holes, visibleDays) {
     });
   }
 
-  const daily = [...byDay.values()]
-    .sort((a, b) => a.day - b.day)
+  const daily = [...byRound.values()]
+    .sort((a, b) => a.roundNumber - b.roundNumber)
     .map((entry) => {
       const winnerMap = new Map();
       for (const win of entry.wins) {
@@ -286,10 +197,7 @@ function normalizeSkins(holes, visibleDays) {
       };
     });
 
-  return {
-    holes: filteredHoles,
-    daily
-  };
+  return { holes: filteredHoles, daily };
 }
 
 function buildSkinsLeaderboard(holes, skinPotPerHole) {
@@ -301,7 +209,7 @@ function buildSkinsLeaderboard(holes, skinPotPerHole) {
       const totalPot = Number(hole.total_pot_amount || 0);
       const skinsCount = basePot > 0 ? Math.max(0, Math.round(totalPot / basePot)) : 0;
       return {
-        day: Number(hole.day || 0),
+        roundNumber: Number(hole.round_number || 0),
         holeNumber: Number(hole.hole_number || 0),
         participantType: String(hole.participant_type || ''),
         participantId: Number(hole.winning_participant_id || 0),
@@ -338,51 +246,52 @@ function buildSkinsLeaderboard(holes, skinPotPerHole) {
       ));
   };
 
-  return {
-    playerRows: aggregate('player'),
-    teamRows: aggregate('team')
-  };
+  return { playerRows: aggregate('player'), teamRows: aggregate('team') };
 }
 
-function buildSkinsCarryovers(holes) {
-  const byDay = new Map();
-  (holes || []).forEach((hole) => {
-    const day = Number(hole.day || 0);
-    if (!day) return;
-    if (!byDay.has(day)) byDay.set(day, []);
-    byDay.get(day).push(hole);
-  });
+function buildSkinsDetail(holes, visibleRoundNumbers, stakePerPlayerPerHole) {
+  const roundSet = new Set((visibleRoundNumbers || []).map(Number));
+  const filtered = (holes || []).filter((h) => roundSet.has(Number(h.round_number)));
+  if (!filtered.length) return [];
 
-  return [...byDay.entries()]
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .map(([day, dayHoles]) => {
-      const hole1 = dayHoles.find((h) => Number(h.hole_number || 0) === 1);
-      const hole18 = dayHoles.find((h) => Number(h.hole_number || 0) === 18);
-      const basePotIn = Number(hole1?.base_pot_amount || 0);
-      const carryInAmount = Number(hole1?.carry_in_amount || 0);
-      const carryInSkins = basePotIn > 0 ? Math.round(carryInAmount / basePotIn) : 0;
+  const basePot = Number(filtered[0].base_pot_amount || 0);
+  const stake = Number(stakePerPlayerPerHole || 0);
 
-      const basePotOut = Number(hole18?.base_pot_amount || 0);
-      const totalPotOut = Number(hole18?.total_pot_amount || 0);
-      const carryOutSkins = hole18 && String(hole18.status || '') !== 'won' && basePotOut > 0
-        ? Math.round(totalPotOut / basePotOut)
-        : 0;
+  const byRound = new Map();
+  for (const hole of filtered) {
+    const rn = Number(hole.round_number);
+    if (!byRound.has(rn)) byRound.set(rn, []);
+    const carryIn = basePot > 0 ? Math.round(Number(hole.carry_in_amount || 0) / basePot) : 0;
+    const skinsAtStake = basePot > 0 ? Math.round(Number(hole.total_pot_amount || 0) / basePot) : 1;
+    const dollarAmount = hole.status === 'won' && stake > 0
+      ? Number(hole.total_pot_amount || 0) * stake
+      : 0;
+    byRound.get(rn).push({
+      holeNumber: Number(hole.hole_number),
+      carryIn,
+      skinsAtStake,
+      dollarAmount,
+      status: String(hole.status || 'jackpot'),
+      winnerName: hole.winner_name || null,
+      tiedCount: Number(hole.tied_count || 0),
+      topStableford: Number(hole.top_stableford || 0),
+      winningGross: hole.winning_gross != null ? Number(hole.winning_gross) : null,
+      winningStableford: hole.winning_stableford != null ? Number(hole.winning_stableford) : null
+    });
+  }
 
-      return {
-        day: Number(day),
-        carryInSkins: Math.max(0, Number(carryInSkins || 0)),
-        carryOutSkins: Math.max(0, Number(carryOutSkins || 0))
-      };
-    })
-    .filter((row) => Number(row.carryInSkins || 0) > 0 || Number(row.carryOutSkins || 0) > 0);
+  return [...byRound.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([roundNumber, holeRows]) => ({
+      roundNumber,
+      holes: holeRows.sort((a, b) => a.holeNumber - b.holeNumber)
+    }));
 }
 
-function buildChampionshipFromVisibleDays(stablefordByDay, visibleDays) {
-  const visibleSet = new Set((visibleDays || []).map(Number));
+function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRounds) {
   const byUser = new Map();
-  [2, 3, 4].forEach((day) => {
-    if (!visibleSet.has(day)) return;
-    (stablefordByDay?.[day] || []).forEach((row) => {
+  (visibleStablefordRounds || []).forEach((roundNumber) => {
+    (stablefordByDay?.[roundNumber] || []).forEach((row) => {
       const key = Number(row.userId);
       if (!byUser.has(key)) {
         byUser.set(key, {
@@ -416,18 +325,15 @@ function buildChampionshipFromVisibleDays(stablefordByDay, visibleDays) {
     .map((row, index) => ({ ...row, position: index + 1 }));
 }
 
-async function getPlayerMetaByUserIds(db, eventId, userIds) {
+async function getPlayerMetaByUserIds(db, tourId, userIds) {
   const ids = [...new Set((userIds || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
   if (!ids.length) return {};
   const rows = await db('users as u')
-    .join('event_players as ep', function joinEventPlayers() {
-      this.on('ep.user_id', '=', 'u.id').andOnVal('ep.event_id', '=', eventId);
-    })
     .leftJoin('player_handicaps as ph', function joinHandicap() {
-      this.on('ph.user_id', '=', 'u.id').andOnVal('ph.event_id', '=', eventId);
+      this.on('ph.user_id', '=', 'u.id').andOnVal('ph.tour_id', '=', tourId);
     })
     .whereIn('u.id', ids)
-    .select('u.id', 'u.first_name', 'u.last_name', 'u.is_previous_winner', 'ep.is_previous_year_winner', 'ph.playing_handicap');
+    .select('u.id', 'u.first_name', 'u.last_name', 'ph.playing_handicap');
 
   const meta = {};
   rows.forEach((row) => {
@@ -435,71 +341,103 @@ async function getPlayerMetaByUserIds(db, eventId, userIds) {
     meta[userId] = {
       userId,
       name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
-      handicap: row.playing_handicap == null ? null : Math.trunc(Number(row.playing_handicap)),
-      isPreviousWinner: Number(row.is_previous_winner || 0) === 1,
-      isDefendingChampion: Number(row.is_previous_year_winner || 0) === 1
+      handicap: row.playing_handicap == null ? null : Math.trunc(Number(row.playing_handicap))
     };
   });
   return meta;
 }
 
-async function getDefaultCourseId(db) {
-  const row = await db('courses').orderBy('id', 'asc').first();
-  return row ? Number(row.id) : null;
-}
+async function getAmbroseTeamMembersByTeamId(db, tourId, teamIds) {
+  const ids = [...new Set((teamIds || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return {};
 
-async function getDayPublicationRows(db, eventId) {
-  const rows = await db('event_day_statuses')
-    .where({ event_id: eventId })
-    .whereIn('day', [1, 2, 3, 4])
-    .select('day', 'status', 'leaderboard_published', 'calc_type');
-  const byDay = new Map(rows.map((r) => [Number(r.day), r]));
-  return [1, 2, 3, 4].map((day) => {
-    const row = byDay.get(day);
-    return {
-      day,
-      status: row?.status || 'draft',
-      calcType: row?.calc_type || defaultCalcTypeForDay(day),
-      leaderboardPublished: Number(row?.leaderboard_published || 0) === 1
-    };
+  const rows = await db('team_members as tm')
+    .join('users as u', 'u.id', 'tm.user_id')
+    .leftJoin('player_handicaps as ph', function joinHcp() {
+      this.on('ph.user_id', '=', 'u.id').andOnVal('ph.tour_id', '=', tourId);
+    })
+    .whereIn('tm.team_id', ids)
+    .orderBy([{ column: 'tm.team_id', order: 'asc' }, { column: 'u.last_name', order: 'asc' }, { column: 'u.first_name', order: 'asc' }])
+    .select(
+      'tm.team_id',
+      'tm.is_dual_assigned',
+      'u.id',
+      'u.first_name',
+      'u.last_name',
+      'ph.playing_handicap'
+    );
+
+  const out = {};
+  rows.forEach((row) => {
+    const teamId = Number(row.team_id);
+    if (!out[teamId]) out[teamId] = [];
+    out[teamId].push({
+      id: Number(row.id),
+      first_name: row.first_name,
+      last_name: row.last_name,
+      handicap_display: formatHandicapDisplay(row.playing_handicap),
+      is_dual_assigned: Number(row.is_dual_assigned || 0) === 1
+    });
   });
+  return out;
 }
 
-async function getDayFinalizationRows(db, eventId) {
+function formatHandicapDisplay(raw) {
+  if (raw === null || raw === undefined || raw === '') return '-';
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return '-';
+  const abs = Number.isInteger(num) ? String(Math.abs(num)) : String(Math.abs(num).toFixed(1)).replace(/\.0$/, '');
+  return num < 0 ? `+${abs}` : abs;
+}
+
+async function getRoundPublicationRows(db, tourId) {
+  const rows = await db('golf_rounds')
+    .where({ tour_id: tourId })
+    .select('round_number', 'status', 'leaderboard_published', 'calc_type', 'virtual_teams_enabled')
+    .orderBy('round_number');
+  return rows.map((r) => ({
+    roundNumber: Number(r.round_number),
+    status: r.status || 'draft',
+    calcType: r.calc_type || 'stableford',
+    leaderboardPublished: Number(r.leaderboard_published || 0) === 1,
+    virtualTeamsEnabled: Boolean(r.virtual_teams_enabled)
+  }));
+}
+
+async function getRoundFinalizationRows(db, tourId) {
   const rows = await db('scorecards')
-    .where({ event_id: eventId })
-    .whereIn('day', [1, 2, 3, 4])
-    .groupBy('day')
-    .select('day')
+    .where({ tour_id: tourId })
+    .groupBy('round_number')
+    .select('round_number')
     .count({ total: '*' })
     .sum({
       submitted: db.raw(`CASE WHEN status = 'submitted' THEN 1 ELSE 0 END`)
     });
-  const byDay = new Map(
-    rows.map((r) => [
-      Number(r.day),
-      {
-        total: Number(r.total || 0),
-        submitted: Number(r.submitted || 0)
-      }
-    ])
-  );
-  return [1, 2, 3, 4].map((day) => {
-    const row = byDay.get(day) || { total: 0, submitted: 0 };
-    return {
-      day,
-      total: row.total,
-      submitted: row.submitted,
-      isFinalized: row.total > 0 && row.submitted === row.total
-    };
-  });
+  return rows.map((r) => ({
+    roundNumber: Number(r.round_number),
+    total: Number(r.total || 0),
+    submitted: Number(r.submitted || 0),
+    isFinalized: Number(r.total || 0) > 0 && Number(r.submitted || 0) === Number(r.total || 0)
+  }));
 }
 
-function dayToRoundLabel(day) {
-  if (Number(day) === 2) return 'R1';
-  if (Number(day) === 3) return 'R2';
-  if (Number(day) === 4) return 'R3';
-  return dayLabel(day);
+async function getPublishedRoundSet(db, tourId) {
+  const rows = await getRoundPublicationRows(db, tourId);
+  return new Set(rows.filter((r) => r.leaderboardPublished).map((r) => Number(r.roundNumber)));
+}
+
+async function getCourseHolesForRound(db, tourId, roundNumber) {
+  return db('golf_rounds as gr')
+    .join('holes as h', 'h.course_id', 'gr.course_id')
+    .where({ 'gr.tour_id': tourId, 'gr.round_number': roundNumber })
+    .orderBy('h.hole_number', 'asc')
+    .select('h.hole_number', 'h.par', 'h.stroke_index_primary', 'h.stroke_index_secondary');
+}
+
+function ambroseAllowance(memberCount) {
+  if (Number(memberCount) === 2) return 1 / 4;
+  if (Number(memberCount) === 3) return 1 / 3;
+  return 0;
 }
 
 function toScorecardMatrixModel(base) {
@@ -513,12 +451,7 @@ function toScorecardMatrixModel(base) {
   }));
   const front9 = holes.filter((h) => h.holeNumber >= 1 && h.holeNumber <= 9).sort((a, b) => a.holeNumber - b.holeNumber);
   const back9 = holes.filter((h) => h.holeNumber >= 10 && h.holeNumber <= 18).sort((a, b) => a.holeNumber - b.holeNumber);
-  return {
-    ...base,
-    holes,
-    front9,
-    back9
-  };
+  return { ...base, holes, front9, back9 };
 }
 
 function summarizeTotals(holes) {
@@ -539,90 +472,17 @@ function summarizeTotals(holes) {
   };
 }
 
-async function getCourseHolesForDay(db, eventId, day) {
-  return db('event_day_statuses as eds')
-    .join('holes as h', 'h.course_id', 'eds.course_id')
-    .where({ 'eds.event_id': eventId, 'eds.day': day })
-    .orderBy('h.hole_number', 'asc')
-    .select('h.hole_number', 'h.par', 'h.stroke_index_primary', 'h.stroke_index_secondary');
-}
-
-async function getPublishedDaySet(db, eventId) {
-  const rows = await getDayPublicationRows(db, eventId);
-  return new Set(rows.filter((r) => r.leaderboardPublished).map((r) => Number(r.day)));
-}
-
-function ambroseAllowance(memberCount) {
-  if (Number(memberCount) === 2) return 1 / 4;
-  if (Number(memberCount) === 3) return 1 / 3;
-  return 0;
-}
-
-function formatHandicapDisplay(raw) {
-  if (raw === null || raw === undefined || raw === '') return '-';
-  const num = Number(raw);
-  if (!Number.isFinite(num)) return '-';
-  const abs = Number.isInteger(num) ? String(Math.abs(num)) : String(Math.abs(num).toFixed(1)).replace(/\\.0$/, '');
-  return num < 0 ? `+${abs}` : abs;
-}
-
-async function getAmbroseTeamMembersByTeamId(db, eventId, teamIds) {
-  const ids = [...new Set((teamIds || []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
-  if (!ids.length) return {};
-
-  const rows = await db('team_members as tm')
-    .join('users as u', 'u.id', 'tm.user_id')
-    .leftJoin('player_handicaps as ph', function joinHcp() {
-      this.on('ph.user_id', '=', 'u.id').andOnVal('ph.event_id', '=', eventId);
-    })
-    .leftJoin('event_players as ep', function joinEventPlayer() {
-      this.on('ep.user_id', '=', 'u.id').andOnVal('ep.event_id', '=', eventId);
-    })
-    .whereIn('tm.team_id', ids)
-    .orderBy([{ column: 'tm.team_id', order: 'asc' }, { column: 'u.last_name', order: 'asc' }, { column: 'u.first_name', order: 'asc' }])
-    .select(
-      'tm.team_id',
-      'tm.is_dual_assigned',
-      'u.id',
-      'u.first_name',
-      'u.last_name',
-      'u.is_previous_winner',
-      'ep.is_previous_year_winner',
-      'ph.playing_handicap'
-    );
-
-  const out = {};
-  rows.forEach((row) => {
-    const teamId = Number(row.team_id);
-    if (!out[teamId]) out[teamId] = [];
-    out[teamId].push({
-      id: Number(row.id),
-      first_name: row.first_name,
-      last_name: row.last_name,
-      handicap_display: formatHandicapDisplay(row.playing_handicap),
-      is_previous_winner: Number(row.is_previous_winner || 0) === 1,
-      is_previous_year_winner: Number(row.is_previous_year_winner || 0) === 1,
-      is_dual_assigned: Number(row.is_dual_assigned || 0) === 1
-    });
-  });
-  return out;
-}
-
-async function getSultansTeamMembersByTeamId(db, eventId, teamIds) {
-  return getAmbroseTeamMembersByTeamId(db, eventId, teamIds);
-}
-
-async function buildIndividualScorecardModel(db, event, day, userId) {
-  const [scorecard, user, handicap, holeConfig, holeScores, dayStatus] = await Promise.all([
-    db('scorecards').where({ event_id: event.id, day, type: 'individual', user_id: userId }).first(),
+async function buildIndividualScorecardModel(db, tour, roundNumber, userId) {
+  const [scorecard, user, handicap, holeConfig, holeScores, roundRow] = await Promise.all([
+    db('scorecards').where({ tour_id: tour.id, round_number: roundNumber, type: 'individual', user_id: userId }).first(),
     db('users').where({ id: userId }).first(),
-    db('player_handicaps').where({ event_id: event.id, user_id: userId }).first(),
-    getCourseHolesForDay(db, event.id, day),
+    db('player_handicaps').where({ tour_id: tour.id, user_id: userId }).first(),
+    getCourseHolesForRound(db, tour.id, roundNumber),
     db('scorecards as s')
       .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .where({ 's.event_id': event.id, 's.day': day, 's.type': 'individual', 's.user_id': userId })
+      .where({ 's.tour_id': tour.id, 's.round_number': roundNumber, 's.type': 'individual', 's.user_id': userId })
       .select('sh.hole_number', 'sh.gross_score', 'sh.stableford_points'),
-    db('event_day_statuses').where({ event_id: event.id, day }).first()
+    db('golf_rounds').where({ tour_id: tour.id, round_number: roundNumber }).first()
   ]);
   if (!scorecard || !user || !holeConfig.length) return null;
 
@@ -643,7 +503,7 @@ async function buildIndividualScorecardModel(db, event, day, userId) {
     };
   });
 
-  const calcType = String(dayStatus?.calc_type || defaultCalcTypeForDay(day));
+  const calcType = String(roundRow?.calc_type || CALC_TYPES.STABLEFORD);
   const totals = summarizeTotals(holes);
   const resultLabel = calcType === CALC_TYPES.STABLEFORD
     ? `${totals.stablefordTotal} pts`
@@ -651,9 +511,9 @@ async function buildIndividualScorecardModel(db, event, day, userId) {
 
   return toScorecardMatrixModel({
     mode: 'individual',
-    day,
-    roundLabel: dayToRoundLabel(day),
-    dayLabel: dayLabel(day),
+    roundNumber,
+    roundLabel: dayLabel(roundNumber),
+    dayLabel: dayLabel(roundNumber),
     calcType,
     showStablefordTotals: calcType === CALC_TYPES.STABLEFORD,
     showGrossOnlyTotals: calcType !== CALC_TYPES.STABLEFORD,
@@ -665,28 +525,28 @@ async function buildIndividualScorecardModel(db, event, day, userId) {
   });
 }
 
-async function buildAmbroseScorecardModel(db, event, teamId) {
+async function buildAmbroseScorecardModel(db, tour, teamId) {
   const scorecard = await db('scorecards as s')
     .join('teams as t', 't.id', 's.team_id')
-    .where({ 's.event_id': event.id, 's.type': 'team', 't.id': teamId })
-    .select('s.id', 's.day', 's.team_id', 't.name as team_name')
+    .where({ 's.tour_id': tour.id, 's.type': 'team', 't.id': teamId })
+    .select('s.id', 's.round_number', 's.team_id', 't.name as team_name')
     .first();
   if (!scorecard) return null;
 
-  const day = Number(scorecard.day);
-  const [holeConfig, holeScores, memberRows, dayStatus] = await Promise.all([
-    getCourseHolesForDay(db, event.id, day),
+  const roundNumber = Number(scorecard.round_number);
+  const [holeConfig, holeScores, memberRows, roundRow] = await Promise.all([
+    getCourseHolesForRound(db, tour.id, roundNumber),
     db('scorecard_holes')
       .where({ scorecard_id: scorecard.id })
       .select('hole_number', 'gross_score', 'stableford_points'),
     db('team_members as tm')
       .join('users as u', 'u.id', 'tm.user_id')
       .leftJoin('player_handicaps as ph', function joinPh() {
-        this.on('ph.user_id', '=', 'tm.user_id').andOnVal('ph.event_id', '=', event.id);
+        this.on('ph.user_id', '=', 'tm.user_id').andOnVal('ph.tour_id', '=', tour.id);
       })
       .where({ 'tm.team_id': teamId })
       .select('u.first_name', 'u.last_name', 'ph.playing_handicap'),
-    db('event_day_statuses').where({ event_id: event.id, day }).first()
+    db('golf_rounds').where({ tour_id: tour.id, round_number: roundNumber }).first()
   ]);
   if (!holeConfig.length) return null;
 
@@ -711,7 +571,7 @@ async function buildAmbroseScorecardModel(db, event, teamId) {
     };
   });
 
-  const calcType = String(dayStatus?.calc_type || defaultCalcTypeForDay(day));
+  const calcType = String(roundRow?.calc_type || 'ambrose_nett');
   const totals = summarizeTotals(holes);
   const netExact = totals.grossTotal - exactTeamHandicap;
   const membersLabel = memberRows
@@ -721,9 +581,9 @@ async function buildAmbroseScorecardModel(db, event, teamId) {
 
   return toScorecardMatrixModel({
     mode: 'team',
-    day,
-    roundLabel: dayToRoundLabel(day),
-    dayLabel: dayLabel(day),
+    roundNumber,
+    roundLabel: dayLabel(roundNumber),
+    dayLabel: dayLabel(roundNumber),
     calcType,
     showStablefordTotals: false,
     showGrossOnlyTotals: true,
@@ -735,109 +595,45 @@ async function buildAmbroseScorecardModel(db, event, teamId) {
   });
 }
 
-async function buildSultansScorecardModel(db, event, teamId, day) {
-  const team = await db('teams')
-    .where({ id: teamId, event_id: event.id, day: 2, competition_type: 'sultans' })
-    .first();
-  if (!team) return null;
-
-  const [holeConfig, memberRows] = await Promise.all([
-    getCourseHolesForDay(db, event.id, day),
-    db('team_members as tm')
-      .join('users as u', 'u.id', 'tm.user_id')
-      .where({ 'tm.team_id': teamId })
-      .select('u.id', 'u.first_name', 'u.last_name')
-  ]);
-  if (!holeConfig.length || !memberRows.length) return null;
-
-  const memberIds = memberRows.map((m) => Number(m.id));
-  const holeRows = await db('scorecards as s')
-    .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-    .where({ 's.event_id': event.id, 's.type': 'individual', 's.day': day })
-    .whereIn('s.user_id', memberIds)
-    .select('s.user_id', 'sh.hole_number', 'sh.stableford_points');
-
-  const pointsByUserHole = new Map();
-  holeRows.forEach((row) => {
-    pointsByUserHole.set(`${Number(row.user_id)}:${Number(row.hole_number)}`, Number(row.stableford_points || 0));
-  });
-
-  const holes = holeConfig.map((hole) => {
-    const holeNo = Number(hole.hole_number);
-    const values = memberIds
-      .map((userId) => Number(pointsByUserHole.get(`${userId}:${holeNo}`) || 0))
-      .sort((a, b) => b - a);
-    const bestThree = values.slice(0, 3);
-    const stableford = bestThree.reduce((sum, p) => sum + Number(p || 0), 0);
-    return {
-      holeNumber: holeNo,
-      par: Number(hole.par || 0),
-      siPrimary: Number(hole.stroke_index_primary || 0),
-      siSecondary: Number(hole.stroke_index_secondary || 0),
-      gross: null,
-      net: null,
-      stableford
-    };
-  });
-
-  const totals = summarizeTotals(holes);
-  const subtitle = memberRows.map((m) => `${m.first_name || ''} ${m.last_name || ''}`.trim()).join(', ');
-  return toScorecardMatrixModel({
-    mode: 'team',
-    day,
-    roundLabel: `Sultans ${dayToRoundLabel(day)}`,
-    dayLabel: dayLabel(day),
-    calcType: CALC_TYPES.STABLEFORD,
-    showStablefordTotals: true,
-    showGrossOnlyTotals: false,
-    title: team.name || 'Sultans Team',
-    subtitle,
-    resultLabel: `${Number(totals.stablefordTotal || 0)} pts`,
-    totals,
-    holes
-  });
-}
-
-async function buildEclecticScorecardModel(db, event, userId, days = [2, 3, 4]) {
-  const scopedDays = (Array.isArray(days) ? days : [2, 3, 4])
-    .map((d) => Number(d))
-    .filter((d) => [2, 3, 4].includes(d));
-  if (!scopedDays.length) return null;
+async function buildEclecticScorecardModel(db, tour, userId, roundNumbers = []) {
+  const scopedRounds = (Array.isArray(roundNumbers) ? roundNumbers : [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  if (!scopedRounds.length) return null;
 
   const [user, handicap] = await Promise.all([
     db('users').where({ id: userId }).first(),
-    db('player_handicaps').where({ event_id: event.id, user_id: userId }).first()
+    db('player_handicaps').where({ tour_id: tour.id, user_id: userId }).first()
   ]);
   if (!user) return null;
 
-  const configDay = [...scopedDays].sort((a, b) => a - b)[0];
-  const holeConfig = await getCourseHolesForDay(db, event.id, configDay);
+  const configRound = [...scopedRounds].sort((a, b) => a - b)[0];
+  const holeConfig = await getCourseHolesForRound(db, tour.id, configRound);
   if (!holeConfig.length) return null;
 
   const rows = await db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-    .where({ 's.event_id': event.id, 's.type': 'individual', 's.user_id': userId })
-    .whereIn('s.day', scopedDays)
-    .select('s.day', 'sh.hole_number', 'sh.gross_score', 'sh.stableford_points');
+    .where({ 's.tour_id': tour.id, 's.type': 'individual', 's.user_id': userId })
+    .whereIn('s.round_number', scopedRounds)
+    .select('s.round_number', 'sh.hole_number', 'sh.gross_score', 'sh.stableford_points');
 
   const bestByHole = new Map();
   for (const row of rows) {
     const hole = Number(row.hole_number);
     const stableford = Number(row.stableford_points || 0);
     const gross = Number(row.gross_score || 0);
-    const day = Number(row.day || 0);
+    const roundNumber = Number(row.round_number || 0);
     if (!bestByHole.has(hole)) {
-      bestByHole.set(hole, { hole, stableford, gross, day });
+      bestByHole.set(hole, { hole, stableford, gross, roundNumber });
       continue;
     }
     const current = bestByHole.get(hole);
-    // Primary: best stableford. Tie-break: lower gross. Then earlier round.
     if (
       stableford > Number(current.stableford || 0) ||
       (stableford === Number(current.stableford || 0) && gross < Number(current.gross || 0)) ||
-      (stableford === Number(current.stableford || 0) && gross === Number(current.gross || 0) && day < Number(current.day || 0))
+      (stableford === Number(current.stableford || 0) && gross === Number(current.gross || 0) && roundNumber < Number(current.roundNumber || 0))
     ) {
-      bestByHole.set(hole, { hole, stableford, gross, day });
+      bestByHole.set(hole, { hole, stableford, gross, roundNumber });
     }
   }
 
@@ -865,9 +661,9 @@ async function buildEclecticScorecardModel(db, event, userId, days = [2, 3, 4]) 
   const totalPoints = holes.reduce((sum, h) => sum + Number(h.stableford || 0), 0);
   return toScorecardMatrixModel({
     mode: 'individual',
-    day: configDay,
+    roundNumber: configRound,
     roundLabel: 'Eclectic',
-    dayLabel: 'Rounds 1-3',
+    dayLabel: 'All Rounds',
     calcType: CALC_TYPES.STABLEFORD,
     showStablefordTotals: true,
     showGrossOnlyTotals: false,
@@ -879,364 +675,337 @@ async function buildEclecticScorecardModel(db, event, userId, days = [2, 3, 4]) 
   });
 }
 
+function buildRoundStates(publicationRows, finalizationRows) {
+  const finByRound = new Map(finalizationRows.map((r) => [r.roundNumber, r]));
+  return publicationRows.map((pub) => {
+    const fin = finByRound.get(pub.roundNumber) || { total: 0, submitted: 0, isFinalized: false };
+    return {
+      roundNumber: pub.roundNumber,
+      label: dayLabel(pub.roundNumber),
+      status: pub.status,
+      calcType: pub.calcType,
+      leaderboardPublished: pub.leaderboardPublished,
+      virtualTeamsEnabled: pub.virtualTeamsEnabled || false,
+      total: fin.total,
+      submitted: fin.submitted,
+      isFinalized: fin.isFinalized
+    };
+  });
+}
+
+function deriveRoundSets(roundStates) {
+  const finalizedRoundNumbers = roundStates.filter((r) => r.isFinalized).map((r) => r.roundNumber);
+  const publishedRoundNumbers = roundStates.filter((r) => r.leaderboardPublished).map((r) => r.roundNumber);
+  const stablefordRoundNumbers = roundStates.filter((r) => r.calcType !== 'ambrose_nett').map((r) => r.roundNumber);
+  const visibleStablefordRounds = publishedRoundNumbers.filter((rn) => stablefordRoundNumbers.includes(rn));
+  return { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds };
+}
+
+function buildVisibleBoards(boards, roundStates, publishedRoundNumbers, stablefordRoundNumbers, skinsNormalized, championship) {
+  const stablefordByDayVisible = {};
+  stablefordRoundNumbers.forEach((rn) => {
+    stablefordByDayVisible[rn] = publishedRoundNumbers.includes(rn) ? (boards.stableford?.byDay?.[rn] || []) : [];
+  });
+  return {
+    stableford: { byDay: stablefordByDayVisible, championship },
+    skins: {
+      ...boards.skins,
+      holes: skinsNormalized.holes,
+      daily: skinsNormalized.daily
+    }
+  };
+}
+
 function leaderboardRouter(db) {
   const router = express.Router();
 
-  router.post('/publish/:day', requireAuth, async (req, res, next) => {
+  router.post('/publish/:roundNumber', requireAuth, async (req, res, next) => {
     try {
-      const day = Number(req.params.day);
-      if (![1, 2, 3, 4].includes(day)) return res.redirect('/leaderboards?error=Invalid%20day');
-      if (!isPrivileged(req.session?.user)) return res.status(403).send('Forbidden');
+      const roundNumber = Number(req.params.roundNumber);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(roundNumber) || roundNumber <= 0) {
+        return res.redirect(tp('/leaderboards?error=Invalid%20round'));
+      }
+      if (!isPrivileged(req)) return res.status(403).send('Forbidden');
 
-      const active = await db('events').where({ is_active: 1 }).first();
-      if (!active) return res.redirect('/leaderboards?error=No%20active%20event');
+      const active = await db('tours').where({ tenant_id: req.tenant.id, status: 'active' }).first();
+      if (!active) return res.redirect(tp('/leaderboards?error=No%20active%20tour'));
 
-      const finalizedRows = await getDayFinalizationRows(db, active.id);
-      const target = finalizedRows.find((row) => row.day === day);
-      if (!target || !target.isFinalized) {
-        return res.redirect(`/leaderboards?error=${encodeURIComponent(`${dayLabel(day)} is not finalized`)}`);
+      const finRow = await db('scorecards')
+        .where({ tour_id: active.id, round_number: roundNumber })
+        .count({ total: '*' })
+        .sum({ submitted: db.raw(`CASE WHEN status = 'submitted' THEN 1 ELSE 0 END`) })
+        .first();
+      const total = Number(finRow?.total || 0);
+      const submitted = Number(finRow?.submitted || 0);
+      if (total === 0 || submitted !== total) {
+        return res.redirect(tp(`/leaderboards?error=${encodeURIComponent(`${dayLabel(roundNumber)} is not finalized`)}`));
       }
 
-      const existing = await db('event_day_statuses').where({ event_id: active.id, day }).first();
-      if (existing) {
-        await db('event_day_statuses')
-          .where({ id: existing.id })
-          .update({ leaderboard_published: 1, updated_at: db.fn.now() });
-      } else {
-        const defaultCourseId = await getDefaultCourseId(db);
-        if (!defaultCourseId) return res.redirect('/leaderboards?error=No%20courses%20configured');
-        await db('event_day_statuses').insert({
-          event_id: active.id,
-          day,
-          status: 'draft',
-          calc_type: defaultCalcTypeForDay(day),
-          leaderboard_published: 1,
-          course_id: defaultCourseId
-        });
-      }
+      const existing = await db('golf_rounds').where({ tour_id: active.id, round_number: roundNumber }).first();
+      if (!existing) return res.redirect(tp('/leaderboards?error=Round%20not%20configured'));
 
-      return res.redirect(`/leaderboards?message=${encodeURIComponent(`${dayLabel(day)} published`)}`);
+      await db('golf_rounds')
+        .where({ id: existing.id })
+        .update({ leaderboard_published: 1, updated_at: db.fn.now() });
+
+      await recalculateSkins(db, active);
+
+      return res.redirect(tp(`/leaderboards?message=${encodeURIComponent(`${dayLabel(roundNumber)} published`)}`));
     } catch (error) {
       return next(error);
     }
   });
 
-  router.post('/unpublish/:day', requireAuth, async (req, res, next) => {
+  router.post('/unpublish/:roundNumber', requireAuth, async (req, res, next) => {
     try {
-      const day = Number(req.params.day);
-      if (![1, 2, 3, 4].includes(day)) return res.redirect('/leaderboards?error=Invalid%20day');
-      if (!isPrivileged(req.session?.user)) return res.status(403).send('Forbidden');
-
-      const active = await db('events').where({ is_active: 1 }).first();
-      if (!active) return res.redirect('/leaderboards?error=No%20active%20event');
-
-      const existing = await db('event_day_statuses').where({ event_id: active.id, day }).first();
-      if (existing) {
-        await db('event_day_statuses')
-          .where({ id: existing.id })
-          .update({ leaderboard_published: 0, updated_at: db.fn.now() });
-      } else {
-        const defaultCourseId = await getDefaultCourseId(db);
-        if (!defaultCourseId) return res.redirect('/leaderboards?error=No%20courses%20configured');
-        await db('event_day_statuses').insert({
-          event_id: active.id,
-          day,
-          status: 'draft',
-          calc_type: defaultCalcTypeForDay(day),
-          leaderboard_published: 0,
-          course_id: defaultCourseId
-        });
+      const roundNumber = Number(req.params.roundNumber);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(roundNumber) || roundNumber <= 0) {
+        return res.redirect(tp('/leaderboards?error=Invalid%20round'));
       }
+      if (!isPrivileged(req)) return res.status(403).send('Forbidden');
 
-      return res.redirect(`/leaderboards?message=${encodeURIComponent(`${dayLabel(day)} unpublished`)}`);
+      const active = await db('tours').where({ tenant_id: req.tenant.id, status: 'active' }).first();
+      if (!active) return res.redirect(tp('/leaderboards?error=No%20active%20tour'));
+
+      const existing = await db('golf_rounds').where({ tour_id: active.id, round_number: roundNumber }).first();
+      if (!existing) return res.redirect(tp('/leaderboards?error=Round%20not%20configured'));
+
+      await db('golf_rounds')
+        .where({ id: existing.id })
+        .update({ leaderboard_published: 0, updated_at: db.fn.now() });
+
+      await recalculateSkins(db, active);
+
+      return res.redirect(tp(`/leaderboards?message=${encodeURIComponent(`${dayLabel(roundNumber)} unpublished`)}`));
     } catch (error) {
       return next(error);
     }
   });
 
-  router.get('/event/:eventId/scorecards/individual/:userId', requireAuth, async (req, res, next) => {
+  router.get('/tour/:tourId/scorecards/individual/:userId', requireAuth, async (req, res, next) => {
     try {
-      const eventId = Number(req.params.eventId);
+      const tourId = Number(req.params.tourId);
       const userId = Number(req.params.userId);
-      const day = Number(req.query.day || 2);
-      if (!Number.isInteger(eventId) || eventId <= 0) return res.redirect('/leaderboards?error=Invalid%20event');
-      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20player`);
-      if (![2, 3, 4].includes(day)) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20round`);
+      const roundNumber = Number(req.query.round || req.query.day);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(tourId) || tourId <= 0) return res.redirect(tp('/leaderboards?error=Invalid%20tour'));
+      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Invalid%20player`));
+      if (!Number.isInteger(roundNumber) || roundNumber <= 0) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Invalid%20round`));
 
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) return res.redirect('/leaderboards?error=Event%20not%20found');
-      const publishedDays = await getPublishedDaySet(db, eventId);
-      if (!publishedDays.has(day)) return res.redirect(`/leaderboards/event/${eventId}?error=Round%20not%20published`);
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.redirect(tp('/leaderboards?error=Tour%20not%20found'));
+      const publishedRounds = await getPublishedRoundSet(db, tourId);
+      if (!publishedRounds.has(roundNumber)) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Round%20not%20published`));
 
-      const scorecardModel = await buildIndividualScorecardModel(db, event, day, userId);
-      if (!scorecardModel) return res.redirect(`/leaderboards/event/${eventId}?error=Scorecard%20not%20found`);
+      const scorecardModel = await buildIndividualScorecardModel(db, tour, roundNumber, userId);
+      if (!scorecardModel) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Scorecard%20not%20found`));
 
       return res.render('leaderboard/scorecard-view', {
-        title: `${scorecardModel.title} ${dayToRoundLabel(day)} Scorecard`,
+        title: `${scorecardModel.title} ${dayLabel(roundNumber)} Scorecard`,
         user: req.session.user,
-        activeEvent: event,
+        activeTour: tour,
         models: [scorecardModel],
-        backUrl: `/leaderboards/event/${eventId}?view=championship`,
-        pageSubtitle: `${event.year} · ${event.location}`
+        backUrl: tp(`/leaderboards/tour/${tourId}?view=championship`),
+        pageSubtitle: `${tour.year} · ${tour.location}`
       });
     } catch (error) {
       return next(error);
     }
   });
 
-  router.get('/event/:eventId/scorecards/team/:teamId', requireAuth, async (req, res, next) => {
+  router.get('/tour/:tourId/scorecards/team/:teamId', requireAuth, async (req, res, next) => {
     try {
-      const eventId = Number(req.params.eventId);
+      const tourId = Number(req.params.tourId);
       const teamId = Number(req.params.teamId);
-      if (!Number.isInteger(eventId) || eventId <= 0) return res.redirect('/leaderboards?error=Invalid%20event');
-      if (!Number.isInteger(teamId) || teamId <= 0) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20team`);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(tourId) || tourId <= 0) return res.redirect(tp('/leaderboards?error=Invalid%20tour'));
+      if (!Number.isInteger(teamId) || teamId <= 0) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Invalid%20team`));
 
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) return res.redirect('/leaderboards?error=Event%20not%20found');
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.redirect(tp('/leaderboards?error=Tour%20not%20found'));
 
-      const scorecardModel = await buildAmbroseScorecardModel(db, event, teamId);
-      if (!scorecardModel) return res.redirect(`/leaderboards/event/${eventId}?error=Scorecard%20not%20found`);
+      const scorecardModel = await buildAmbroseScorecardModel(db, tour, teamId);
+      if (!scorecardModel) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Scorecard%20not%20found`));
 
-      const publishedDays = await getPublishedDaySet(db, eventId);
-      if (!publishedDays.has(Number(scorecardModel.day))) {
-        return res.redirect(`/leaderboards/event/${eventId}?error=Ambrose%20not%20published`);
+      const publishedRounds = await getPublishedRoundSet(db, tourId);
+      if (!publishedRounds.has(Number(scorecardModel.roundNumber))) {
+        return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Ambrose%20not%20published`));
       }
 
       return res.render('leaderboard/scorecard-view', {
         title: `${scorecardModel.title} ${scorecardModel.dayLabel} Scorecard`,
         user: req.session.user,
-        activeEvent: event,
+        activeTour: tour,
         models: [scorecardModel],
-        backUrl: `/leaderboards/event/${eventId}?view=ambrose`,
-        pageSubtitle: `${event.year} · ${event.location}`
+        backUrl: tp(`/leaderboards/tour/${tourId}?view=ambrose`),
+        pageSubtitle: `${tour.year} · ${tour.location}`
       });
     } catch (error) {
       return next(error);
     }
   });
 
-  router.get('/event/:eventId/scorecards/championship/:userId', requireAuth, async (req, res, next) => {
+  router.get('/tour/:tourId/scorecards/championship/:userId', requireAuth, async (req, res, next) => {
     try {
-      const eventId = Number(req.params.eventId);
+      const tourId = Number(req.params.tourId);
       const userId = Number(req.params.userId);
-      if (!Number.isInteger(eventId) || eventId <= 0) return res.redirect('/leaderboards?error=Invalid%20event');
-      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20player`);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(tourId) || tourId <= 0) return res.redirect(tp('/leaderboards?error=Invalid%20tour'));
+      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Invalid%20player`));
 
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) return res.redirect('/leaderboards?error=Event%20not%20found');
-      const publishedDays = await getPublishedDaySet(db, eventId);
-      const rounds = [2, 3, 4].filter((day) => publishedDays.has(day));
-      if (!rounds.length) return res.redirect(`/leaderboards/event/${eventId}?error=No%20published%20rounds`);
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.redirect(tp('/leaderboards?error=Tour%20not%20found'));
 
-      const modelsRaw = await Promise.all(rounds.map((day) => buildIndividualScorecardModel(db, event, day, userId)));
+      const pubRows = await getRoundPublicationRows(db, tourId);
+      const publishedStablefordRounds = pubRows
+        .filter((r) => r.leaderboardPublished && r.calcType !== 'ambrose_nett')
+        .map((r) => r.roundNumber);
+      if (!publishedStablefordRounds.length) {
+        return res.redirect(tp(`/leaderboards/tour/${tourId}?error=No%20published%20rounds`));
+      }
+
+      const modelsRaw = await Promise.all(
+        publishedStablefordRounds.map((rn) => buildIndividualScorecardModel(db, tour, rn, userId))
+      );
       const models = modelsRaw.filter(Boolean);
-      if (!models.length) return res.redirect(`/leaderboards/event/${eventId}?error=No%20scorecards%20found`);
+      if (!models.length) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=No%20scorecards%20found`));
 
       const playerName = models[0].title;
       return res.render('leaderboard/scorecard-view', {
         title: `${playerName} Championship Cards`,
         user: req.session.user,
-        activeEvent: event,
+        activeTour: tour,
         models,
-        backUrl: `/leaderboards/event/${eventId}?view=championship`,
-        pageSubtitle: `${event.year} · ${event.location} · Championship`
+        backUrl: tp(`/leaderboards/tour/${tourId}?view=championship`),
+        pageSubtitle: `${tour.year} · ${tour.location} · Championship`
       });
     } catch (error) {
       return next(error);
     }
   });
 
-  router.get('/event/:eventId/scorecards/sultans/:teamId', requireAuth, async (req, res, next) => {
+  router.get('/tour/:tourId/scorecards/eclectic/:userId', requireAuth, async (req, res, next) => {
     try {
-      const eventId = Number(req.params.eventId);
-      const teamId = Number(req.params.teamId);
-      if (!Number.isInteger(eventId) || eventId <= 0) return res.redirect('/leaderboards?error=Invalid%20event');
-      if (!Number.isInteger(teamId) || teamId <= 0) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20team`);
-
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) return res.redirect('/leaderboards?error=Event%20not%20found');
-      const publishedDays = await getPublishedDaySet(db, eventId);
-      const rounds = [2, 3, 4].filter((day) => publishedDays.has(day));
-      if (rounds.length < 2) return res.redirect(`/leaderboards/event/${eventId}?view=sultans&error=Sultans%20is%20available%20after%20Round%202`);
-
-      const modelsRaw = await Promise.all(rounds.map((day) => buildSultansScorecardModel(db, event, teamId, day)));
-      const models = modelsRaw.filter(Boolean);
-      if (!models.length) return res.redirect(`/leaderboards/event/${eventId}?view=sultans&error=Sultans%20scorecard%20not%20found`);
-
-      return res.render('leaderboard/scorecard-view', {
-        title: `${models[0].title} Sultans Scorecard`,
-        user: req.session.user,
-        activeEvent: event,
-        models,
-        backUrl: `/leaderboards/event/${eventId}?view=sultans`,
-        pageSubtitle: `${event.year} · ${event.location} · Sultans`
-      });
-    } catch (error) {
-      return next(error);
-    }
-  });
-
-  router.get('/event/:eventId/scorecards/eclectic/:userId', requireAuth, async (req, res, next) => {
-    try {
-      const eventId = Number(req.params.eventId);
+      const tourId = Number(req.params.tourId);
       const userId = Number(req.params.userId);
-      if (!Number.isInteger(eventId) || eventId <= 0) return res.redirect('/leaderboards?error=Invalid%20event');
-      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(`/leaderboards/event/${eventId}?error=Invalid%20player`);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(tourId) || tourId <= 0) return res.redirect(tp('/leaderboards?error=Invalid%20tour'));
+      if (!Number.isInteger(userId) || userId <= 0) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Invalid%20player`));
 
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) return res.redirect('/leaderboards?error=Event%20not%20found');
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.redirect(tp('/leaderboards?error=Tour%20not%20found'));
 
-      const publishedDays = await getPublishedDaySet(db, eventId);
-      const scopedDays = [2, 3, 4].filter((day) => publishedDays.has(day));
-      if (scopedDays.length < 2) {
-        return res.redirect(`/leaderboards/event/${eventId}?view=eclectic&error=Eclectic%20is%20available%20after%20Round%202`);
+      const pubRows = await getRoundPublicationRows(db, tourId);
+      const publishedStablefordRounds = pubRows
+        .filter((r) => r.leaderboardPublished && r.calcType !== 'ambrose_nett')
+        .map((r) => r.roundNumber);
+      if (publishedStablefordRounds.length < 2) {
+        return res.redirect(tp(`/leaderboards/tour/${tourId}?view=eclectic&error=Eclectic%20is%20available%20after%20Round%202`));
       }
 
-      const scorecardModel = await buildEclecticScorecardModel(db, event, userId, scopedDays);
-      if (!scorecardModel) return res.redirect(`/leaderboards/event/${eventId}?view=eclectic&error=Eclectic%20scorecard%20not%20found`);
+      const scorecardModel = await buildEclecticScorecardModel(db, tour, userId, publishedStablefordRounds);
+      if (!scorecardModel) {
+        return res.redirect(tp(`/leaderboards/tour/${tourId}?view=eclectic&error=Eclectic%20scorecard%20not%20found`));
+      }
 
       return res.render('leaderboard/scorecard-view', {
         title: `${scorecardModel.title} Eclectic Scorecard`,
         user: req.session.user,
-        activeEvent: event,
+        activeTour: tour,
         models: [scorecardModel],
-        backUrl: `/leaderboards/event/${eventId}?view=eclectic`,
-        pageSubtitle: `${event.year} · ${event.location} · Eclectic`
+        backUrl: tp(`/leaderboards/tour/${tourId}?view=eclectic`),
+        pageSubtitle: `${tour.year} · ${tour.location} · Eclectic`
       });
     } catch (error) {
       return next(error);
     }
   });
 
-  router.get('/event/:eventId', requireAuth, async (req, res, next) => {
+  router.get('/tour/:tourId', requireAuth, async (req, res, next) => {
     try {
       const viewer = req.session.user;
-      const eventId = Number(req.params.eventId);
-      if (!Number.isInteger(eventId) || eventId <= 0) {
-        return res.redirect('/admin/dashboard?error=Invalid%20event');
+      const tourId = Number(req.params.tourId);
+      const tp = res.locals.tenantPath;
+      if (!Number.isInteger(tourId) || tourId <= 0) {
+        return res.redirect(tp('/admin/dashboard?error=Invalid%20tour'));
       }
 
-      const event = await db('events').where({ id: eventId }).first();
-      if (!event) {
-        return res.redirect('/admin/dashboard?error=Event%20not%20found');
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) {
+        return res.redirect(tp('/admin/dashboard?error=Tour%20not%20found'));
       }
 
-      const [publicationRows, finalizationRows, calcuttaSummary] = await Promise.all([
-        getDayPublicationRows(db, event.id),
-        getDayFinalizationRows(db, event.id),
-        getCalcuttaSummary(db, event.id, viewer?.id)
+      const [publicationRows, finalizationRows] = await Promise.all([
+        getRoundPublicationRows(db, tour.id),
+        getRoundFinalizationRows(db, tour.id),
       ]);
-      const requestedView = normalizeLeaderboardView(req.query.view);
-      const activeView = requestedView === 'calcutta' && !calcuttaSummary.finalized
-        ? 'championship'
-        : requestedView;
 
-      const dayStates = [1, 2, 3, 4].map((day) => {
-        const pub = publicationRows.find((r) => r.day === day) || { day, status: 'draft', leaderboardPublished: false };
-        const fin = finalizationRows.find((r) => r.day === day) || { day, total: 0, submitted: 0, isFinalized: false };
-        return {
-          day,
-          label: dayLabel(day),
-          status: pub.status,
-          leaderboardPublished: pub.leaderboardPublished,
-          total: fin.total,
-          submitted: fin.submitted,
-          isFinalized: fin.isFinalized
-        };
+      const roundStates = buildRoundStates(publicationRows, finalizationRows);
+      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds } = deriveRoundSets(roundStates);
+
+      const adminView = isAdminViewer(req);
+      const effectivePublished = adminView ? stablefordRoundNumbers : publishedRoundNumbers;
+      const effectiveVisible = adminView ? stablefordRoundNumbers : visibleStablefordRounds;
+      const showAggregate = effectiveVisible.length > 0;
+      const activeView = normalizeLeaderboardView(req.query.view, effectiveVisible, visibleStablefordRounds);
+
+      const boards = await buildLeaderboards(db, tour.id, {
+        finalizedRoundsForSkins: finalizedRoundNumbers,
+        roundNumbers: stablefordRoundNumbers,
+        bestOf: tour.leaderboard_best_of_rounds || null,
+        initialCarryInSkins: tour.skins_carry_in_skins || 0
       });
 
-      const finalizedDays = dayStates.filter((d) => d.isFinalized).map((d) => d.day);
-      const publishedDays = dayStates.filter((d) => d.leaderboardPublished).map((d) => d.day);
-      const boards = await buildLeaderboards(db, event.id, { finalizedDaysForSkins: finalizedDays });
-      const visibleDays = publishedDays;
-      const visibleIndividualDays = visibleDays.filter((day) => [2, 3, 4].includes(day));
-      const showAggregate = visibleIndividualDays.length > 0;
-      const showEclectic = visibleIndividualDays.length >= 2;
-      const showSultans = visibleIndividualDays.length >= 2;
-      const skinsNormalized = normalizeSkins(boards.skins.holes, visibleDays);
-      const championship =
-        showAggregate
-          ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, visibleIndividualDays)
-          : [];
-      const [eclecticTop, sultansTop] = showAggregate
-        ? await Promise.all([
-            showEclectic ? calculateEclecticLeaderboard(db, event.id, visibleIndividualDays) : Promise.resolve([]),
-            showSultans ? calculateSultansLeaderboard(db, event.id, visibleIndividualDays) : Promise.resolve([])
-          ])
-        : [[], []];
+      const championship = showAggregate
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible)
+        : [];
+      const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
+      const visibleBoards = buildVisibleBoards(
+        boards, roundStates, effectivePublished, stablefordRoundNumbers, skinsNormalized, championship
+      );
 
-      const visibleBoards = {
-        ...boards,
-        ambrose: visibleDays.includes(1) ? boards.ambrose : [],
-        stableford: {
-          byDay: {
-            2: visibleDays.includes(2) ? (boards.stableford?.byDay?.[2] || []) : [],
-            3: visibleDays.includes(3) ? (boards.stableford?.byDay?.[3] || []) : [],
-            4: visibleDays.includes(4) ? (boards.stableford?.byDay?.[4] || []) : []
-          },
-          championship
-        },
-        eclectic: showEclectic ? eclecticTop : [],
-        sultans: showSultans ? sultansTop : [],
-        skins: {
-          ...boards.skins,
-          holes: skinsNormalized.holes,
-          daily: skinsNormalized.daily
-        }
-      };
-      const skinPotPerHole = Number(visibleBoards.skins.activePlayerCount || 0) * Number(event.skins_amount_per_player_per_hole || 1);
-      const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinPotPerHole);
-      const skinsCarryovers = buildSkinsCarryovers(visibleBoards.skins.holes);
-      const championshipTable = buildChampionshipTable(visibleBoards.stableford);
-      const calcuttaPayouts = buildCalcuttaPayouts(
-        event,
-        calcuttaSummary,
-        visibleBoards.stableford?.byDay || {},
-        championshipTable,
-        publishedDays
-      );
-      if (calcuttaPayouts.enabled) {
-        const viewerId = Number(viewer?.id || 0);
-        const personalPayout = Number(calcuttaPayouts.personalPayoutByUserId.get(viewerId) || 0);
-        if (calcuttaSummary.viewerBalance) {
-          calcuttaSummary.viewerBalance.personalPayout = personalPayout;
-          calcuttaSummary.viewerBalance.netAfterPayout = Number(calcuttaSummary.viewerBalance.netBalance || 0) + personalPayout;
-        }
+      const skinsDetail = buildSkinsDetail(visibleBoards.skins.holes, effectivePublished, tour.skins_amount_per_player_per_hole);
+      const championshipTable = buildChampionshipTable(visibleBoards.stableford, stablefordRoundNumbers);
+
+      const playerMetaById = await getPlayerMetaByUserIds(db, tour.id, championshipTable.map((row) => Number(row.userId)));
+      const noveltyResults = await getNoveltyResults(db, tour.id, effectivePublished);
+
+      const dailyPrizes = Array.isArray(tour.daily_prizes)
+        ? tour.daily_prizes
+        : (tour.daily_prizes ? JSON.parse(tour.daily_prizes) : []);
+
+      const skinsPotPerHole = Number(boards.skins.activePlayerCount || 0) * Number(tour.skins_amount_per_player_per_hole || 0);
+      const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinsPotPerHole);
+
+      const vtEnabledRounds = roundStates.filter((r) => r.virtualTeamsEnabled && effectiveVisible.includes(r.roundNumber));
+      const virtualTeamResultsByRound = {};
+      for (const r of vtEnabledRounds) {
+        virtualTeamResultsByRound[r.roundNumber] = await calculateVirtualTeamResults(db, tour.id, r.roundNumber);
       }
-      calcuttaSummary.payouts = calcuttaPayouts;
-      const userIdsNeedingMeta = [
-        ...championshipTable.map((row) => Number(row.userId)),
-        ...(visibleBoards.eclectic || []).map((row) => Number(row.userId))
-      ];
-      const playerMetaById = await getPlayerMetaByUserIds(db, event.id, userIdsNeedingMeta);
-      const ambroseTeamMembersById = await getAmbroseTeamMembersByTeamId(
-        db,
-        event.id,
-        (visibleBoards.ambrose || []).map((row) => Number(row.id))
-      );
-      const sultansTeamMembersById = await getSultansTeamMembersByTeamId(
-        db,
-        event.id,
-        (visibleBoards.sultans || []).map((row) => Number(row.id))
-      );
+
+      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound);
 
       return res.render('leaderboard/index', {
-        title: `Leaderboards ${event.year}`,
+        title: `Leaderboards ${tour.year}`,
         user: viewer,
-        activeEvent: event,
+        activeTour: tour,
         boards: visibleBoards,
+        skinsDetail,
         skinsLeaderboard,
-        skinsCarryovers,
         championshipTable,
         playerMetaById,
-        ambroseTeamMembersById,
-        sultansTeamMembersById,
-        dayStates,
-        calcuttaSummary,
+        noveltyResults,
+        roundStates,
+        stablefordRoundNumbers,
         activeView,
-        leaderboardBasePath: `/leaderboards/event/${event.id}`,
-        canManagePublish: false,
+        dayViews,
+        leaderboardBasePath: tp(`/leaderboards/tour/${tour.id}`),
+        canManagePublish: adminView,
         hasDirtyMarker: false,
+        dayLabel,
+        dailyPrizes,
         message: req.query.message ? String(req.query.message) : null,
         error: req.query.error ? String(req.query.error) : null
       });
@@ -1248,161 +1017,106 @@ function leaderboardRouter(db) {
   router.get('/', requireAuth, async (req, res, next) => {
     try {
       const viewer = req.session.user;
-      const active = await db('events').where({ is_active: 1 }).first();
+      const tp = res.locals.tenantPath;
+      const active = await db('tours').where({ tenant_id: req.tenant.id, status: 'active' }).first();
+
       if (!active) {
         const activeView = normalizeLeaderboardView(req.query.view);
         return res.render('leaderboard/index', {
           title: 'Leaderboards',
           user: viewer,
-          activeEvent: null,
+          activeTour: null,
           boards: {
-            ambrose: [],
-            stableford: { byDay: { 2: [], 3: [], 4: [] }, championship: [] },
-            eclectic: [],
-            sultans: [],
+            stableford: { byDay: {}, championship: [] },
             skins: { holes: [], winners: [], activePlayerCount: 0, stakePerPlayer: 1 }
           },
+          skinsDetail: [],
           skinsLeaderboard: { playerRows: [], teamRows: [] },
-          skinsCarryovers: [],
           championshipTable: [],
           playerMetaById: {},
-          ambroseTeamMembersById: {},
-          sultansTeamMembersById: {},
-          calcuttaSummary: {
-            finalized: false,
-            totalPlayers: 0,
-            drawnPlayers: 0,
-            missingOwnerCount: 0,
-            poolTotal: 0,
-            rows: [],
-            balances: [],
-            viewerBalance: null
-          },
-          dayStates: [],
+          noveltyResults: [],
+          roundStates: [],
+          stablefordRoundNumbers: [],
           activeView,
-          leaderboardBasePath: '/leaderboards',
+          dayViews: [],
+          leaderboardBasePath: tp('/leaderboards'),
           canManagePublish: false,
           hasDirtyMarker: false,
+          dayLabel,
           message: req.query.message ? String(req.query.message) : null,
           error: req.query.error ? String(req.query.error) : null
         });
       }
 
-      const [publicationRows, finalizationRows, calcuttaSummary] = await Promise.all([
-        getDayPublicationRows(db, active.id),
-        getDayFinalizationRows(db, active.id),
-        getCalcuttaSummary(db, active.id, viewer?.id)
+      const [publicationRows, finalizationRows] = await Promise.all([
+        getRoundPublicationRows(db, active.id),
+        getRoundFinalizationRows(db, active.id),
       ]);
-      const requestedView = normalizeLeaderboardView(req.query.view);
-      const activeView = requestedView === 'calcutta' && !calcuttaSummary.finalized
-        ? 'championship'
-        : requestedView;
 
-      const dayStates = [1, 2, 3, 4].map((day) => {
-        const pub = publicationRows.find((r) => r.day === day) || { day, status: 'draft', leaderboardPublished: false };
-        const fin = finalizationRows.find((r) => r.day === day) || { day, total: 0, submitted: 0, isFinalized: false };
-        return {
-          day,
-          label: dayLabel(day),
-          status: pub.status,
-          leaderboardPublished: pub.leaderboardPublished,
-          total: fin.total,
-          submitted: fin.submitted,
-          isFinalized: fin.isFinalized
-        };
+      const roundStates = buildRoundStates(publicationRows, finalizationRows);
+      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds } = deriveRoundSets(roundStates);
+
+      const adminView = isAdminViewer(req);
+      const effectivePublished = adminView ? stablefordRoundNumbers : publishedRoundNumbers;
+      const effectiveVisible = adminView ? stablefordRoundNumbers : visibleStablefordRounds;
+      const showAggregate = effectiveVisible.length > 0;
+      const activeView = normalizeLeaderboardView(req.query.view, effectiveVisible, visibleStablefordRounds);
+
+      const boards = await buildLeaderboards(db, active.id, {
+        finalizedRoundsForSkins: finalizedRoundNumbers,
+        roundNumbers: stablefordRoundNumbers,
+        bestOf: active.leaderboard_best_of_rounds || null,
+        initialCarryInSkins: active.skins_carry_in_skins || 0
       });
 
-      const finalizedDays = dayStates.filter((d) => d.isFinalized).map((d) => d.day);
-      const boards = await buildLeaderboards(db, active.id, { finalizedDaysForSkins: finalizedDays });
-      const publishedDays = dayStates.filter((d) => d.leaderboardPublished).map((d) => d.day);
-      const visibleDays = publishedDays;
-      const visibleIndividualDays = visibleDays.filter((day) => [2, 3, 4].includes(day));
-      const showAggregate = visibleIndividualDays.length > 0;
-      const showEclectic = visibleIndividualDays.length >= 2;
-      const showSultans = visibleIndividualDays.length >= 2;
-      const skinsNormalized = normalizeSkins(boards.skins.holes, visibleDays);
-      const championship =
-        showAggregate
-          ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, visibleIndividualDays)
-          : [];
-      const [eclecticTop, sultansTop] = showAggregate
-        ? await Promise.all([
-            showEclectic ? calculateEclecticLeaderboard(db, active.id, visibleIndividualDays) : Promise.resolve([]),
-            showSultans ? calculateSultansLeaderboard(db, active.id, visibleIndividualDays) : Promise.resolve([])
-          ])
-        : [[], []];
-      const visibleBoards = {
-        ...boards,
-        ambrose: visibleDays.includes(1) ? boards.ambrose : [],
-        stableford: {
-          byDay: {
-            2: visibleDays.includes(2) ? (boards.stableford?.byDay?.[2] || []) : [],
-            3: visibleDays.includes(3) ? (boards.stableford?.byDay?.[3] || []) : [],
-            4: visibleDays.includes(4) ? (boards.stableford?.byDay?.[4] || []) : []
-          },
-          championship
-        },
-        eclectic: showEclectic ? eclecticTop : [],
-        sultans: showSultans ? sultansTop : [],
-        skins: {
-          ...boards.skins,
-          holes: skinsNormalized.holes,
-          daily: skinsNormalized.daily
-        }
-      };
-      const skinPotPerHole = Number(visibleBoards.skins.activePlayerCount || 0) * Number(active.skins_amount_per_player_per_hole || 1);
-      const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinPotPerHole);
-      const skinsCarryovers = buildSkinsCarryovers(visibleBoards.skins.holes);
-      const championshipTable = buildChampionshipTable(visibleBoards.stableford);
-      const calcuttaPayouts = buildCalcuttaPayouts(
-        active,
-        calcuttaSummary,
-        visibleBoards.stableford?.byDay || {},
-        championshipTable,
-        publishedDays
+      const championship = showAggregate
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible)
+        : [];
+      const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
+      const visibleBoards = buildVisibleBoards(
+        boards, roundStates, effectivePublished, stablefordRoundNumbers, skinsNormalized, championship
       );
-      if (calcuttaPayouts.enabled) {
-        const viewerId = Number(viewer?.id || 0);
-        const personalPayout = Number(calcuttaPayouts.personalPayoutByUserId.get(viewerId) || 0);
-        if (calcuttaSummary.viewerBalance) {
-          calcuttaSummary.viewerBalance.personalPayout = personalPayout;
-          calcuttaSummary.viewerBalance.netAfterPayout = Number(calcuttaSummary.viewerBalance.netBalance || 0) + personalPayout;
-        }
+
+      const skinsDetail = buildSkinsDetail(visibleBoards.skins.holes, effectivePublished, active.skins_amount_per_player_per_hole);
+      const championshipTable = buildChampionshipTable(visibleBoards.stableford, stablefordRoundNumbers);
+
+      const playerMetaById = await getPlayerMetaByUserIds(db, active.id, championshipTable.map((row) => Number(row.userId)));
+      const noveltyResults = await getNoveltyResults(db, active.id, effectivePublished);
+
+      const dailyPrizes = Array.isArray(active.daily_prizes)
+        ? active.daily_prizes
+        : (active.daily_prizes ? JSON.parse(active.daily_prizes) : []);
+
+      const skinsPotPerHole = Number(boards.skins.activePlayerCount || 0) * Number(active.skins_amount_per_player_per_hole || 0);
+      const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinsPotPerHole);
+
+      const vtEnabledRounds = roundStates.filter((r) => r.virtualTeamsEnabled && effectiveVisible.includes(r.roundNumber));
+      const virtualTeamResultsByRound = {};
+      for (const r of vtEnabledRounds) {
+        virtualTeamResultsByRound[r.roundNumber] = await calculateVirtualTeamResults(db, active.id, r.roundNumber);
       }
-      calcuttaSummary.payouts = calcuttaPayouts;
-      const userIdsNeedingMeta = [
-        ...championshipTable.map((row) => Number(row.userId)),
-        ...(visibleBoards.eclectic || []).map((row) => Number(row.userId))
-      ];
-      const playerMetaById = await getPlayerMetaByUserIds(db, active.id, userIdsNeedingMeta);
-      const ambroseTeamMembersById = await getAmbroseTeamMembersByTeamId(
-        db,
-        active.id,
-        (visibleBoards.ambrose || []).map((row) => Number(row.id))
-      );
-      const sultansTeamMembersById = await getSultansTeamMembersByTeamId(
-        db,
-        active.id,
-        (visibleBoards.sultans || []).map((row) => Number(row.id))
-      );
+
+      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound);
 
       return res.render('leaderboard/index', {
         title: 'Leaderboards',
         user: viewer,
-        activeEvent: active,
+        activeTour: active,
         boards: visibleBoards,
+        skinsDetail,
         skinsLeaderboard,
-        skinsCarryovers,
         championshipTable,
         playerMetaById,
-        ambroseTeamMembersById,
-        sultansTeamMembersById,
-        dayStates,
-        calcuttaSummary,
+        noveltyResults,
+        roundStates,
+        stablefordRoundNumbers,
         activeView,
-        leaderboardBasePath: '/leaderboards',
-        canManagePublish: false,
+        dayViews,
+        leaderboardBasePath: tp('/leaderboards'),
+        canManagePublish: adminView,
         hasDirtyMarker: false,
+        dayLabel,
+        dailyPrizes,
         message: req.query.message ? String(req.query.message) : null,
         error: req.query.error ? String(req.query.error) : null
       });

@@ -1,26 +1,18 @@
 'use strict';
 
-function holeSequenceFrom(startingHole) {
-  const start = Math.min(18, Math.max(1, Number(startingHole) || 1));
-  const seq = [];
-  for (let i = 0; i < 18; i += 1) {
-    seq.push(((start - 1 + i) % 18) + 1);
-  }
-  return seq;
+// Absolute back-9 hole numbers — countback always uses holes 10-18 regardless of starting hole
+const BACK_9 = [10, 11, 12, 13, 14, 15, 16, 17, 18];
+
+function holeSum(pointsByHole, holes) {
+  return holes.reduce((sum, h) => sum + Number(pointsByHole.get(h) || 0), 0);
 }
 
-function segmentSum(pointsByHole, sequence, size) {
-  const segment = sequence.slice(Math.max(0, sequence.length - size));
-  return segment.reduce((sum, hole) => sum + Number(pointsByHole.get(hole) || 0), 0);
-}
-
-function countbackMetrics(pointsByHole, startingHole) {
-  const sequence = holeSequenceFrom(startingHole);
+function countbackMetrics(pointsByHole) {
   return {
-    last9: segmentSum(pointsByHole, sequence, 9),
-    last6: segmentSum(pointsByHole, sequence, 6),
-    last3: segmentSum(pointsByHole, sequence, 3),
-    last1: segmentSum(pointsByHole, sequence, 1)
+    last9: holeSum(pointsByHole, BACK_9),           // holes 10-18
+    last6: holeSum(pointsByHole, BACK_9.slice(3)),  // holes 13-18
+    last3: holeSum(pointsByHole, BACK_9.slice(6)),  // holes 16-18
+    last1: holeSum(pointsByHole, BACK_9.slice(8)),  // hole 18
   };
 }
 
@@ -39,29 +31,15 @@ function withPosition(rows) {
   return rows.map((row, index) => ({ ...row, position: index + 1 }));
 }
 
-async function getStartingHolesByUserDay(db, eventId) {
-  const rows = await db('tee_group_players as tgp')
-    .join('tee_groups as tg', 'tg.id', 'tgp.tee_group_id')
-    .where({ 'tg.event_id': eventId })
-    .whereIn('tg.day', [2, 3, 4])
-    .select('tgp.user_id', 'tg.day', 'tg.starting_hole');
-
-  const map = new Map();
-  for (const row of rows) {
-    map.set(`${Number(row.user_id)}:${Number(row.day)}`, Number(row.starting_hole || 1));
-  }
-  return map;
-}
-
-async function getStablefordRows(db, eventId) {
+async function getStablefordRows(db, tourId, roundNumbers) {
   return db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
     .join('users as u', 'u.id', 's.user_id')
-    .where({ 's.event_id': eventId, 's.type': 'individual' })
-    .whereIn('s.day', [2, 3, 4])
+    .where({ 's.tour_id': tourId, 's.type': 'individual' })
+    .whereIn('s.round_number', roundNumbers)
     .select(
       's.user_id',
-      's.day',
+      's.round_number',
       'u.first_name',
       'u.last_name',
       'sh.hole_number',
@@ -69,30 +47,28 @@ async function getStablefordRows(db, eventId) {
     );
 }
 
-function buildDayBoards(rows, startingByUserDay) {
-  const byDay = new Map([[2, new Map()], [3, new Map()], [4, new Map()]]);
+function buildDayBoards(rows, days) {
+  const byDay = new Map(days.map((d) => [d, new Map()]));
 
   for (const row of rows) {
-    const day = Number(row.day);
+    const day = Number(row.round_number);
     if (!byDay.has(day)) continue;
     const userId = Number(row.user_id);
-    const key = `${userId}`;
     const dayMap = byDay.get(day);
-    if (!dayMap.has(key)) {
-      dayMap.set(key, {
+    if (!dayMap.has(userId)) {
+      dayMap.set(userId, {
         userId,
         name: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
-        pointsByHole: new Map()
+        pointsByHole: new Map(),
       });
     }
-    dayMap.get(key).pointsByHole.set(Number(row.hole_number), Number(row.stableford_points || 0));
+    dayMap.get(userId).pointsByHole.set(Number(row.hole_number), Number(row.stableford_points || 0));
   }
 
   const boards = {};
-  [2, 3, 4].forEach((day) => {
+  for (const day of days) {
     const rowsForDay = [...byDay.get(day).values()].map((entry) => {
-      const startingHole = startingByUserDay.get(`${entry.userId}:${day}`) || 1;
-      const metrics = countbackMetrics(entry.pointsByHole, startingHole);
+      const metrics = countbackMetrics(entry.pointsByHole);
       const total = [...entry.pointsByHole.values()].reduce((sum, p) => sum + Number(p || 0), 0);
       return {
         userId: entry.userId,
@@ -101,54 +77,69 @@ function buildDayBoards(rows, startingByUserDay) {
         countbackLast9: metrics.last9,
         countbackLast6: metrics.last6,
         countbackLast3: metrics.last3,
-        countbackLast1: metrics.last1
+        countbackLast1: metrics.last1,
       };
     });
-
     boards[day] = withPosition(rowsForDay.sort(compareStablefordRows));
-  });
+  }
 
   return boards;
 }
 
-function buildChampionshipBoard(dayBoards) {
+// Sums only the counting rounds for each player.
+// When bestOf is set, each player's rounds are ranked by score descending and only the
+// top bestOf count — matching the rounds excluded from their total score.
+function buildChampionshipBoard(dayBoards, days, bestOf) {
   const byUser = new Map();
-  [2, 3, 4].forEach((day) => {
-    (dayBoards[day] || []).forEach((row) => {
+
+  for (const day of days) {
+    for (const row of dayBoards[day] || []) {
       const key = Number(row.userId);
       if (!byUser.has(key)) {
-        byUser.set(key, {
-          userId: key,
-          name: row.name,
-          total: 0,
-          countbackLast9: 0,
-          countbackLast6: 0,
-          countbackLast3: 0,
-          countbackLast1: 0
-        });
+        byUser.set(key, { userId: key, name: row.name, rounds: [] });
       }
-      const target = byUser.get(key);
-      target.total += Number(row.total || 0);
-      target.countbackLast9 += Number(row.countbackLast9 || 0);
-      target.countbackLast6 += Number(row.countbackLast6 || 0);
-      target.countbackLast3 += Number(row.countbackLast3 || 0);
-      target.countbackLast1 += Number(row.countbackLast1 || 0);
-    });
-  });
+      byUser.get(key).rounds.push({
+        total: Number(row.total || 0),
+        countbackLast9: Number(row.countbackLast9 || 0),
+        countbackLast6: Number(row.countbackLast6 || 0),
+        countbackLast3: Number(row.countbackLast3 || 0),
+        countbackLast1: Number(row.countbackLast1 || 0),
+      });
+    }
+  }
 
-  return withPosition([...byUser.values()].sort(compareStablefordRows));
+  const result = [];
+  for (const { userId, name, rounds } of byUser.values()) {
+    const sorted = [...rounds].sort((a, b) => b.total - a.total);
+    const counting = bestOf && bestOf < sorted.length ? sorted.slice(0, bestOf) : sorted;
+
+    const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0 };
+    for (const r of counting) {
+      entry.total += r.total;
+      entry.countbackLast9 += r.countbackLast9;
+      entry.countbackLast6 += r.countbackLast6;
+      entry.countbackLast3 += r.countbackLast3;
+      entry.countbackLast1 += r.countbackLast1;
+    }
+    result.push(entry);
+  }
+
+  return withPosition(result.sort(compareStablefordRows));
 }
 
-async function calculateStablefordLeaderboards(db, eventId) {
-  const [rows, startingByUserDay] = await Promise.all([
-    getStablefordRows(db, eventId),
-    getStartingHolesByUserDay(db, eventId)
-  ]);
-  const byDay = buildDayBoards(rows, startingByUserDay);
-  const championship = buildChampionshipBoard(byDay);
+// options.roundNumbers — array of round numbers to include; required
+// options.bestOf       — if set, each player's championship total uses only their best N rounds
+async function calculateStablefordLeaderboards(db, tourId, { roundNumbers, bestOf } = {}) {
+  const activeRounds = roundNumbers && roundNumbers.length ? roundNumbers : [];
+  const rows = await getStablefordRows(db, tourId, activeRounds);
+  const byDay = buildDayBoards(rows, activeRounds);
+  const championship = buildChampionshipBoard(byDay, activeRounds, bestOf);
   return { byDay, championship };
 }
 
 module.exports = {
-  calculateStablefordLeaderboards
+  calculateStablefordLeaderboards,
+  // Exported for unit tests
+  countbackMetrics,
+  buildChampionshipBoard,
 };

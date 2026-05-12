@@ -1,7 +1,7 @@
 'use strict';
 
 async function getActiveEvent(db) {
-  return db('events').where({ is_active: 1 }).first();
+  return db('tours').where({ status: 'active' }).first();
 }
 
 module.exports = { getActiveEvent };

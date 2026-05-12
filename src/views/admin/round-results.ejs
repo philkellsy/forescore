@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      .card { border: 1px solid #dee2e6 !important; box-shadow: none !important; }
+      body { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <%- include('../partials/nav', { noprint: true }) %>
+  <main class="container py-3 py-md-4" style="max-width:800px">
+
+    <div class="d-flex justify-content-between align-items-start mb-4 no-print">
+      <div>
+        <h1 class="h5 mb-0"><%= dayLabel(roundNumber) %> Results</h1>
+        <p class="text-muted small mb-0"><%= tour.label %><% if (round.tour_date) { %> &mdash; <%= new Date(round.tour_date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) %><% } %></p>
+      </div>
+      <div class="d-flex gap-2">
+        <button onclick="window.print()" class="btn btn-sm btn-outline-secondary no-print">
+          <i class="fa-solid fa-print me-1"></i>Print
+        </button>
+        <a href="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/scores`) %>" class="btn btn-sm btn-outline-secondary no-print">
+          <i class="fa-solid fa-arrow-left me-1"></i>Back
+        </a>
+      </div>
+    </div>
+
+    <% if (message) { %><div class="alert alert-success no-print"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger no-print"><%= error %></div><% } %>
+
+    <%# ── Day Results ─────────────────────────────── %>
+    <section class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0"><%= dayLabel(roundNumber) %> — <%= isAmbrose ? 'Ambrose Nett' : 'Stableford' %></h2>
+        <% if (round.leaderboard_published) { %>
+          <span class="badge text-bg-success">Published</span>
+        <% } else { %>
+          <span class="badge text-bg-warning text-dark">Preview</span>
+        <% } %>
+      </div>
+      <% if (!dayBoard.length) { %>
+        <div class="card-body"><p class="text-muted mb-0">No scores recorded yet.</p></div>
+      <% } else { %>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width:3rem">#</th>
+                <th><%= isAmbrose ? 'Team' : 'Player' %></th>
+                <% if (isAmbrose) { %>
+                  <th class="text-end">Gross</th>
+                  <th class="text-end">Hcp</th>
+                <% } %>
+                <th class="text-end"><%= isAmbrose ? 'Net' : 'Pts' %></th>
+                <% if (prizes.length) { %><th>Prize</th><% } %>
+              </tr>
+            </thead>
+            <tbody>
+              <% dayBoard.forEach((row, i) => { %>
+                <% const prize = prizes[i] || null; %>
+                <tr class="<%= prize ? 'table-warning' : '' %>">
+                  <td class="text-muted fw-semibold"><%= row.position %></td>
+                  <td><%= row.name %></td>
+                  <% if (isAmbrose) { %>
+                    <td class="text-end text-muted"><%= row.gross %></td>
+                    <td class="text-end text-muted">-<%= row.handicap %></td>
+                  <% } %>
+                  <td class="text-end fw-semibold"><%= isAmbrose ? row.total : row.total %></td>
+                  <% if (prizes.length) { %>
+                    <td>
+                      <% if (prize) { %>
+                        <span class="badge text-bg-warning text-dark"><%= prize.label %></span>
+                        <% if (prize.amount) { %><span class="text-muted small ms-1">$<%= prize.amount %></span><% } %>
+                      <% } %>
+                    </td>
+                  <% } %>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+        <% if (prizes.length) { %>
+          <div class="card-footer bg-transparent">
+            <div class="d-flex flex-wrap gap-3">
+              <% prizes.forEach((p) => { %>
+                <span class="small text-muted"><%= p.label %>: <strong>$<%= p.amount %></strong></span>
+              <% }) %>
+            </div>
+          </div>
+        <% } %>
+      <% } %>
+    </section>
+
+    <%# ── Skins ───────────────────────────────────── %>
+    <% if (!isAmbrose) { %>
+    <section class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-transparent">
+        <h2 class="h6 mb-0">Skins — <%= dayLabel(roundNumber) %></h2>
+      </div>
+      <% if (!skinsHoles.length) { %>
+        <div class="card-body"><p class="text-muted mb-0">No skins calculated yet — scores must be submitted first.</p></div>
+      <% } else { %>
+        <% if (skinsCarryIn > 0) { %>
+          <div class="card-body border-bottom py-2">
+            <span class="badge text-bg-warning text-dark me-2"><%= skinsCarryIn %> skin<%= skinsCarryIn !== 1 ? 's' : '' %> carried in</span>
+            <span class="text-muted small">from the previous round</span>
+          </div>
+        <% } %>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Hole</th>
+                <th class="text-center">Carry In</th>
+                <th class="text-center">Score</th>
+                <th>Winner</th>
+                <th class="text-center">Skins</th>
+                <th class="text-end">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% skinsHoles.forEach((hole) => { %>
+                <tr class="<%= hole.status === 'jackpot' ? 'table-secondary' : '' %>">
+                  <td class="fw-semibold"><%= hole.holeNumber %></td>
+                  <td class="text-center">
+                    <% if (hole.carryIn > 0) { %>
+                      <span class="badge text-bg-warning text-dark">+<%= hole.carryIn %></span>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                  <td class="text-center text-muted small">
+                    <% if (hole.status === 'won' && hole.winningGross != null) { %>
+                      <span class="fw-semibold"><%= hole.winningGross %>/<%= hole.winningStableford %> pts</span>
+                    <% } else if (hole.topStableford > 0) { %>
+                      <span class="text-muted"><%= hole.topStableford %> pts</span>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                  <td>
+                    <% if (hole.status === 'won') { %>
+                      <strong><%= hole.winnerName %></strong>
+                    <% } else { %>
+                      <span class="fst-italic text-muted">Tied (<%= hole.tiedCount %>)</span>
+                    <% } %>
+                  </td>
+                  <td class="text-center">
+                    <% if (hole.status === 'won') { %>
+                      <span class="badge text-bg-success"><%= hole.skinsAtStake %></span>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                  <td class="text-end">
+                    <% if (hole.dollarAmount > 0) { %>
+                      <span class="fw-semibold text-success">$<%= hole.dollarAmount %></span>
+                    <% } else { %>
+                      <span class="text-muted">—</span>
+                    <% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+        <% if (skinsCarryOut > 0 || skinsWinners.length) { %>
+          <div class="card-footer bg-transparent">
+            <% if (skinsWinners.length) { %>
+              <div class="mb-2">
+                <% skinsWinners.forEach((w) => { %>
+                  <span class="me-3">
+                    <strong><%= w.name %></strong>
+                    <span class="badge text-bg-success"><%= w.skinsWon %> skin<%= w.skinsWon !== 1 ? 's' : '' %></span>
+                    <% if (w.dollarWon > 0) { %><span class="text-success fw-semibold ms-1">$<%= w.dollarWon %></span><% } %>
+                  </span>
+                <% }) %>
+              </div>
+            <% } %>
+            <% if (skinsCarryOut > 0) { %>
+              <p class="text-muted small mb-0"><strong><%= skinsCarryOut %> skin<%= skinsCarryOut !== 1 ? 's' : '' %></strong> carry into the next round.</p>
+            <% } %>
+          </div>
+        <% } %>
+      <% } %>
+    </section>
+    <% } %>
+
+    <%# ── Championship Standings ─────────────────── %>
+    <% if (championship.length && championshipRounds.length) { %>
+    <section class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-transparent">
+        <h2 class="h6 mb-0">Championship Standings</h2>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="width:3rem">#</th>
+              <th>Player</th>
+              <% championshipRounds.forEach((rn, i) => { %><th class="text-end text-muted">R<%= i + 1 %></th><% }) %>
+              <th class="text-end">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% championship.forEach((row) => { %>
+              <tr>
+                <td class="fw-semibold text-muted"><%= row.position %></td>
+                <td><%= row.name %></td>
+                <% championshipRounds.forEach((rn) => { %>
+                  <td class="text-end text-muted small"><%= row.rounds[rn] != null ? row.rounds[rn] : '—' %></td>
+                <% }) %>
+                <td class="text-end fw-semibold"><%= row.total %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <% } else if (!isAmbrose) { %>
+      <p class="text-muted small">No championship data yet — scores must be submitted.</p>
+    <% } %>
+
+    <%# ── Virtual Teams ───────────────────────────── %>
+    <% if (virtualTeamResults && virtualTeamResults.length) { %>
+    <section class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-transparent">
+        <h2 class="h6 mb-0">Virtual Teams — <%= dayLabel(roundNumber) %></h2>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="width:3rem">#</th>
+              <th>Team</th>
+              <th class="text-end">Total</th>
+              <th class="text-end">Players</th>
+              <th class="text-end">Average</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% virtualTeamResults.forEach((row) => { %>
+              <tr>
+                <td class="fw-semibold text-muted"><%= row.position %></td>
+                <td><strong><%= row.name %></strong></td>
+                <td class="text-end text-muted"><%= row.total %></td>
+                <td class="text-end text-muted small"><%= row.playerCount %></td>
+                <td class="text-end fw-semibold"><%= row.average %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <% } %>
+
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+</body>
+</html>

@@ -1,7 +1,8 @@
 'use strict';
 
-function canEditAllScores(user) {
-  return user && (user.role === 'admin' || user.role === 'scorer');
+// Role is on tenant_memberships, not users. Pass req.tenantMembership.role.
+function canEditAllScores(role) {
+  return role === 'owner' || role === 'admin' || role === 'scorer';
 }
 
 module.exports = { canEditAllScores };

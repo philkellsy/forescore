@@ -2,14 +2,14 @@
 
 async function markLeaderboardDirty(db, eventId) {
   if (!eventId) return;
-  await db('events')
+  await db('tours')
     .where({ id: eventId })
     .update({ leaderboard_dirty_at: db.fn.now(), updated_at: db.fn.now() });
 }
 
 async function clearLeaderboardDirty(db, eventId) {
   if (!eventId) return;
-  await db('events')
+  await db('tours')
     .where({ id: eventId })
     .update({ leaderboard_dirty_at: null, updated_at: db.fn.now() });
 }

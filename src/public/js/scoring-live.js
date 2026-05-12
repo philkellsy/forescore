@@ -4,8 +4,10 @@
   const state = window.__SCORECARD_LIVE__;
   const dayStatus = window.__DAY_STATUS__ || 'draft';
   const offlineTestAllowed = Boolean(window.__OFFLINE_TEST_ALLOWED__);
+  const tenantSlug = window.__TENANT_PATH__ || '';
+  const tp = (path) => `/${tenantSlug}${path}`;
   if (!state) return;
-  const offlineTestStorageKey = 'legends_scoring_offline_test_mode';
+  const offlineTestStorageKey = 'forescore_scoring_offline_test_mode';
   const searchParams = new URLSearchParams(window.location.search || '');
   const requestedOfflineTestMode = searchParams.get('offline_test');
 
@@ -59,7 +61,7 @@
   }
 
   function isEditingEnabled() {
-    return dayStatus === 'open_scoring';
+    return dayStatus === 'open';
   }
 
   function updateOfflineTestModeUi() {
@@ -100,7 +102,7 @@
     const warming = Boolean(options && options.warming);
 
     if (ready) {
-      offlineCacheStatusEl.textContent = 'offline cache ready';
+      offlineCacheStatusEl.textContent = '✔ ready';
       offlineCacheStatusEl.className = 'offline-cache-status is-ready';
       return;
     }
@@ -274,7 +276,7 @@
 
   async function fetchHoleDataFromServer(holeNumber) {
     const hole = Number(holeNumber);
-    const res = await fetch(`/scoring/api/live/${state.scorecardId}/hole/${hole}`);
+    const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/hole/${hole}`));
     if (!res.ok) {
       if (offlineStore) {
         const cached = await offlineStore.getSnapshot(state.scorecardId, hole);
@@ -321,10 +323,16 @@
     const holePar = Number(currentPar || 0);
     const stableford = entry.stableford === null || entry.stableford === undefined ? '-' : entry.stableford;
     const hasScorecard = Number.isFinite(Number(entry.scorecardId));
+    const shotDots = (hcp) => {
+      const n = strokesForHole(hcp, currentSiPrimary, currentSiSecondary);
+      if (n > 0) return `<span class="text-success ms-1" style="font-size:1.4rem;line-height:1">${'•'.repeat(n)}</span>`;
+      if (n < 0) return `<span class="text-danger ms-1">−</span>`;
+      return '';
+    };
     const label =
       entry.type === 'team'
         ? `${entry.displayName} (Hcp ${entry.teamHandicapDisplay || entry.teamHandicap || 0})`
-        : `${entry.displayName} ${entry.isPreviousWinner ? '<span class="text-warning ms-1" title="Previous Winner"><i class="fa-solid fa-trophy"></i></span>' : ''} (${entry.handicapDisplay || '-'})`;
+        : `${entry.displayName} (${entry.handicapDisplay || '-'})${shotDots(entry.playingHandicap)}`;
     const formatRelative = (value) => {
       const num = Number(value || 0);
       if (!Number.isFinite(num) || num === 0) return 'E';
@@ -372,7 +380,7 @@
         ${entry.members
           .map(
             (m) =>
-              `<button class="btn btn-sm ${entry.selectedDriveUserId === m.userId ? 'btn-dark' : 'btn-outline-dark'} drive-btn" data-scorecard-id="${entry.scorecardId || ''}" data-user-id="${m.userId}" ${hasScorecard ? '' : 'disabled'}>${m.displayName}${m.isPreviousWinner ? ' <i class="fa-solid fa-trophy text-warning"></i>' : ''} (${m.handicapDisplay || '-'}, ${m.driveCount})</button>`
+              `<button class="btn btn-sm ${entry.selectedDriveUserId === m.userId ? 'btn-dark' : 'btn-outline-dark'} drive-btn" data-scorecard-id="${entry.scorecardId || ''}" data-user-id="${m.userId}" ${hasScorecard ? '' : 'disabled'}>${m.displayName} (${m.handicapDisplay || '-'})${shotDots(m.playingHandicap)} ${m.driveCount}</button>`
           )
           .join('')}
       </div>`
@@ -518,7 +526,8 @@
         : (holeData.individualContext || state.individualContext);
       if (ctx) {
         const who = state.requesterDisplay ? ` | ${state.requesterDisplay}` : '';
-        groupMetaEl.textContent = `Group ${ctx.groupNumber || '-'} | ${ctx.teeTime || '-'} | ${ctx.teeLocation || '-'}${who}`;
+        const teeTimeDisplay = ctx.teeTime ? ctx.teeTime.slice(0, 5) : '-';
+        groupMetaEl.textContent = `Group ${ctx.groupNumber || '-'} | ${teeTimeDisplay} | ${ctx.teeLocation || '-'}${who}`;
       } else {
         groupMetaEl.textContent = '';
       }
@@ -577,7 +586,7 @@
   }
 
   async function setGross(scorecardId, grossScore) {
-    if (dayStatus !== 'open_scoring') return;
+    if (dayStatus !== 'open') return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const normalizedGross = normalizeGross(grossScore);
     const baseVersion = getCurrentHoleVersion(scorecardId);
@@ -611,7 +620,7 @@
     }
 
     const opId = newOpId();
-    const res = await fetch('/scoring/api/live/gross', {
+    const res = await fetch(tp('/scoring/api/live/gross'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -649,7 +658,7 @@
   }
 
   async function setDrive(scorecardId, driveTakenUserId) {
-    if (dayStatus !== 'open_scoring') return;
+    if (dayStatus !== 'open') return;
     if (!Number.isFinite(Number(scorecardId))) return;
 
     if (!isEffectivelyOnline()) {
@@ -668,7 +677,7 @@
       return;
     }
 
-    const res = await fetch('/scoring/api/live/drive', {
+    const res = await fetch(tp('/scoring/api/live/drive'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -773,7 +782,7 @@
 
   function goToConfirmation() {
     persistConflictState();
-    window.location.assign(`/scoring/confirm/${state.scorecardId}`);
+    window.location.assign(tp(`/scoring/confirm/${state.scorecardId}`));
   }
 
   async function navigateByOffset(offset) {
@@ -838,7 +847,7 @@
       opId: String(op.opId || op.payload?.opId || ''),
       baseVersion: Number(op.payload?.baseVersion || 0)
     };
-    const res = await fetch('/scoring/api/live/gross', {
+    const res = await fetch(tp('/scoring/api/live/gross'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -858,7 +867,7 @@
           ? null
           : Number(op.payload.driveTakenUserId)
     };
-    const res = await fetch('/scoring/api/live/drive', {
+    const res = await fetch(tp('/scoring/api/live/drive'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -869,10 +878,10 @@
   }
 
   function initializeOfflineSync() {
-    if (!window.LegendsOfflineStore || typeof window.LegendsOfflineStore.create !== 'function') return;
-    offlineStore = window.LegendsOfflineStore.create();
-    if (!window.LegendsOfflineSync || typeof window.LegendsOfflineSync.create !== 'function') return;
-    offlineSync = window.LegendsOfflineSync.create({
+    if (!window.ForeScoreOfflineStore || typeof window.ForeScoreOfflineStore.create !== 'function') return;
+    offlineStore = window.ForeScoreOfflineStore.create();
+    if (!window.ForeScoreOfflineSync || typeof window.ForeScoreOfflineSync.create !== 'function') return;
+    offlineSync = window.ForeScoreOfflineSync.create({
       store: offlineStore,
       scorecardId: Number(state.scorecardId),
       isEffectivelyOnline,

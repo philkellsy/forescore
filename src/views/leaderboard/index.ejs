@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %> | Legends</title>
+    <title><%= title %> | ForeScore</title>
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
-    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
+    <meta name="theme-color" content="#215463" />
+    <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
     <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
@@ -22,37 +22,282 @@
       <% if (error) { %>
         <div class="alert alert-danger"><%= error %></div>
       <% } %>
-      <% if (!activeEvent) { %>
-        <div class="alert alert-warning">No active event configured yet.</div>
+      <% if (!activeTour) { %>
+        <div class="alert alert-warning">No active tour configured yet.</div>
       <% } else { %>
-        <% const publishedByDay = {}; (dayStates || []).forEach((d) => { publishedByDay[Number(d.day)] = Boolean(d.leaderboardPublished); }); %>
-        <p class="text-muted mb-4"><%= activeEvent.year %> at <%= activeEvent.location %></p>
+        <%
+          const publishedByRound = {};
+          (roundStates || []).forEach((r) => { publishedByRound[Number(r.roundNumber)] = Boolean(r.leaderboardPublished); });
+          const rnList = stablefordRoundNumbers || [];
+          const allRoundsPublished = rnList.length > 0 && rnList.every((rn) => publishedByRound[rn]);
+          const dayViewRn = activeView && activeView.startsWith('day-') ? Number(activeView.split('-')[1]) : null;
+          const activeDayView = dayViewRn ? (dayViews || []).find((d) => d.roundNumber === dayViewRn) : null;
+        %>
+        <p class="text-muted mb-4"><%= activeTour.year %> at <%= activeTour.location %></p>
         <% if (hasDirtyMarker && canManagePublish) { %>
           <div class="alert alert-warning py-2">Scores changed since last leaderboard build. Results were refreshed just now.</div>
         <% } %>
 
-        <% if (!boards.ambrose.length && !boards.stableford.byDay[2].length && !boards.stableford.byDay[3].length && !boards.stableford.byDay[4].length && !boards.stableford.championship.length && !boards.eclectic.length && !boards.sultans.length) { %>
+        <% if (!(dayViews && dayViews.length) && !canManagePublish) { %>
           <div class="alert alert-info mb-3">Leaderboards have not been released yet.</div>
         <% } %>
 
+        <%# ── Navigation ──────────────────────────── %>
         <div class="d-flex flex-wrap gap-2 mb-3">
+          <% (dayViews || []).forEach((dv) => { %>
+            <a class="btn <%= activeView === `day-${dv.roundNumber}` ? 'btn-legends' : 'btn-outline-secondary' %>"
+               href="<%= leaderboardBasePath %>?view=day-<%= dv.roundNumber %>">
+              <%= dv.label %>
+            </a>
+          <% }) %>
           <a class="btn <%= activeView === 'championship' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=championship">Championship</a>
-          <a class="btn <%= activeView === 'ambrose' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=ambrose">Ambrose</a>
-          <a class="btn <%= activeView === 'eclectic' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=eclectic">Eclectic</a>
-          <a class="btn <%= activeView === 'sultans' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=sultans">Sultans</a>
-          <a class="btn <%= activeView === 'skins' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=skins">Skins</a>
-          <% if (calcuttaSummary && calcuttaSummary.finalized) { %>
-            <a class="btn <%= activeView === 'calcutta' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=calcutta">Calcutta</a>
+          <% if (skinsDetail && skinsDetail.length) { %>
+            <a class="btn <%= activeView === 'skins' ? 'btn-legends' : 'btn-outline-secondary' %>" href="<%= leaderboardBasePath %>?view=skins">Skins</a>
           <% } %>
         </div>
 
+        <%# ── Day View ────────────────────────────── %>
+        <% if (activeDayView) { %>
+
+          <%# Day leaderboard %>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+              <h2 class="h6 mb-0"><%= activeDayView.label %> — Stableford</h2>
+              <% if (activeDayView.tourDate) { %>
+                <span class="text-muted small"><%= new Date(activeDayView.tourDate).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }) %></span>
+              <% } %>
+            </div>
+            <% if (!activeDayView.dayBoard || !activeDayView.dayBoard.length) { %>
+              <div class="card-body"><p class="text-muted mb-0">No scores recorded yet.</p></div>
+              <% if (activeDayView.prizes && activeDayView.prizes.length) { %>
+                <div class="card-footer bg-transparent">
+                  <div class="d-flex flex-wrap gap-3">
+                    <% activeDayView.prizes.forEach((p) => { %>
+                      <span class="small text-muted"><%= p.label %>: <strong>$<%= p.amount %></strong></span>
+                    <% }) %>
+                  </div>
+                </div>
+              <% } %>
+            <% } else { %>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:3rem">#</th>
+                      <th>Player</th>
+                      <th class="text-end">Pts</th>
+                      <% if (activeDayView.prizes && activeDayView.prizes.length) { %><th>Prize</th><% } %>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% activeDayView.dayBoard.forEach((row, i) => { %>
+                      <% const prize = activeDayView.prizes ? activeDayView.prizes[i] : null; %>
+                      <tr class="<%= prize ? 'table-warning' : '' %>">
+                        <td class="fw-semibold text-muted"><%= row.position %></td>
+                        <td><%- include('../partials/participant-card', { name: row.name, handicapText: '' }) %></td>
+                        <td class="text-end fw-semibold"><%= row.total %></td>
+                        <% if (activeDayView.prizes && activeDayView.prizes.length) { %>
+                          <td>
+                            <% if (prize) { %>
+                              <span class="badge text-bg-warning text-dark"><%= prize.label %></span>
+                              <% if (prize.amount) { %><span class="text-muted small ms-1">$<%= prize.amount %></span><% } %>
+                            <% } %>
+                          </td>
+                        <% } %>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </div>
+              <% if (activeDayView.prizes && activeDayView.prizes.length) { %>
+                <div class="card-footer bg-transparent">
+                  <div class="d-flex flex-wrap gap-3">
+                    <% activeDayView.prizes.forEach((p) => { %>
+                      <span class="small text-muted"><%= p.label %>: <strong>$<%= p.amount %></strong></span>
+                    <% }) %>
+                  </div>
+                </div>
+              <% } %>
+            <% } %>
+          </section>
+
+          <%# Day skins %>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent">
+              <h2 class="h6 mb-0">Skins — <%= activeDayView.label %></h2>
+            </div>
+            <% if (!activeDayView.skinsForDay || !activeDayView.skinsForDay.holes.length) { %>
+              <div class="card-body"><p class="text-muted mb-0">No skins calculated yet.</p></div>
+            <% } else { %>
+              <% const skinsDay = activeDayView.skinsForDay; %>
+              <% const firstHole = skinsDay.holes[0]; %>
+              <% if (firstHole && firstHole.carryIn > 0) { %>
+                <div class="card-body border-bottom py-2">
+                  <span class="badge text-bg-warning text-dark me-2"><%= firstHole.carryIn %> skin<%= firstHole.carryIn !== 1 ? 's' : '' %> carried in</span>
+                  <span class="text-muted small">from the previous round</span>
+                </div>
+              <% } %>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Hole</th>
+                      <th class="text-center">Carry In</th>
+                      <th class="text-center">Score</th>
+                      <th>Winner</th>
+                      <th class="text-center">Skins</th>
+                      <th class="text-end">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% skinsDay.holes.forEach((hole) => { %>
+                      <tr class="<%= hole.status === 'jackpot' ? 'table-secondary' : '' %>">
+                        <td class="fw-semibold"><%= hole.holeNumber %></td>
+                        <td class="text-center">
+                          <% if (hole.carryIn > 0) { %>
+                            <span class="badge text-bg-warning text-dark">+<%= hole.carryIn %></span>
+                          <% } else { %>
+                            <span class="text-muted">—</span>
+                          <% } %>
+                        </td>
+                        <td class="text-center">
+                          <% if (hole.status === 'won' && hole.winningGross != null) { %>
+                            <span class="fw-semibold"><%= hole.winningGross %>/<%= hole.winningStableford %> pts</span>
+                          <% } else if (hole.topStableford > 0) { %>
+                            <span class="text-muted small"><%= hole.topStableford %> pts</span>
+                          <% } else { %>
+                            <span class="text-muted">—</span>
+                          <% } %>
+                        </td>
+                        <td>
+                          <% if (hole.status === 'won' && hole.winnerName) { %>
+                            <strong><%= hole.winnerName %></strong>
+                          <% } else { %>
+                            <span class="text-muted fst-italic">Tied (<%= hole.tiedCount %>)</span>
+                          <% } %>
+                        </td>
+                        <td class="text-center">
+                          <% if (hole.status === 'won') { %>
+                            <span class="badge text-bg-success"><%= hole.skinsAtStake %></span>
+                          <% } else { %>
+                            <span class="text-muted">—</span>
+                          <% } %>
+                        </td>
+                        <td class="text-end">
+                          <% if (hole.dollarAmount > 0) { %>
+                            <span class="fw-semibold text-success">$<%= Math.round(hole.dollarAmount) %></span>
+                          <% } else { %>
+                            <span class="text-muted">—</span>
+                          <% } %>
+                        </td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </div>
+              <% if (activeDayView.skinsWinners && activeDayView.skinsWinners.length) { %>
+                <div class="card-footer bg-transparent">
+                  <% activeDayView.skinsWinners.forEach((w) => { %>
+                    <span class="me-3">
+                      <strong><%= w.name %></strong>
+                      <span class="badge text-bg-success"><%= w.skinsWon %> skin<%= w.skinsWon !== 1 ? 's' : '' %></span>
+                      <% if (w.dollarWon > 0) { %><span class="text-success fw-semibold ms-1">$<%= Math.round(w.dollarWon) %></span><% } %>
+                    </span>
+                  <% }) %>
+                  <% const lastHole = skinsDay.holes[skinsDay.holes.length - 1]; %>
+                  <% if (lastHole && lastHole.status === 'jackpot') { %>
+                    <p class="text-muted small mb-0 mt-2"><strong><%= lastHole.skinsAtStake %> skin<%= lastHole.skinsAtStake !== 1 ? 's' : '' %></strong> carry into the next round.</p>
+                  <% } %>
+                </div>
+              <% } %>
+            <% } %>
+          </section>
+
+          <%# Day virtual teams %>
+          <% if (activeDayView.virtualTeamResults && activeDayView.virtualTeamResults.length) { %>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent">
+              <h2 class="h6 mb-0">Virtual Teams — <%= activeDayView.label %></h2>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width:3rem">#</th>
+                    <th>Team</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Players</th>
+                    <th class="text-end">Average</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% activeDayView.virtualTeamResults.forEach((row) => { %>
+                    <tr>
+                      <td class="fw-semibold text-muted"><%= row.position %></td>
+                      <td><strong><%= row.name %></strong></td>
+                      <td class="text-end text-muted"><%= row.total %></td>
+                      <td class="text-end text-muted small"><%= row.playerCount %></td>
+                      <td class="text-end fw-semibold"><%= row.average %></td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <% } %>
+
+          <%# Day novelty events %>
+          <% if (activeDayView.noveltyEvents && activeDayView.noveltyEvents.length) { %>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent">
+              <h2 class="h6 mb-0">Novelty Events — <%= activeDayView.label %></h2>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Event</th>
+                    <th>Hole</th>
+                    <th>Winner</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% activeDayView.noveltyEvents.forEach((ne) => { %>
+                    <tr>
+                      <td><span class="badge text-bg-secondary me-1"><%= ne.noveltyType %></span><%= ne.label %></td>
+                      <td><%= ne.holeNumber %></td>
+                      <td>
+                        <% if (!ne.result) { %>
+                          <span class="text-muted">—</span>
+                        <% } else if (ne.result.isNoWinner) { %>
+                          <span class="text-muted fst-italic">No winner</span>
+                        <% } else { %>
+                          <strong><%= ne.result.winnerName || '—' %></strong>
+                        <% } %>
+                      </td>
+                    </tr>
+                  <% }) %>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <% } %>
+
+        <% } %>
+
+        <%# ── Championship ────────────────────────── %>
         <% if (activeView === 'championship') { %>
           <section class="card border-0 shadow-sm">
             <div class="card-body">
-              <h2 class="h6 mb-2">Legends Championship</h2>
-              <p class="text-muted small mb-3">Rounds shown as R1 (Day 2), R2 (Day 3), R3 (Day 4). Ties use countback.</p>
+              <h2 class="h6 mb-2">ForeScore Championship</h2>
+              <% if (rnList.length) { %>
+                <p class="text-muted small mb-3">
+                  <%= rnList.map((rn, i) => `R${i + 1} (${dayLabel(rn)})`).join(', ') %>.
+                  Ties use countback.
+                </p>
+              <% } %>
               <% if (!championshipTable.length) { %>
-                <p class="text-muted mb-0">Not released yet.</p>
+                <p class="text-muted mb-0"><%= canManagePublish ? 'No scores entered yet.' : 'Not released yet.' %></p>
               <% } else { %>
                 <div class="table-responsive">
                   <table class="table table-sm align-middle mb-0">
@@ -60,9 +305,7 @@
                       <tr>
                         <th>#</th>
                         <th>Player</th>
-                        <th>R1</th>
-                        <th>R2</th>
-                        <th>R3</th>
+                        <% rnList.forEach((rn, i) => { %><th>R<%= i + 1 %></th><% }) %>
                         <th>Total</th>
                         <th>Countback</th>
                       </tr>
@@ -75,35 +318,21 @@
                           <td>
                             <%- include('../partials/participant-card', {
                               name: meta?.name || row.name,
-                              handicapText: (meta && meta.handicap !== null && meta.handicap !== undefined) ? String(meta.handicap) : '',
-                              isDefendingChampion: Boolean(meta && meta.isDefendingChampion),
-                              isPreviousWinner: Boolean(meta && meta.isPreviousWinner)
+                              handicapText: (meta && meta.handicap !== null && meta.handicap !== undefined) ? String(meta.handicap) : ''
                             }) %>
                           </td>
+                          <% rnList.forEach((rn) => { %>
+                            <td>
+                              <% if (publishedByRound[rn]) { %>
+                                <a href="<%= tenantPath(`/leaderboards/tour/${activeTour.id}/scorecards/individual/${row.userId}?round=${rn}`) %>"><%= (row.rounds && row.rounds[rn] != null) ? row.rounds[rn] : 0 %></a>
+                              <% } else { %>
+                                <%= (row.rounds && row.rounds[rn] != null) ? row.rounds[rn] : 0 %>
+                              <% } %>
+                            </td>
+                          <% }) %>
                           <td>
-                            <% if (publishedByDay[2]) { %>
-                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=2"><%= row.r1 %></a>
-                            <% } else { %>
-                              <%= row.r1 %>
-                            <% } %>
-                          </td>
-                          <td>
-                            <% if (publishedByDay[3]) { %>
-                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=3"><%= row.r2 %></a>
-                            <% } else { %>
-                              <%= row.r2 %>
-                            <% } %>
-                          </td>
-                          <td>
-                            <% if (publishedByDay[4]) { %>
-                              <a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/individual/<%= row.userId %>?day=4"><%= row.r3 %></a>
-                            <% } else { %>
-                              <%= row.r3 %>
-                            <% } %>
-                          </td>
-                          <td>
-                            <% if (publishedByDay[2] && publishedByDay[3] && publishedByDay[4]) { %>
-                              <strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/championship/<%= row.userId %>"><%= row.total %></a></strong>
+                            <% if (allRoundsPublished) { %>
+                              <strong><a href="<%= tenantPath(`/leaderboards/tour/${activeTour.id}/scorecards/championship/${row.userId}`) %>"><%= row.total %></a></strong>
                             <% } else { %>
                               <strong><%= row.total %></strong>
                             <% } %>
@@ -121,350 +350,48 @@
           </section>
         <% } %>
 
-        <% if (activeView === 'ambrose') { %>
-          <section class="card border-0 shadow-sm">
-            <div class="card-body">
-              <h2 class="h6 mb-2"><%= dayLabel(1) %> Ambrose</h2>
-              <p class="text-muted small mb-3">Team result is Gross minus exact team handicap. Handicap allowance is 1/4 of combined handicaps for 2-ball teams and 1/3 for 3-ball teams.</p>
-              <% if (!boards.ambrose.length) { %>
-                <p class="text-muted mb-0">Not released yet.</p>
-              <% } else { %>
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Team</th>
-                        <th>Gross</th>
-                        <th>Net</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <% boards.ambrose.forEach((row, i) => { %>
-                        <tr>
-                          <td><%= i + 1 %></td>
-                          <td>
-                            <%- include('../partials/team-card', {
-                              teamName: row.name,
-                              exactHandicapText: String(Number(row.teamHandicap || 0)),
-                              members: (ambroseTeamMembersById && ambroseTeamMembersById[row.id]) ? ambroseTeamMembersById[row.id] : [],
-                              canDelete: false,
-                              deleteAction: '',
-                              summary: null,
-                              dayPublished: true,
-                              eventId: activeEvent.id,
-                              returnTo: leaderboardBasePath,
-                              className: 'mb-0'
-                            }) %>
-                          </td>
-                          <td><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/team/<%= row.id %>"><%= Number(row.totalGross || 0) %></a></td>
-                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/team/<%= row.id %>"><%= Number(row.totalNet || 0) %></a></strong></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                  </table>
-                </div>
-              <% } %>
-            </div>
-          </section>
-        <% } %>
-
-        <% if (activeView === 'eclectic') { %>
-          <section class="card border-0 shadow-sm">
-            <div class="card-body">
-              <h2 class="h6 mb-2">Eclectic (Rounds 1-3)</h2>
-              <p class="text-muted small mb-3">Best Stableford score per hole across R1-R3 builds the Eclectic card. Those 18 best-hole scores are summed for the total.</p>
-              <% if (!boards.eclectic.length) { %>
-                <p class="text-muted mb-0">Not released yet.</p>
-              <% } else { %>
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Player</th>
-                        <th>Total Stableford</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <% boards.eclectic.forEach((row, i) => { %>
-                        <% const meta = (playerMetaById && playerMetaById[row.userId]) ? playerMetaById[row.userId] : null; %>
-                        <tr>
-                          <td><%= i + 1 %></td>
-                          <td>
-                            <%- include('../partials/participant-card', {
-                              name: meta?.name || row.name,
-                              handicapText: (meta && meta.handicap !== null && meta.handicap !== undefined) ? String(meta.handicap) : '',
-                              isDefendingChampion: Boolean(meta && meta.isDefendingChampion),
-                              isPreviousWinner: Boolean(meta && meta.isPreviousWinner)
-                            }) %>
-                          </td>
-                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/eclectic/<%= row.userId %>"><%= Number(row.totalPoints || 0) %></a></strong></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                  </table>
-                </div>
-              <% } %>
-            </div>
-          </section>
-        <% } %>
-
-        <% if (activeView === 'sultans') { %>
-          <section class="card border-0 shadow-sm">
-            <div class="card-body">
-              <h2 class="h6 mb-2">Sultans of Swing</h2>
-              <p class="text-muted small mb-3">Each hole uses the best 3 Stableford scores from 4 team members. Round totals (R1-R3) are summed for aggregate position.</p>
-              <% if (!boards.sultans.length) { %>
-                <p class="text-muted mb-0">Not released yet.</p>
-              <% } else { %>
-                <div class="table-responsive">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Team</th>
-                        <th>R1</th>
-                        <th>R2</th>
-                        <th>R3</th>
-                        <th>Aggregate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <% boards.sultans.forEach((row, i) => { %>
-                        <tr>
-                          <td><%= i + 1 %></td>
-                          <td>
-                            <%- include('../partials/team-card', {
-                              teamName: row.name,
-                              exactHandicapText: '',
-                              members: (sultansTeamMembersById && sultansTeamMembersById[row.id]) ? sultansTeamMembersById[row.id] : [],
-                              membersLayout: 'grid-2',
-                              showGhostTag: true,
-                              canDelete: false,
-                              deleteAction: '',
-                              summary: null,
-                              dayPublished: true,
-                              eventId: activeEvent.id,
-                              returnTo: leaderboardBasePath,
-                              className: 'mb-0'
-                            }) %>
-                          </td>
-                          <td><%= Number((row.days && row.days[2]) || 0) %></td>
-                          <td><%= Number((row.days && row.days[3]) || 0) %></td>
-                          <td><%= Number((row.days && row.days[4]) || 0) %></td>
-                          <td><strong><a href="/leaderboards/event/<%= activeEvent.id %>/scorecards/sultans/<%= row.id %>"><%= Number(row.aggregate || 0) %></a></strong></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                  </table>
-                </div>
-              <% } %>
-            </div>
-          </section>
-        <% } %>
-
+        <%# ── Skins (tour summary by player) ────────── %>
         <% if (activeView === 'skins') { %>
-          <section class="card border-0 shadow-sm">
-            <div class="card-body">
-              <h2 class="h6 mb-2">Skins Leaderboard</h2>
-              <p class="text-muted small mb-3">Player skins and payout totals are shown below. Team skins are listed separately.</p>
-              <% if (skinsCarryovers && skinsCarryovers.length) { %>
-                <div class="table-responsive mb-3">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Day</th>
-                        <th>Carry In</th>
-                        <th>Carry Out</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <% skinsCarryovers.forEach((row) => { %>
-                        <tr>
-                          <td><%= dayLabel(row.day) %></td>
-                          <td><%= Number(row.carryInSkins || 0) > 0 ? `${Number(row.carryInSkins || 0)} to Hole 1` : '-' %></td>
-                          <td><%= Number(row.carryOutSkins || 0) > 0 ? `${Number(row.carryOutSkins || 0)} to next day Hole 1` : '-' %></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                  </table>
-                </div>
-              <% } %>
-
-              <div class="row g-3">
-                <div class="col-12 col-lg-6">
-                  <h3 class="h6 mb-2">Player Skins</h3>
-                  <% if (!skinsLeaderboard || !(skinsLeaderboard.playerRows || []).length) { %>
-                    <p class="text-muted mb-0">No published player skins yet.</p>
-                  <% } else { %>
-                    <div class="table-responsive">
-                      <table class="table table-sm align-middle mb-0">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>Player</th>
-                            <th>Skins</th>
-                            <th>Payout</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <% (skinsLeaderboard.playerRows || []).forEach((row, i) => { %>
-                            <tr>
-                              <td><%= i + 1 %></td>
-                              <td><%= row.name %></td>
-                              <td><strong><%= Number(row.skinsWon || 0) %></strong></td>
-                              <td>$<%= Number(row.payoutAmount || 0).toFixed(2) %></td>
-                            </tr>
-                          <% }) %>
-                        </tbody>
-                      </table>
-                    </div>
-                  <% } %>
-                </div>
-
-                <div class="col-12 col-lg-6">
-                  <h3 class="h6 mb-2">Team Skins</h3>
-                  <% if (!skinsLeaderboard || !(skinsLeaderboard.teamRows || []).length) { %>
-                    <p class="text-muted mb-0">No published team skins yet.</p>
-                  <% } else { %>
-                    <div class="table-responsive">
-                      <table class="table table-sm align-middle mb-0">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>Team</th>
-                            <th>Skins</th>
-                            <th>Payout</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <% (skinsLeaderboard.teamRows || []).forEach((row, i) => { %>
-                            <tr>
-                              <td><%= i + 1 %></td>
-                              <td><%= row.name %></td>
-                              <td><strong><%= Number(row.skinsWon || 0) %></strong></td>
-                              <td>$<%= Number(row.payoutAmount || 0).toFixed(2) %></td>
-                            </tr>
-                          <% }) %>
-                        </tbody>
-                      </table>
-                    </div>
-                  <% } %>
-                </div>
-              </div>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent">
+              <h2 class="h6 mb-0">Skins — Tour Summary</h2>
             </div>
-          </section>
-        <% } %>
-
-        <% if (activeView === 'calcutta' && calcuttaSummary && calcuttaSummary.finalized) { %>
-          <section class="card border-0 shadow-sm mb-3">
-            <div class="card-body">
-              <h2 class="h6 mb-2">Calcutta Summary</h2>
-              <p class="text-muted small mb-3">Shows final draw sales, owner payouts (50%), and buyer purchase balances.</p>
-              <div class="row g-2 mb-3">
-                <div class="col-12 col-md-4">
-                  <div class="border rounded p-2 bg-light small">
-                    <div class="text-muted">Players</div>
-                    <div class="fw-semibold"><%= Number(calcuttaSummary.totalPlayers || 0) %> / <%= Number(calcuttaSummary.drawnPlayers || 0) %> drawn</div>
-                  </div>
-                </div>
-                <div class="col-12 col-md-4">
-                  <div class="border rounded p-2 bg-light small">
-                    <div class="text-muted">Owners Missing</div>
-                    <div class="fw-semibold"><%= Number(calcuttaSummary.missingOwnerCount || 0) %></div>
-                  </div>
-                </div>
-                <div class="col-12 col-md-4">
-                  <div class="border rounded p-2 bg-light small">
-                    <div class="text-muted">Pool Total</div>
-                    <div class="fw-semibold">$<%= Number(calcuttaSummary.poolTotal || 0).toFixed(2) %></div>
-                  </div>
-                </div>
-              </div>
-
-              <% if (calcuttaSummary.viewerBalance) { %>
-                <div class="border rounded p-2 bg-light small mb-3">
-                  <div class="fw-semibold mb-1">Your Calcutta Position</div>
-                  <div>Ownership Receivable: <strong>$<%= Number(calcuttaSummary.viewerBalance.ownershipReceivable || 0).toFixed(2) %></strong></div>
-                  <div>Purchases Owed: <strong>$<%= Number(calcuttaSummary.viewerBalance.purchasesOwed || 0).toFixed(2) %></strong></div>
-                  <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
-                    <div>Personal Payout: <strong>$<%= Number(calcuttaSummary.viewerBalance.personalPayout || 0).toFixed(2) %></strong></div>
-                  <% } %>
-                  <div>Net Balance: <strong>$<%= Number(calcuttaSummary.viewerBalance.netBalance || 0).toFixed(2) %></strong></div>
-                  <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
-                    <div>Net After Payout: <strong>$<%= Number(calcuttaSummary.viewerBalance.netAfterPayout || 0).toFixed(2) %></strong></div>
-                  <% } %>
-                </div>
-              <% } %>
-
-              <% if (calcuttaSummary.payouts && calcuttaSummary.payouts.enabled) { %>
-                <div class="table-responsive mb-3">
-                  <table class="table table-sm align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th>Category</th>
-                        <th>Player</th>
-                        <th>Owner</th>
-                        <th>%</th>
-                        <th>Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <% (calcuttaSummary.payouts.rows || []).forEach((row) => { %>
-                        <tr>
-                          <td><%= row.category %></td>
-                          <td><%= row.basisName %></td>
-                          <td><%= row.recipientName %></td>
-                          <td><%= Number(row.percent || 0).toFixed(2) %>%</td>
-                          <td><strong>$<%= Number(row.amount || 0).toFixed(2) %></strong></td>
-                        </tr>
-                      <% }) %>
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <th colspan="4" class="text-end">Total Calcutta Payout</th>
-                        <th>$<%= Number(calcuttaSummary.payouts.totalPayout || 0).toFixed(2) %></th>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              <% } %>
-
-              <div class="table-responsive mb-3">
+            <% if (!skinsLeaderboard || !skinsLeaderboard.playerRows.length) { %>
+              <div class="card-body"><p class="text-muted mb-0">No skins won yet.</p></div>
+            <% } else { %>
+              <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
-                  <thead>
+                  <thead class="table-light">
                     <tr>
-                      <th>Draw</th>
+                      <th>#</th>
                       <th>Player</th>
-                      <th>Buyer</th>
-                      <th>Owner</th>
-                      <th>Price</th>
-                      <th>Owner 50%</th>
-                      <th>Pool 50%</th>
+                      <th class="text-center">Skins</th>
+                      <% if (skinsLeaderboard.playerRows.some((r) => r.payoutAmount > 0)) { %>
+                        <th class="text-end">Winnings</th>
+                      <% } %>
                     </tr>
                   </thead>
                   <tbody>
-                    <% (calcuttaSummary.rows || []).forEach((row) => { %>
+                    <% skinsLeaderboard.playerRows.forEach((row, i) => { %>
                       <tr>
-                        <td><%= row.drawOrder %></td>
-                        <td><%= row.playerName %></td>
-                        <td><%= row.buyerName %></td>
-                        <td><%= row.ownerName %></td>
-                        <td>$<%= Number(row.price || 0).toFixed(2) %></td>
-                        <td>$<%= Number(row.ownerShare || 0).toFixed(2) %></td>
-                        <td>$<%= Number(row.poolShare || 0).toFixed(2) %></td>
+                        <td class="text-muted"><%= i + 1 %></td>
+                        <td><strong><%= row.name %></strong></td>
+                        <td class="text-center"><span class="badge text-bg-success"><%= row.skinsWon %></span></td>
+                        <% if (skinsLeaderboard.playerRows.some((r) => r.payoutAmount > 0)) { %>
+                          <td class="text-end fw-semibold text-success"><% if (row.payoutAmount > 0) { %>$<%= Math.round(row.payoutAmount) %><% } else { %><span class="text-muted">—</span><% } %></td>
+                        <% } %>
                       </tr>
                     <% }) %>
                   </tbody>
                 </table>
               </div>
-
-            </div>
+            <% } %>
           </section>
         <% } %>
+
+
       <% } %>
     </main>
-      <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   </body>
 </html>

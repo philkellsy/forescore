@@ -1,606 +1,764 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { ROLES } = require('../config/roles');
-const { CALC_TYPES, defaultCalcTypeForDay } = require('../config/calc-types');
-const { calculateAmbroseLeaderboard } = require('../services/scoring/ambrose.service');
+const { computeCourseHandicap } = require('../services/scoring/handicap.service');
 const { calculateStablefordLeaderboards } = require('../services/scoring/stableford-leaderboard.service');
-const { calculateSultansLeaderboard } = require('../services/scoring/sultans.service');
 const { calculateEventSkinsForDays } = require('../services/scoring/skins.service');
 const { dayLabel } = require('../services/events/day-label.service');
+const { sanitizeCode } = require('../services/auth/login-code.service');
+const { sendEmailChangeCode } = require('../services/auth/mailer.service');
+const { LOGIN_CODE_EXPIRY_MINUTES, LOGIN_CODE_LENGTH, LOGIN_CODE_RESEND_SECONDS } = require('../config/constants');
 
-function ambroseAllowance(memberCount) {
-  if (memberCount === 2) return 1 / 4;
-  if (memberCount === 3) return 1 / 3;
-  return 0;
+function hashEmailCode(code) {
+  return crypto.createHash('sha256').update(code).digest('hex');
 }
 
-function formatAmbroseValue(raw, allowance) {
-  const num = Number(raw || 0);
-  if (!Number.isFinite(num)) return '0';
-  const signPrefix = num < 0 ? '-' : '';
-  const abs = Math.abs(num);
-  let whole = Math.trunc(abs);
-  const fraction = abs - whole;
-
-  let denominator = 1;
-  if (allowance === 1 / 4) denominator = 4;
-  else if (allowance === 1 / 3) denominator = 3;
-  if (denominator === 1) return `${signPrefix}${whole}`;
-
-  let numerator = Math.round(fraction * denominator);
-  if (numerator >= denominator) {
-    whole += 1;
-    numerator = 0;
-  }
-
-  if (!numerator) return `${signPrefix}${whole}`;
-  return `${signPrefix}${whole} ${numerator}/${denominator}`;
-}
-
-function toMoney(raw) {
-  const num = Number(raw || 0);
-  if (!Number.isFinite(num)) return 0;
-  return num;
-}
-
-function compareChampionshipRows(a, b) {
-  return (
-    Number(b.points || 0) - Number(a.points || 0) ||
-    Number(b.countbackLast9 || 0) - Number(a.countbackLast9 || 0) ||
-    Number(b.countbackLast6 || 0) - Number(a.countbackLast6 || 0) ||
-    Number(b.countbackLast3 || 0) - Number(a.countbackLast3 || 0) ||
-    Number(b.countbackLast1 || 0) - Number(a.countbackLast1 || 0) ||
-    String(a.name || '').localeCompare(String(b.name || ''))
-  );
+function generateEmailCode() {
+  return String(crypto.randomInt(0, 10 ** LOGIN_CODE_LENGTH)).padStart(LOGIN_CODE_LENGTH, '0');
 }
 
 function playerRouter(db) {
   const router = express.Router();
 
-  router.get('/dashboard', requireAuth, async (req, res) => {
-    const user = req.session.user;
-    if (user.role !== ROLES.PLAYER && user.role !== ROLES.SCORER && user.role !== ROLES.ADMIN) {
-      return res.status(403).render('auth/forbidden', { title: 'Forbidden', user });
+  // Resolves which active tour to show for the current tenant.
+  // Returns { tour, needsPicker, tours } — if needsPicker is true, render the picker with `tours`.
+  async function resolveActiveTour(tenantId, requestedTourId) {
+    if (requestedTourId) {
+      const tour = await db('tours')
+        .where({ id: Number(requestedTourId), tenant_id: tenantId, status: 'active' })
+        .first();
+      // Invalid / not-active tourId → fall through to normal resolution
+      if (tour) return { tour, needsPicker: false, tours: [] };
     }
 
-    const individualScores = await db('scorecards as s')
-      .leftJoin('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .leftJoin('event_day_statuses as eds', function joinDayStatus() {
-        this.on('eds.event_id', '=', 's.event_id').andOn('eds.day', '=', 's.day');
-      })
-      .where('s.user_id', user.id)
-      .andWhere('s.type', 'individual')
-      .groupBy('s.id', 's.day', 's.status', 's.event_id', 'eds.calc_type', 'eds.status')
-      .select('s.id', 's.day', 's.status', 's.event_id', 'eds.calc_type', { day_status: 'eds.status' })
-      .sum({ totalGross: 'sh.gross_score' })
-      .sum({ totalStableford: 'sh.stableford_points' })
-      .orderBy('s.day', 'asc');
+    const tours = await db('tours')
+      .where({ tenant_id: tenantId, status: 'active' })
+      .orderBy('year', 'desc');
 
-    const ambroseScores = await db('scorecards as s')
-      .join('teams as t', 't.id', 's.team_id')
-      .join('team_members as tm', 'tm.team_id', 't.id')
-      .leftJoin('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .leftJoin('event_day_statuses as eds', function joinDayStatus() {
-        this.on('eds.event_id', '=', 's.event_id').andOn('eds.day', '=', 's.day');
-      })
-      .where('tm.user_id', user.id)
-      .andWhere('s.type', 'team')
-      .groupBy('s.id', 's.day', 's.status', 's.event_id', 's.team_id', 't.name', 'eds.calc_type', 'eds.status')
-      .select('s.id', 's.day', 's.status', 's.event_id', 's.team_id', 't.name as teamName', 'eds.calc_type', { day_status: 'eds.status' })
-      .sum({ totalGross: 'sh.gross_score' })
-      .orderBy('s.day', 'asc');
+    if (tours.length <= 1) return { tour: tours[0] || null, needsPicker: false, tours: [] };
 
-    const ambroseScorecardIds = ambroseScores.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
-    const teamMemberRows = ambroseScorecardIds.length
-      ? await db('scorecards as s')
-          .join('team_members as tm', 'tm.team_id', 's.team_id')
-          .leftJoin('player_handicaps as ph', function joinPh() {
-            this.on('ph.user_id', '=', 'tm.user_id').andOn('ph.event_id', '=', 's.event_id');
+    // Multiple active tours — fetch date ranges so the picker can show them
+    const dateRanges = await db('golf_rounds')
+      .whereIn('tour_id', tours.map((t) => t.id))
+      .groupBy('tour_id')
+      .select('tour_id', db.raw('MIN(tour_date) as start_date'), db.raw('MAX(tour_date) as end_date'));
+
+    const rangeByTourId = {};
+    for (const r of dateRanges) rangeByTourId[r.tour_id] = r;
+
+    const toursWithDates = tours.map((t) => ({
+      ...t,
+      start_date: rangeByTourId[t.id]?.start_date || null,
+      end_date: rangeByTourId[t.id]?.end_date || null,
+    }));
+
+    return { tour: null, needsPicker: true, tours: toursWithDates };
+  }
+
+  router.get('/', requireAuth, (req, res) => {
+    return res.redirect(res.locals.tenantPath('/dashboard'));
+  });
+
+  router.get('/dashboard', requireAuth, async (req, res, next) => {
+    try {
+      const user = req.session.user;
+      const tenant = req.tenant;
+
+      const { tour: activeTour, needsPicker, tours } = await resolveActiveTour(tenant.id, req.query.tourId);
+
+      if (needsPicker) {
+        return res.render('player/tour-picker', { title: 'Your Tours', tours });
+      }
+
+      if (!activeTour) {
+        const _now = new Date();
+        return res.render('player/dashboard', {
+          title: 'Dashboard',
+          activeTour: null,
+          openRound: null,
+          todayGroup: null,
+          todayHandicap: null,
+          championshipStanding: null,
+          skinsSummary: null,
+          daysSummary: [],
+          byDate: {},
+          todayKey: _now.toISOString().slice(0, 10),
+          tomorrowKey: new Date(_now.getTime() + 86400000).toISOString().slice(0, 10),
+          tabOverride: null,
+          dayLabel,
+        });
+      }
+
+      const tourId = Number(activeTour.id);
+
+      const allRoundRows = await db('golf_rounds')
+        .where({ tour_id: tourId })
+        .orderBy('round_number')
+        .select('round_number', 'status', 'calc_type', 'course_id', 'female_course_id', 'leaderboard_published');
+
+      const openRound = allRoundRows.find((r) => r.status === 'open') || null;
+
+      let todayHandicap = null;
+      if (openRound) {
+        const [roundHcpRow, tourHcpRow] = await Promise.all([
+          db('player_day_handicaps').where({ tour_id: tourId, round_number: openRound.round_number, user_id: user.id }).first(),
+          db('player_handicaps').where({ tour_id: tourId, user_id: user.id }).first(),
+        ]);
+        const rawIndex = roundHcpRow
+          ? Number(roundHcpRow.handicap_index)
+          : tourHcpRow
+          ? Number(tourHcpRow.playing_handicap)
+          : null;
+
+        if (rawIndex !== null) {
+          const playerUser = await db('users').where({ id: user.id }).select('gender').first();
+          const courseId = (playerUser?.gender === 'female' && openRound.female_course_id)
+            ? openRound.female_course_id
+            : openRound.course_id;
+          if (courseId) {
+            const [course, parRow] = await Promise.all([
+              db('courses').where({ id: courseId }).first(),
+              db('holes').where({ course_id: courseId }).sum('par as total').first(),
+            ]);
+            todayHandicap = computeCourseHandicap(rawIndex, course?.slope_rating, course?.course_rating, Number(parRow?.total) || 72);
+          } else {
+            todayHandicap = Math.round(rawIndex);
+          }
+        }
+      }
+
+      let todayGroup = null;
+      if (openRound) {
+        const myGroupRow = await db('tee_groups as tg')
+          .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+          .where({ 'tg.tour_id': tourId, 'tg.round_number': openRound.round_number, 'tgp.user_id': user.id })
+          .select('tg.id as groupId', 'tg.group_number', 'tg.tee_time', 'tg.starting_hole', 'tg.tee_location')
+          .first();
+
+        if (myGroupRow) {
+          const [groupPlayers, scorecard] = await Promise.all([
+            db('tee_group_players as tgp')
+              .join('users as u', 'u.id', 'tgp.user_id')
+              .where({ 'tgp.tee_group_id': myGroupRow.groupId })
+              .orderBy('tgp.position')
+              .select('u.id', 'u.first_name', 'u.last_name'),
+            db('scorecards')
+              .where({ tour_id: tourId, round_number: openRound.round_number, user_id: user.id, type: 'individual' })
+              .first(),
+          ]);
+
+          todayGroup = {
+            groupNumber: myGroupRow.group_number,
+            teeTime: myGroupRow.tee_time ? String(myGroupRow.tee_time).slice(0, 5) : null,
+            startingHole: myGroupRow.starting_hole,
+            teeLocation: myGroupRow.tee_location,
+            players: groupPlayers.map((p) => ({
+              id: Number(p.id),
+              name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+              isMe: Number(p.id) === Number(user.id),
+            })),
+            scorecard: scorecard || null,
+          };
+        }
+      }
+
+      const publishedRoundNumbers = allRoundRows
+        .filter((r) => r.leaderboard_published)
+        .map((r) => r.round_number);
+      const stablefordRoundNumbers = allRoundRows
+        .filter((r) => r.calc_type !== 'ambrose_nett')
+        .map((r) => r.round_number);
+
+      const publishedStablefordRounds = stablefordRoundNumbers.filter((rn) => publishedRoundNumbers.includes(rn));
+
+      let championshipStanding = null;
+      if (publishedStablefordRounds.length) {
+        const boards = await calculateStablefordLeaderboards(db, tourId, {
+          roundNumbers: publishedStablefordRounds,
+          bestOf: activeTour.leaderboard_best_of_rounds || null
+        });
+        const championship = boards?.championship || [];
+        const idx = championship.findIndex((row) => Number(row.userId) === Number(user.id));
+        if (idx >= 0) {
+          const row = championship[idx];
+          const leaderPoints = Number(championship[0]?.total || championship[0]?.points || 0);
+          championshipStanding = {
+            place: idx + 1,
+            total: championship.length,
+            points: Number(row.total || row.points || 0),
+            pointsFromLeader: Math.max(0, leaderPoints - Number(row.total || row.points || 0)),
+          };
+        }
+      }
+
+      let skinsSummary = null;
+      if (activeTour.skins_enabled && publishedRoundNumbers.length) {
+        const [activePlayerCountRow, skins] = await Promise.all([
+          db('event_players').where({ tour_id: tourId, status: 'active' }).count({ total: '*' }).first(),
+          calculateEventSkinsForDays(db, tourId, publishedRoundNumbers),
+        ]);
+        const baseSkinPot = Number(activePlayerCountRow?.total || 0) * Number(activeTour.skins_amount_per_player_per_hole || 0);
+        const myWins = (skins?.holes || [])
+          .filter((h) => h.status === 'won' && String(h.participant_type) === 'player' && Number(h.winning_participant_id) === Number(user.id))
+          .map((h) => {
+            const basePot = Number(h.base_pot_amount || 0);
+            const skinsCount = basePot > 0 ? Math.round(Number(h.total_pot_amount || 0) / basePot) : 1;
+            return { roundNumber: Number(h.round_number), holeNumber: Number(h.hole_number), skinsCount, payout: skinsCount * baseSkinPot };
           })
-          .whereIn('s.id', ambroseScorecardIds)
-          .select('s.id as scorecard_id', 'ph.playing_handicap')
-      : [];
-    const teamMembersByScorecard = new Map();
-    for (const row of teamMemberRows) {
-      const key = Number(row.scorecard_id);
-      if (!teamMembersByScorecard.has(key)) teamMembersByScorecard.set(key, []);
-      teamMembersByScorecard.get(key).push(Number(row.playing_handicap || 0));
-    }
+          .sort((a, b) => a.roundNumber - b.roundNumber || a.holeNumber - b.holeNumber);
 
-    const recentScores = [
-      ...individualScores.map((row) => ({
-        ...row,
-        calcType: row.calc_type || defaultCalcTypeForDay(row.day),
-        entryType: 'individual',
-        entryLabel: 'Individual',
-        resultDisplay: `${Number(row.totalStableford || 0)} pts`,
-        showGross: String(row.calc_type || defaultCalcTypeForDay(row.day)) !== CALC_TYPES.STABLEFORD
-      })),
-      ...ambroseScores.map((row) => ({
-        ...row,
-        calcType: row.calc_type || defaultCalcTypeForDay(row.day),
-        entryType: 'team',
-        entryLabel: row.teamName ? `Ambrose - ${row.teamName}` : 'Ambrose',
-        resultDisplay: (() => {
-          const handicaps = teamMembersByScorecard.get(Number(row.id)) || [];
-          const allowance = ambroseAllowance(handicaps.length);
-          const teamHcpRaw = handicaps.reduce((sum, h) => sum + Number(h || 0), 0) * allowance;
-          const gross = Number(row.totalGross || 0);
-          const netRaw = gross - teamHcpRaw;
-          return `Net ${formatAmbroseValue(netRaw, allowance)}`;
-        })(),
-        showGross: String(row.calc_type || defaultCalcTypeForDay(row.day)) !== CALC_TYPES.STABLEFORD
-      }))
-    ].sort((a, b) => Number(a.day || 0) - Number(b.day || 0) || String(a.entryType).localeCompare(String(b.entryType)));
+        const totalSkins = myWins.reduce((s, h) => s + h.skinsCount, 0);
+        if (totalSkins > 0) {
+          skinsSummary = { totalSkins, totalPayout: totalSkins * baseSkinPot, baseSkinPot, wins: myWins };
+        }
+      }
 
-    const profile = await db('users')
-      .where({ id: user.id })
-      .select('first_name', 'last_name', 'email', 'phone_number', 'is_previous_winner')
-      .first();
+      const daysSummary = await Promise.all(
+        allRoundRows.map(async (roundRow) => {
+          const [teeGroupRow, scorecard] = await Promise.all([
+            db('tee_groups as tg')
+              .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+              .where({ 'tg.tour_id': tourId, 'tg.round_number': roundRow.round_number, 'tgp.user_id': user.id })
+              .select('tg.group_number', 'tg.tee_time', 'tg.starting_hole')
+              .first(),
+            db('scorecards')
+              .where({ tour_id: tourId, round_number: roundRow.round_number, user_id: user.id, type: 'individual' })
+              .first(),
+          ]);
+          return {
+            roundNumber: roundRow.round_number,
+            status: roundRow.status,
+            leaderboardPublished: Boolean(roundRow.leaderboard_published),
+            teeTime: teeGroupRow?.tee_time ? String(teeGroupRow.tee_time).slice(0, 5) : null,
+            startingHole: teeGroupRow?.starting_hole || null,
+            groupNumber: teeGroupRow?.group_number || null,
+            scorecardId: scorecard ? Number(scorecard.id) : null,
+            scorecardStatus: scorecard?.status || null,
+          };
+        })
+      );
 
-    const activeEvent = await db('events')
-      .where({ is_active: 1 })
-      .orderBy('year', 'desc')
-      .first();
-
-    let calcuttaSummary = null;
-    let noveltySummary = null;
-    let prizeSummary = null;
-    let championshipStanding = null;
-    let skinsSummary = null;
-
-    if (activeEvent) {
-      const eventId = Number(activeEvent.id);
-      const [activePlayerCountRow, calcuttaCountsRow] = await Promise.all([
-        db('event_players')
-          .where({ event_id: eventId, status: 'active' })
-          .count({ total: '*' })
-          .first(),
-        db('calcutta_auctions')
-          .where({ event_id: eventId })
-          .count({ total: '*' })
-          .sum({ missing_owner_count: db.raw("CASE WHEN owner_user_id IS NULL THEN 1 ELSE 0 END") })
-          .first()
+      const [itineraryItems, roundsForItinerary, teeTimeRows, myTeeGroupRows] = await Promise.all([
+        db('itinerary_items').where({ tour_id: tourId }).orderBy(['item_date', 'sort_order', 'start_time']),
+        db('golf_rounds as gr')
+          .join('courses as c', 'gr.course_id', 'c.id')
+          .where({ 'gr.tour_id': tourId })
+          .orderBy('gr.round_number')
+          .select('gr.round_number', 'gr.tour_date', 'gr.calc_type', 'gr.status', 'c.course_name', 'c.tee_name'),
+        db('tee_groups')
+          .where({ tour_id: tourId })
+          .groupBy(['tour_id', 'round_number'])
+          .select('round_number', db.raw('MIN(tee_time) as first_tee_time')),
+        db('tee_groups as tg')
+          .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+          .where({ 'tg.tour_id': tourId, 'tgp.user_id': user.id })
+          .select('tg.id as group_id', 'tg.round_number', 'tg.tee_time', 'tg.starting_hole', 'tg.group_number'),
       ]);
 
-      const activePlayerCount = Number(activePlayerCountRow?.total || 0);
-      const calcuttaDrawnCount = Number(calcuttaCountsRow?.total || 0);
-      const calcuttaMissingOwnerCount = Number(calcuttaCountsRow?.missing_owner_count || 0);
-      const isCalcuttaFinalized = activePlayerCount > 0
-        && calcuttaDrawnCount === activePlayerCount
-        && calcuttaMissingOwnerCount === 0;
+      const myGroupIds = myTeeGroupRows.map((g) => g.group_id);
+      const allGroupPlayers = myGroupIds.length
+        ? await db('tee_group_players as tgp')
+            .join('users as u', 'u.id', 'tgp.user_id')
+            .whereIn('tgp.tee_group_id', myGroupIds)
+            .orderBy('tgp.position')
+            .select('tgp.tee_group_id', 'u.id', 'u.first_name', 'u.last_name')
+        : [];
 
-      if (isCalcuttaFinalized) {
-        const [boughtRows, soldRows, purchasesOwedRow, ownershipReceivableRow, allSalesRows, publishedRoundsRows] = await Promise.all([
-          db('calcutta_auctions as ca')
-            .join('users as auctioned', 'auctioned.id', 'ca.auctioned_user_id')
-            .leftJoin('users as owner', 'owner.id', 'ca.owner_user_id')
-            .where({ 'ca.event_id': eventId, 'ca.buyer_user_id': user.id })
-            .orderBy('ca.draw_order', 'asc')
-            .select(
-              'ca.draw_order',
-              'ca.auction_bid_amount',
-              'auctioned.first_name as auctioned_first_name',
-              'auctioned.last_name as auctioned_last_name',
-              'owner.first_name as owner_first_name',
-              'owner.last_name as owner_last_name'
-            ),
-          db('calcutta_auctions as ca')
-            .join('users as auctioned', 'auctioned.id', 'ca.auctioned_user_id')
-            .join('users as buyer', 'buyer.id', 'ca.buyer_user_id')
-            .where({ 'ca.event_id': eventId, 'ca.owner_user_id': user.id })
-            .orderBy('ca.draw_order', 'asc')
-            .select(
-              'ca.draw_order',
-              'ca.auction_bid_amount',
-              'auctioned.first_name as auctioned_first_name',
-              'auctioned.last_name as auctioned_last_name',
-              'buyer.first_name as buyer_first_name',
-              'buyer.last_name as buyer_last_name'
-            ),
-          db('calcutta_auctions')
-            .where({ event_id: eventId, buyer_user_id: user.id })
-            .sum({ total: 'auction_bid_amount' })
-            .first(),
-          db('calcutta_auctions')
-            .where({ event_id: eventId, owner_user_id: user.id })
-            .sum({ total: db.raw('auction_bid_amount * 0.5') })
-            .first(),
-          db('calcutta_auctions as ca')
-            .join('users as auctioned', 'auctioned.id', 'ca.auctioned_user_id')
-            .join('users as buyer', 'buyer.id', 'ca.buyer_user_id')
-            .leftJoin('users as owner', 'owner.id', 'ca.owner_user_id')
-            .where({ 'ca.event_id': eventId })
-            .select(
-              'ca.auctioned_user_id',
-              'ca.buyer_user_id',
-              'ca.owner_user_id',
-              'ca.auction_bid_amount',
-              'auctioned.first_name as auctioned_first_name',
-              'auctioned.last_name as auctioned_last_name',
-              'buyer.first_name as buyer_first_name',
-              'buyer.last_name as buyer_last_name',
-              'owner.first_name as owner_first_name',
-              'owner.last_name as owner_last_name'
-            ),
-          db('event_day_statuses')
-            .where({ event_id: eventId, leaderboard_published: 1 })
-            .whereIn('day', [2, 3, 4])
-            .select('day')
-        ]);
+      const playersByGroup = {};
+      for (const p of allGroupPlayers) {
+        if (!playersByGroup[p.tee_group_id]) playersByGroup[p.tee_group_id] = [];
+        playersByGroup[p.tee_group_id].push({
+          id: Number(p.id),
+          name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+          isMe: Number(p.id) === Number(user.id),
+        });
+      }
 
-        const purchasesOwed = Number(purchasesOwedRow?.total || 0);
-        const ownershipReceivable = Number(ownershipReceivableRow?.total || 0);
-        const poolTotal = allSalesRows.reduce((sum, row) => sum + (Number(row.auction_bid_amount || 0) * 0.5), 0);
-        const publishedRoundSet = new Set((publishedRoundsRows || []).map((row) => Number(row.day)));
-        const payouts = [];
-        const pushPayout = (category, basisUserId, basisName, recipientUserId, recipientName, percent) => {
-          const pct = Number(percent || 0);
-          if (!Number.isFinite(pct) || pct <= 0) return;
-          if (!Number.isInteger(Number(recipientUserId)) || Number(recipientUserId) <= 0) return;
-          const amount = poolTotal * (pct / 100);
-          payouts.push({
-            category: String(category || ''),
-            basisName: String(basisName || '').trim() || '-',
-            recipientName: String(recipientName || '').trim() || '-',
-            recipientUserId: Number(recipientUserId),
-            basisUserId: Number(basisUserId || 0),
-            percent: pct,
-            amount
-          });
+      const myGroupByRound = {};
+      for (const g of myTeeGroupRows) {
+        myGroupByRound[g.round_number] = {
+          teeTime: g.tee_time ? String(g.tee_time).slice(0, 5) : null,
+          startingHole: g.starting_hole,
+          groupNumber: g.group_number,
+          players: playersByGroup[g.group_id] || [],
         };
+      }
 
-        if (publishedRoundSet.has(4) && poolTotal > 0) {
-          const saleByAuctionedUser = new Map();
-          allSalesRows.forEach((row) => {
-            saleByAuctionedUser.set(Number(row.auctioned_user_id), row);
-          });
+      const itinTeeTimeByRound = {};
+      for (const t of teeTimeRows) itinTeeTimeByRound[t.round_number] = t.first_tee_time;
 
-          const stablefordBoards = await calculateStablefordLeaderboards(db, eventId);
-          [2, 3, 4].forEach((day) => {
-            const dailyWinner = (stablefordBoards?.byDay?.[day] || [])[0];
-            if (!dailyWinner) return;
-            const sale = saleByAuctionedUser.get(Number(dailyWinner.userId || 0));
-            if (!sale || !Number(sale.buyer_user_id || 0)) return;
-            pushPayout(
-              `Owner Daily Winner (${dayLabel(day)})`,
-              Number(dailyWinner.userId || 0),
-              `${sale.auctioned_first_name || ''} ${sale.auctioned_last_name || ''}`.trim(),
-              Number(sale.buyer_user_id),
-              `${sale.buyer_first_name || ''} ${sale.buyer_last_name || ''}`.trim(),
-              Number(activeEvent.calcutta_owner_daily_winner_percent || 0)
-            );
-          });
+      const byDate = {};
 
-          const champion = (stablefordBoards?.championship || [])[0];
-          if (champion) {
-            const championName = String(champion.name || '').trim();
-            pushPayout(
-              'Champion',
-              Number(champion.userId || 0),
-              championName,
-              Number(champion.userId || 0),
-              championName,
-              Number(activeEvent.calcutta_champion_percent || 0)
-            );
+      for (const r of roundsForItinerary) {
+        const key = String(r.tour_date).slice(0, 10);
+        if (!byDate[key]) byDate[key] = [];
+        byDate[key].push({
+          _kind: 'round',
+          round_number: r.round_number,
+          course_name: r.course_name,
+          tee_name: r.tee_name,
+          calc_type: r.calc_type,
+          status: r.status,
+          first_tee_time: itinTeeTimeByRound[r.round_number] || null,
+          _sort_time: itinTeeTimeByRound[r.round_number] || null,
+          my_group: myGroupByRound[r.round_number] || null,
+        });
+      }
 
-            const championSale = saleByAuctionedUser.get(Number(champion.userId || 0));
-            if (championSale && Number(championSale.buyer_user_id || 0) > 0) {
-              pushPayout(
-                'Champion Owner',
-                Number(champion.userId || 0),
-                championName,
-                Number(championSale.buyer_user_id),
-                `${championSale.buyer_first_name || ''} ${championSale.buyer_last_name || ''}`.trim(),
-                Number(activeEvent.calcutta_champion_owner_percent || 0)
-              );
-            }
-          }
+      for (const item of itineraryItems) {
+        const checkinKey = String(item.item_date).slice(0, 10);
+        if (!byDate[checkinKey]) byDate[checkinKey] = [];
+        byDate[checkinKey].push({
+          ...item,
+          _kind: 'item',
+          _display: item.type === 'accommodation' && item.end_date ? 'checkin' : null,
+          _sort_time: item.start_time || null,
+        });
 
-          const mysteryPlace = Number(activeEvent.calcutta_mystery_place || 0);
-          if (mysteryPlace > 0) {
-            const mysteryRow = (stablefordBoards?.championship || []).find((row) => Number(row.position || 0) === mysteryPlace);
-            if (mysteryRow) {
-              const mysterySale = saleByAuctionedUser.get(Number(mysteryRow.userId || 0));
-              if (mysterySale && Number(mysterySale.buyer_user_id || 0) > 0) {
-                pushPayout(
-                  `Mystery Place #${mysteryPlace}`,
-                  Number(mysteryRow.userId || 0),
-                  `${mysterySale.auctioned_first_name || ''} ${mysterySale.auctioned_last_name || ''}`.trim(),
-                  Number(mysterySale.buyer_user_id),
-                  `${mysterySale.buyer_first_name || ''} ${mysterySale.buyer_last_name || ''}`.trim(),
-                  Number(activeEvent.calcutta_mystery_place_percent || 0)
-                );
-              }
-            }
+        if (item.type === 'accommodation' && item.end_date) {
+          const checkoutKey = String(item.end_date).slice(0, 10);
+          if (checkoutKey !== checkinKey) {
+            if (!byDate[checkoutKey]) byDate[checkoutKey] = [];
+            byDate[checkoutKey].push({
+              ...item,
+              _kind: 'item',
+              _display: 'checkout',
+              _sort_time: item.end_time || null,
+            });
           }
         }
-
-        const payoutsForPlayer = payouts
-          .filter((row) => Number(row.recipientUserId) === Number(user.id))
-          .sort((a, b) => (
-            String(a.category || '').localeCompare(String(b.category || '')) ||
-            String(a.basisName || '').localeCompare(String(b.basisName || ''))
-          ));
-        const personalPayout = payoutsForPlayer
-          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        calcuttaSummary = {
-          event: activeEvent,
-          boughtRows,
-          soldRows,
-          purchasesOwed,
-          ownershipReceivable,
-          netBalance: ownershipReceivable - purchasesOwed,
-          personalPayout,
-          netAfterPayout: (ownershipReceivable - purchasesOwed) + personalPayout,
-          payoutsAvailable: payoutsForPlayer.length > 0,
-          payouts: payoutsForPlayer
-        };
       }
 
-      const publishedNoveltyDayRow = await db('event_day_statuses as eds')
-        .join('novelty_events as ne', function joinNoveltyEvents() {
-          this.on('ne.event_id', '=', 'eds.event_id').andOn('ne.day', '=', 'eds.day');
-        })
-        .where({ 'eds.event_id': eventId, 'eds.leaderboard_published': 1 })
-        .countDistinct({ total: 'eds.day' })
-        .first();
-      const publishedNoveltyDayCount = Number(publishedNoveltyDayRow?.total || 0);
-      if (publishedNoveltyDayCount > 0) {
-        const noveltyWinsRows = await db('novelty_results as nr')
-          .join('novelty_events as ne', 'ne.id', 'nr.novelty_event_id')
-          .join('event_day_statuses as eds', function joinDayStatus() {
-            this.on('eds.event_id', '=', 'ne.event_id').andOn('eds.day', '=', 'ne.day');
-          })
-          .where({ 'nr.event_id': eventId, 'nr.winner_user_id': user.id })
-          .andWhere('nr.is_no_winner', 0)
-          .andWhere('eds.leaderboard_published', 1)
-          .orderBy([{ column: 'ne.day', order: 'asc' }, { column: 'ne.hole_number', order: 'asc' }, { column: 'ne.id', order: 'asc' }])
-          .select('ne.day', 'ne.hole_number', 'ne.novelty_type', 'ne.label');
-
-        const ntpWins = noveltyWinsRows.filter((row) => String(row.novelty_type || '') === 'NTP').length;
-        const longDriveWins = noveltyWinsRows.filter((row) => String(row.novelty_type || '') === 'Long Drive').length;
-        noveltySummary = {
-          event: activeEvent,
-          wins: noveltyWinsRows,
-          totalWins: noveltyWinsRows.length,
-          ntpWins,
-          longDriveWins
-        };
-      }
-
-      const publishedDayRows = await db('event_day_statuses')
-        .where({ event_id: eventId, leaderboard_published: 1 })
-        .orderBy('day', 'asc')
-        .select('day');
-      const publishedDays = publishedDayRows.map((row) => Number(row.day)).filter((d) => d >= 1 && d <= 4);
-      const publishedChampionshipDays = publishedDays.filter((d) => d >= 2 && d <= 4);
-
-      if (publishedChampionshipDays.length) {
-        const stablefordPublished = await calculateStablefordLeaderboards(db, eventId);
-        const aggregateByUser = new Map();
-        publishedChampionshipDays.forEach((day) => {
-          (stablefordPublished?.byDay?.[day] || []).forEach((row) => {
-            const userId = Number(row.userId || 0);
-            if (!userId) return;
-            if (!aggregateByUser.has(userId)) {
-              aggregateByUser.set(userId, {
-                userId,
-                name: row.name,
-                points: 0,
-                countbackLast9: 0,
-                countbackLast6: 0,
-                countbackLast3: 0,
-                countbackLast1: 0
-              });
-            }
-            const current = aggregateByUser.get(userId);
-            current.points += Number(row.total || 0);
-            current.countbackLast9 += Number(row.countbackLast9 || 0);
-            current.countbackLast6 += Number(row.countbackLast6 || 0);
-            current.countbackLast3 += Number(row.countbackLast3 || 0);
-            current.countbackLast1 += Number(row.countbackLast1 || 0);
-          });
+      for (const key of Object.keys(byDate)) {
+        byDate[key].sort((a, b) => {
+          const aNote = a._kind === 'item' && a.type === 'note';
+          const bNote = b._kind === 'item' && b.type === 'note';
+          if (aNote !== bNote) return aNote ? -1 : 1;
+          if (!a._sort_time && !b._sort_time) return 0;
+          if (!a._sort_time) return 1;
+          if (!b._sort_time) return -1;
+          return a._sort_time < b._sort_time ? -1 : a._sort_time > b._sort_time ? 1 : 0;
         });
-
-        const leaderboard = [...aggregateByUser.values()].sort(compareChampionshipRows);
-        const leaderPoints = leaderboard.length ? Number(leaderboard[0].points || 0) : 0;
-        const playerRowIndex = leaderboard.findIndex((row) => Number(row.userId) === Number(user.id));
-        if (playerRowIndex >= 0) {
-          const playerRow = leaderboard[playerRowIndex];
-          championshipStanding = {
-            place: playerRowIndex + 1,
-            points: Number(playerRow.points || 0),
-            pointsFromLeader: Math.max(0, leaderPoints - Number(playerRow.points || 0))
-          };
-        }
       }
 
-      if (publishedDays.length) {
-        const [activePlayerCountRow, stableford, ambrose, sultans, skins] = await Promise.all([
-          db('event_players').where({ event_id: eventId, status: 'active' }).count({ total: '*' }).first(),
-          calculateStablefordLeaderboards(db, eventId),
-          calculateAmbroseLeaderboard(db, eventId),
-          calculateSultansLeaderboard(db, eventId),
-          calculateEventSkinsForDays(db, eventId, publishedDays)
-        ]);
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const tomorrowKey = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
-        const activePlayerCount = Number(activePlayerCountRow?.total || 0);
-        const skinsStake = toMoney(activeEvent.skins_amount_per_player_per_hole || 1);
-        const baseSkinPot = activePlayerCount * skinsStake;
-        const prizeConfig = {
-          ambroseWinner: toMoney(activeEvent.prize_ambrose_winner_amount),
-          ambroseSecond: toMoney(activeEvent.prize_ambrose_second_amount),
-          dailyWinner: toMoney(activeEvent.prize_daily_winner_amount),
-          dailySecond: toMoney(activeEvent.prize_daily_second_amount),
-          sultansWinner: toMoney(activeEvent.prize_sultans_winner_amount),
-          ntp: toMoney(activeEvent.prize_ntp_amount),
-          longDrive: toMoney(activeEvent.prize_long_drive_amount)
-        };
-
-        const lineItems = [];
-        const teamSplitItems = [];
-        const addUserItem = (day, category, label, amount, winnerUserId) => {
-          if (!amount || Number(amount) <= 0) return;
-          if (Number(winnerUserId) !== Number(user.id)) return;
-          lineItems.push({ day, category, label, amount: Number(amount) });
-        };
-        const addTeamItem = (day, category, label, amount, teamId) => {
-          if (!amount || Number(amount) <= 0) return;
-          if (!Number.isInteger(Number(teamId)) || Number(teamId) <= 0) return;
-          teamSplitItems.push({ day, category, label, amount: Number(amount), teamId: Number(teamId) });
-        };
-
-        if (publishedDays.includes(1)) {
-          const winner = (ambrose || [])[0];
-          const second = (ambrose || [])[1];
-          if (winner) addTeamItem(1, 'ambrose', 'Ambrose Winner', prizeConfig.ambroseWinner, Number(winner.id));
-          if (second) addTeamItem(1, 'ambrose', 'Ambrose 2nd', prizeConfig.ambroseSecond, Number(second.id));
-        }
-
-        [2, 3, 4].forEach((day) => {
-          if (!publishedDays.includes(day)) return;
-          const rows = stableford?.byDay?.[day] || [];
-          const winner = rows[0];
-          const second = rows[1];
-          if (winner) addUserItem(day, 'daily', 'Daily Winner', prizeConfig.dailyWinner, Number(winner.userId));
-          if (second) addUserItem(day, 'daily', 'Daily 2nd', prizeConfig.dailySecond, Number(second.userId));
-        });
-
-        if (publishedDays.includes(4)) {
-          const sultansWinner = (sultans || [])[0];
-          if (sultansWinner) addTeamItem(4, 'sultans', 'Sultans Winner', prizeConfig.sultansWinner, Number(sultansWinner.id));
-        }
-
-        const noveltyPrizeRows = await db('novelty_results as nr')
-          .join('novelty_events as ne', 'ne.id', 'nr.novelty_event_id')
-          .join('event_day_statuses as eds', function joinDayStatus() {
-            this.on('eds.event_id', '=', 'ne.event_id').andOn('eds.day', '=', 'ne.day');
-          })
-          .where({ 'nr.event_id': eventId, 'eds.leaderboard_published': 1 })
-          .andWhere('nr.is_no_winner', 0)
-          .whereIn('ne.day', publishedDays)
-          .select('ne.day', 'ne.novelty_type', 'nr.winner_user_id');
-        noveltyPrizeRows.forEach((row) => {
-          const type = String(row.novelty_type || '');
-          const amount = type === 'NTP' ? prizeConfig.ntp : prizeConfig.longDrive;
-          const label = type === 'NTP' ? 'NTP Winner' : 'Long Drive Winner';
-          addUserItem(Number(row.day), type === 'NTP' ? 'ntp' : 'long_drive', label, amount, Number(row.winner_user_id || 0));
-        });
-
-        (skins?.holes || [])
-          .filter((hole) => publishedDays.includes(Number(hole.day)))
-          .filter((hole) => String(hole.status || '') === 'won' && Number(hole.winning_participant_id || 0) > 0)
-          .forEach((hole) => {
-            const units = Number(hole.base_pot_amount || 0) > 0
-              ? Math.round(Number(hole.total_pot_amount || 0) / Number(hole.base_pot_amount || 0))
-              : 0;
-            const amount = units * baseSkinPot;
-            if (String(hole.participant_type) === 'team') {
-              addTeamItem(Number(hole.day), 'skins', `Skins Hole ${Number(hole.hole_number || 0)}`, amount, Number(hole.winning_participant_id));
-            } else {
-              addUserItem(Number(hole.day), 'skins', `Skins Hole ${Number(hole.hole_number || 0)}`, amount, Number(hole.winning_participant_id));
-            }
-          });
-
-        const personalSkinWins = (skins?.holes || [])
-          .filter((hole) => publishedDays.includes(Number(hole.day)))
-          .filter((hole) => String(hole.status || '') === 'won')
-          .filter((hole) => String(hole.participant_type || '') === 'player')
-          .filter((hole) => Number(hole.winning_participant_id || 0) === Number(user.id))
-          .map((hole) => {
-            const basePot = Number(hole.base_pot_amount || 0);
-            const totalPot = Number(hole.total_pot_amount || 0);
-            const skinsCount = basePot > 0 ? Math.max(0, Math.round(totalPot / basePot)) : 0;
-            return {
-              day: Number(hole.day || 0),
-              holeNumber: Number(hole.hole_number || 0),
-              gross: hole.winning_gross == null ? null : Number(hole.winning_gross),
-              stableford: hole.winning_stableford == null ? null : Number(hole.winning_stableford),
-              skinsCount
-            };
-          })
-          .sort((a, b) => Number(a.day || 0) - Number(b.day || 0) || Number(a.holeNumber || 0) - Number(b.holeNumber || 0));
-        if (publishedDays.length) {
-          const totalSkins = personalSkinWins.reduce((sum, row) => sum + Number(row.skinsCount || 0), 0);
-          skinsSummary = {
-            event: activeEvent,
-            baseSkinPot,
-            totalSkins,
-            totalPayout: totalSkins * baseSkinPot,
-            wins: personalSkinWins
-          };
-        }
-
-        if (teamSplitItems.length) {
-          const teamIds = [...new Set(teamSplitItems.map((row) => Number(row.teamId)).filter((id) => id > 0))];
-          const teamMembers = teamIds.length
-            ? await db('team_members')
-                .whereIn('team_id', teamIds)
-                .select('team_id', 'user_id')
-            : [];
-          const membersByTeam = new Map();
-          teamMembers.forEach((row) => {
-            const key = Number(row.team_id);
-            if (!membersByTeam.has(key)) membersByTeam.set(key, []);
-            membersByTeam.get(key).push(Number(row.user_id));
-          });
-          teamSplitItems.forEach((item) => {
-            const members = membersByTeam.get(Number(item.teamId)) || [];
-            const share = members.length ? (Number(item.amount || 0) / members.length) : 0;
-            if (!share) return;
-            if (members.includes(Number(user.id))) {
-              lineItems.push({
-                day: item.day,
-                category: item.category,
-                label: `${item.label} (team share)`,
-                amount: share
-              });
-            }
-          });
-        }
-
-        if (lineItems.length) {
-          const sortedItems = [...lineItems].sort((a, b) => Number(a.day || 0) - Number(b.day || 0) || String(a.label || '').localeCompare(String(b.label || '')));
-          const totalWon = sortedItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-          const byCategory = sortedItems.reduce((acc, item) => {
-            const key = String(item.category || 'other');
-            acc[key] = Number(acc[key] || 0) + Number(item.amount || 0);
-            return acc;
-          }, {});
-          prizeSummary = {
-            event: activeEvent,
-            totalWon,
-            byCategory,
-            items: sortedItems
-          };
-        }
-      }
+      return res.render('player/dashboard', {
+        title: 'Dashboard',
+        activeTour,
+        openRound,
+        todayGroup,
+        todayHandicap,
+        championshipStanding,
+        skinsSummary,
+        daysSummary,
+        byDate,
+        todayKey,
+        tomorrowKey,
+        tabOverride: req.query.tab || null,
+        dayLabel,
+      });
+    } catch (err) {
+      return next(err);
     }
+  });
 
-    const openScorecards = recentScores
-      .filter((score) => String(score.day_status || '') === 'open_scoring' && String(score.status || '') !== 'submitted')
-      .sort((a, b) => Number(a.day || 0) - Number(b.day || 0))
-      .map((score) => ({
-        id: Number(score.id),
-        day: Number(score.day || 0),
-        label: score.entryLabel || 'Scorecard'
-      }));
+  router.get('/itinerary', requireAuth, async (req, res, next) => {
+    try {
+      const { tour: activeTour, needsPicker, tours } = await resolveActiveTour(req.tenant.id, req.query.tourId);
 
-    return res.render('player/dashboard', {
-      title: 'Player Dashboard',
-      user,
-      recentScores,
-      openScorecards,
-      profile,
-      calcuttaSummary,
-      noveltySummary,
-      prizeSummary,
-      championshipStanding,
-      skinsSummary
-    });
+      if (needsPicker) {
+        return res.render('player/tour-picker', { title: 'Your Tours', tours });
+      }
+
+      if (!activeTour) return res.redirect(res.locals.tenantPath('/dashboard'));
+
+      const tourId = Number(activeTour.id);
+
+      const user = req.session.user;
+
+      const [items, rounds, teeTimeRows, myTeeGroupRows] = await Promise.all([
+        db('itinerary_items')
+          .where({ tour_id: tourId })
+          .where(function () { this.whereNull('user_id').orWhere({ user_id: user.id }); })
+          .orderBy(['item_date', 'sort_order', 'start_time']),
+        db('golf_rounds as gr')
+          .join('courses as c', 'gr.course_id', 'c.id')
+          .where({ 'gr.tour_id': tourId })
+          .orderBy('gr.round_number')
+          .select('gr.round_number', 'gr.tour_date', 'gr.calc_type', 'gr.status', 'c.course_name', 'c.tee_name'),
+        db('tee_groups')
+          .where({ tour_id: tourId })
+          .groupBy(['tour_id', 'round_number'])
+          .select('round_number', db.raw('MIN(tee_time) as first_tee_time')),
+        db('tee_groups as tg')
+          .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+          .where({ 'tg.tour_id': tourId, 'tgp.user_id': user.id })
+          .select('tg.id as group_id', 'tg.round_number', 'tg.tee_time', 'tg.starting_hole', 'tg.group_number'),
+      ]);
+
+      const myGroupIds = myTeeGroupRows.map((g) => g.group_id);
+      const allGroupPlayers = myGroupIds.length
+        ? await db('tee_group_players as tgp')
+            .join('users as u', 'u.id', 'tgp.user_id')
+            .whereIn('tgp.tee_group_id', myGroupIds)
+            .orderBy('tgp.position')
+            .select('tgp.tee_group_id', 'u.id', 'u.first_name', 'u.last_name')
+        : [];
+
+      const playersByGroup = {};
+      for (const p of allGroupPlayers) {
+        if (!playersByGroup[p.tee_group_id]) playersByGroup[p.tee_group_id] = [];
+        playersByGroup[p.tee_group_id].push({
+          id: Number(p.id),
+          name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+          isMe: Number(p.id) === Number(user.id),
+        });
+      }
+
+      const myGroupByRound = {};
+      for (const g of myTeeGroupRows) {
+        myGroupByRound[g.round_number] = {
+          teeTime: g.tee_time ? String(g.tee_time).slice(0, 5) : null,
+          startingHole: g.starting_hole,
+          groupNumber: g.group_number,
+          players: playersByGroup[g.group_id] || [],
+        };
+      }
+
+      const teeTimeByRound = {};
+      for (const t of teeTimeRows) teeTimeByRound[t.round_number] = t.first_tee_time;
+
+      const byDate = {};
+
+      for (const r of rounds) {
+        const key = String(r.tour_date).slice(0, 10);
+        if (!byDate[key]) byDate[key] = [];
+        const firstTeeTime = teeTimeByRound[r.round_number] || null;
+        byDate[key].push({
+          _kind: 'round',
+          round_number: r.round_number,
+          course_name: r.course_name,
+          tee_name: r.tee_name,
+          calc_type: r.calc_type,
+          status: r.status,
+          first_tee_time: firstTeeTime,
+          _sort_time: firstTeeTime,
+          my_group: myGroupByRound[r.round_number] || null,
+        });
+      }
+
+      for (const item of items) {
+        const checkinKey = String(item.item_date).slice(0, 10);
+        if (!byDate[checkinKey]) byDate[checkinKey] = [];
+        byDate[checkinKey].push({
+          ...item,
+          _kind: 'item',
+          _display: item.type === 'accommodation' && item.end_date ? 'checkin' : null,
+          _sort_time: item.start_time || null,
+        });
+
+        if (item.type === 'accommodation' && item.end_date) {
+          const checkoutKey = String(item.end_date).slice(0, 10);
+          if (checkoutKey !== checkinKey) {
+            if (!byDate[checkoutKey]) byDate[checkoutKey] = [];
+            byDate[checkoutKey].push({
+              ...item,
+              _kind: 'item',
+              _display: 'checkout',
+              _sort_time: item.end_time || null,
+            });
+          }
+        }
+      }
+
+      for (const key of Object.keys(byDate)) {
+        byDate[key].sort((a, b) => {
+          const aNote = a._kind === 'item' && a.type === 'note';
+          const bNote = b._kind === 'item' && b.type === 'note';
+          if (aNote !== bNote) return aNote ? -1 : 1;
+          if (!a._sort_time && !b._sort_time) return 0;
+          if (!a._sort_time) return 1;
+          if (!b._sort_time) return -1;
+          return a._sort_time < b._sort_time ? -1 : a._sort_time > b._sort_time ? 1 : 0;
+        });
+      }
+
+      res.render('player/itinerary', {
+        title: `Itinerary — ${activeTour.label}`,
+        tour: activeTour,
+        byDate,
+        canEditPersonal: true,
+      });
+    } catch (err) { next(err); }
+  });
+
+  // ── Profile ──────────────────────────────────────────────────────────────
+
+  router.get('/profile', requireAuth, async (req, res, next) => {
+    try {
+      const profileUser = await db('users').where({ id: req.session.user.id }).first();
+      res.render('player/profile', {
+        title: 'My Profile',
+        profileUser,
+        saved: req.query.saved === '1',
+        errors: [],
+        showEmailChangeForm: false,
+        emailChangeValue: '',
+      });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/profile', requireAuth, async (req, res, next) => {
+    try {
+      const userId = Number(req.session.user.id);
+      const firstName   = (req.body.firstName   || '').trim();
+      const lastName    = (req.body.lastName    || '').trim();
+      const phoneNumber = (req.body.phoneNumber || '').trim() || null;
+      const gender      = ['male', 'female'].includes(req.body.gender) ? req.body.gender : null;
+
+      const errors = [];
+      if (!firstName && !lastName) errors.push('Please enter at least a first or last name.');
+
+      if (phoneNumber) {
+        const clash = await db('users').where({ phone_number: phoneNumber }).whereNot({ id: userId }).first();
+        if (clash) errors.push('That phone number is already linked to another account.');
+      }
+
+      if (errors.length) {
+        const profileUser = await db('users').where({ id: userId }).first();
+        return res.render('player/profile', { title: 'My Profile', profileUser, saved: false, errors });
+      }
+
+      await db('users').where({ id: userId }).update({
+        first_name:   firstName || null,
+        last_name:    lastName  || null,
+        phone_number: phoneNumber,
+        gender,
+        updated_at:   new Date(),
+      });
+
+      req.session.user.firstName = firstName;
+      req.session.user.lastName  = lastName;
+
+      res.redirect(res.locals.tenantPath('/profile') + '?saved=1');
+    } catch (err) { next(err); }
+  });
+
+  router.post('/profile/request-email-change', requireAuth, async (req, res, next) => {
+    try {
+      const userId = Number(req.session.user.id);
+      const newEmail = (req.body.newEmail || '').trim().toLowerCase();
+      const tenantPath = res.locals.tenantPath;
+
+      const errors = [];
+      if (!newEmail || !newEmail.includes('@')) errors.push('Please enter a valid email address.');
+
+      if (!errors.length) {
+        const currentUser = await db('users').where({ id: userId }).first();
+
+        if (currentUser.email.toLowerCase() === newEmail) {
+          errors.push('That is already your current email address.');
+        } else {
+          // Throttle: if a code was issued within the last LOGIN_CODE_RESEND_SECONDS, block
+          if (currentUser.pending_email_expires_at) {
+            const expiresMs = new Date(currentUser.pending_email_expires_at).getTime();
+            const issuedMs = expiresMs - LOGIN_CODE_EXPIRY_MINUTES * 60 * 1000;
+            const elapsedSeconds = (Date.now() - issuedMs) / 1000;
+            if (elapsedSeconds < LOGIN_CODE_RESEND_SECONDS) {
+              const remaining = Math.ceil(LOGIN_CODE_RESEND_SECONDS - elapsedSeconds);
+              errors.push(`Please wait ${remaining}s before requesting another code.`);
+            }
+          }
+        }
+
+        if (!errors.length) {
+          const clash = await db('users').whereRaw('lower(email) = ?', [newEmail]).whereNot({ id: userId }).first();
+          if (clash) errors.push('That email address is already linked to another account.');
+        }
+      }
+
+      if (errors.length) {
+        const profileUser = await db('users').where({ id: userId }).first();
+        return res.render('player/profile', {
+          title: 'My Profile', profileUser, saved: false, errors, showEmailChangeForm: true, emailChangeValue: newEmail,
+        });
+      }
+
+      const code = generateEmailCode();
+      const nonce = hashEmailCode(code);
+      const expiresAt = new Date(Date.now() + LOGIN_CODE_EXPIRY_MINUTES * 60 * 1000);
+
+      await db('users').where({ id: userId }).update({
+        pending_email: newEmail,
+        pending_email_nonce: nonce,
+        pending_email_expires_at: expiresAt,
+      });
+
+      try {
+        await sendEmailChangeCode(newEmail, code);
+      } catch (sendErr) {
+        console.error('[profile] email_change_send_failed', sendErr?.message);
+      }
+
+      res.redirect(tenantPath('/profile'));
+    } catch (err) { next(err); }
+  });
+
+  router.post('/profile/verify-email-change', requireAuth, async (req, res, next) => {
+    try {
+      const userId = Number(req.session.user.id);
+      const code = sanitizeCode(req.body.code);
+      const tenantPath = res.locals.tenantPath;
+
+      const currentUser = await db('users').where({ id: userId }).first();
+
+      if (!currentUser.pending_email || !currentUser.pending_email_nonce) {
+        return res.redirect(tenantPath('/profile'));
+      }
+
+      const errors = [];
+      if (new Date(currentUser.pending_email_expires_at).getTime() < Date.now()) {
+        errors.push('Verification code has expired. Please request a new one.');
+      } else if (code.length !== LOGIN_CODE_LENGTH || hashEmailCode(code) !== currentUser.pending_email_nonce) {
+        errors.push('Invalid verification code. Please try again.');
+      }
+
+      if (errors.length) {
+        return res.render('player/profile', {
+          title: 'My Profile', profileUser: currentUser, saved: false, errors,
+          showEmailChangeForm: false, emailChangeValue: '',
+        });
+      }
+
+      await db('users').where({ id: userId }).update({
+        email: currentUser.pending_email,
+        pending_email: null,
+        pending_email_nonce: null,
+        pending_email_expires_at: null,
+        updated_at: new Date(),
+      });
+
+      req.session.user.email = currentUser.pending_email;
+
+      res.redirect(tenantPath('/profile') + '?saved=1');
+    } catch (err) { next(err); }
+  });
+
+  router.post('/profile/cancel-email-change', requireAuth, async (req, res, next) => {
+    try {
+      await db('users').where({ id: Number(req.session.user.id) }).update({
+        pending_email: null,
+        pending_email_nonce: null,
+        pending_email_expires_at: null,
+      });
+      res.redirect(res.locals.tenantPath('/profile'));
+    } catch (err) { next(err); }
+  });
+
+  // ── Personal itinerary item CRUD ──────────────────────────────────────────
+
+  const PERSONAL_ITEM_TYPES = ['note', 'flight'];
+  const toNull = (v) => (typeof v === 'string' && v.trim()) ? v.trim() : null;
+
+  function buildPersonalDetails(type, body) {
+    if (type === 'flight') {
+      return {
+        airline: toNull(body.detail_airline),
+        flight_number: toNull(body.detail_flight_number),
+        departure_airport: toNull(body.detail_departure_airport),
+        arrival_airport: toNull(body.detail_arrival_airport),
+        terminal: toNull(body.detail_terminal),
+        booking_ref: toNull(body.detail_booking_ref),
+      };
+    }
+    return null;
+  }
+
+  async function getActiveTourId(db, tenantId) {
+    const tour = await db('tours').where({ tenant_id: tenantId, status: 'active' }).orderBy('year', 'desc').first();
+    return tour ? Number(tour.id) : null;
+  }
+
+  router.post('/itinerary/personal', requireAuth, async (req, res, next) => {
+    try {
+      const tourId = await getActiveTourId(db, req.tenant.id);
+      if (!tourId) return res.redirect(res.locals.tenantPath('/dashboard'));
+
+      const type = PERSONAL_ITEM_TYPES.includes(req.body.type) ? req.body.type : null;
+      if (!type || !req.body.itemDate || !toNull(req.body.title)) {
+        return res.redirect(res.locals.tenantPath('/dashboard') + '?tab=trip');
+      }
+
+      const details = buildPersonalDetails(type, req.body);
+      await db('itinerary_items').insert({
+        tour_id: tourId,
+        user_id: Number(req.session.user.id),
+        type,
+        item_date: req.body.itemDate,
+        end_date: type === 'flight' ? toNull(req.body.endDate) : null,
+        title: req.body.title.trim(),
+        description: toNull(req.body.description),
+        location: toNull(req.body.location),
+        start_time: toNull(req.body.startTime),
+        end_time: toNull(req.body.endTime),
+        details: details ? JSON.stringify(details) : null,
+        sort_order: 0,
+      });
+
+      const back = req.body.redirectBack === 'itinerary'
+        ? res.locals.tenantPath('/itinerary')
+        : res.locals.tenantPath('/dashboard') + '?tab=trip';
+      res.redirect(back);
+    } catch (err) { next(err); }
+  });
+
+  router.post('/itinerary/personal/:itemId(\\d+)', requireAuth, async (req, res, next) => {
+    try {
+      const itemId = parseInt(req.params.itemId, 10);
+      const userId = Number(req.session.user.id);
+
+      const item = await db('itinerary_items').where({ id: itemId, user_id: userId }).first();
+      if (!item) return res.status(404).send('Item not found');
+
+      const type = PERSONAL_ITEM_TYPES.includes(req.body.type) ? req.body.type : item.type;
+      if (!req.body.itemDate || !toNull(req.body.title)) {
+        return res.redirect(res.locals.tenantPath('/dashboard') + '?tab=trip');
+      }
+
+      const details = buildPersonalDetails(type, req.body);
+      await db('itinerary_items').where({ id: itemId }).update({
+        type,
+        item_date: req.body.itemDate,
+        end_date: type === 'flight' ? toNull(req.body.endDate) : null,
+        title: req.body.title.trim(),
+        description: toNull(req.body.description),
+        location: toNull(req.body.location),
+        start_time: toNull(req.body.startTime),
+        end_time: toNull(req.body.endTime),
+        details: details ? JSON.stringify(details) : null,
+      });
+
+      const back = req.body.redirectBack === 'itinerary'
+        ? res.locals.tenantPath('/itinerary')
+        : res.locals.tenantPath('/dashboard') + '?tab=trip';
+      res.redirect(back);
+    } catch (err) { next(err); }
+  });
+
+  router.post('/itinerary/personal/:itemId(\\d+)/delete', requireAuth, async (req, res, next) => {
+    try {
+      const itemId = parseInt(req.params.itemId, 10);
+      const userId = Number(req.session.user.id);
+      await db('itinerary_items').where({ id: itemId, user_id: userId }).delete();
+      const back = req.body.redirectBack === 'itinerary'
+        ? res.locals.tenantPath('/itinerary')
+        : res.locals.tenantPath('/dashboard') + '?tab=trip';
+      res.redirect(back);
+    } catch (err) { next(err); }
   });
 
   return router;

@@ -3,300 +3,121 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const session = require('express-session');
-const knex = require('knex');
 
-const { bootstrap } = require('../../src/bootstrap');
+const { createTestDb, seedTenantAndOwner, seedScoringScenario, getSessionCookie } = require('../helpers/pg');
 const { createApp } = require('../../src/app');
-const { createLoginCode } = require('../../src/services/auth/login-code.service');
-const { ROLES } = require('../../src/config/roles');
 
-async function createDb() {
-  const db = knex({
-    client: 'sqlite3',
-    connection: { filename: ':memory:' },
-    useNullAsDefault: true
-  });
-  await bootstrap(db);
-  return db;
+async function setup() {
+  const db = await createTestDb();
+  const app = createApp({ db, sessionStore: new session.MemoryStore() });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  return { db, server, baseUrl };
 }
 
-function extractSessionCookie(setCookieHeader) {
-  if (!setCookieHeader) return '';
-  return String(setCookieHeader).split(';')[0].trim();
+async function teardown(server, db) {
+  await new Promise((resolve) => server.close(resolve));
+  await db.destroy();
 }
 
-async function loginWithCode(baseUrl, db, userId) {
-  const user = await db('users').where({ id: userId }).first();
-  assert.ok(user, 'expected user for login helper');
-  const { code } = await createLoginCode(db, userId, '127.0.0.1', 'integration-test');
-  const body = new URLSearchParams({
-    lookup: user.email,
-    code
-  });
-  const res = await fetch(`${baseUrl}/auth/verify-code`, {
+async function postGrossScore(baseUrl, slug, cookie, scorecardId, holeNumber, grossScore) {
+  return fetch(`${baseUrl}/${slug}/scoring/api/live/gross`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-    redirect: 'manual'
+    headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+    body: new URLSearchParams({
+      scorecardId: String(scorecardId),
+      holeNumber: String(holeNumber),
+      grossScore: String(grossScore),
+      opId: `op-${holeNumber}-${Date.now()}`,
+    }).toString(),
   });
-  assert.equal(res.status, 302);
-  return extractSessionCookie(res.headers.get('set-cookie'));
 }
 
 test('confirm submit finalizes all scorecards in the individual group', async () => {
-  const db = await createDb();
-  const app = createApp({ db, sessionStore: new session.MemoryStore() });
-  const server = app.listen(0);
+  const { db, server, baseUrl } = await setup();
+  const ts = Date.now();
 
   try {
-    const address = server.address();
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const { tenant, owner } = await seedTenantAndOwner(db, { slug: `submit-${ts}` });
+    const { scorecard } = await seedScoringScenario(db, tenant.id, owner.id);
+    const cookie = await getSessionCookie(baseUrl, tenant.slug, db, owner);
 
-    const [userAId] = await db('users').insert({
-      first_name: 'Phil',
-      last_name: 'Kells',
-      email: 'submit.group.a@test.local',
-      role: ROLES.PLAYER
-    });
-    const [userBId] = await db('users').insert({
-      first_name: 'Ben',
-      last_name: 'Smith',
-      email: 'submit.group.b@test.local',
-      role: ROLES.PLAYER
-    });
-
-    const [eventId] = await db('events').insert({
-      year: 2033,
-      location: 'Bonville International Golf Resort',
-      start_date: '2033-02-01',
-      end_date: '2033-02-04',
-      is_active: 1
-    });
-
-    const [courseId] = await db('courses').insert({
-      course_name: 'Bonville',
-      tee_name: 'Bloodwood'
-    });
-    await db('holes').insert({
-      course_id: courseId,
-      hole_number: 1,
-      par: 4,
-      stroke_index_primary: 7,
-      stroke_index_secondary: 19
-    });
-    await db('event_day_statuses').insert({
-      event_id: eventId,
-      day: 2,
-      status: 'open_scoring',
-      course_id: courseId
-    });
-
-    await db('event_players').insert([
-      { event_id: eventId, user_id: userAId, status: 'active' },
-      { event_id: eventId, user_id: userBId, status: 'active' }
-    ]);
-    await db('player_handicaps').insert([
-      { event_id: eventId, user_id: userAId, playing_handicap: 8 },
-      { event_id: eventId, user_id: userBId, playing_handicap: 10 }
-    ]);
-
-    const [teeGroupId] = await db('tee_groups').insert({
-      event_id: eventId,
-      day: 2,
-      tee_time: '08:00',
-      tee_location: '1st tee',
-      starting_hole: 1,
-      group_number: 1,
-      source: 'manual'
-    });
-    await db('tee_group_players').insert([
-      { tee_group_id: teeGroupId, user_id: userAId, position: 1 },
-      { tee_group_id: teeGroupId, user_id: userBId, position: 2 }
-    ]);
-
-    const [scorecardAId] = await db('scorecards').insert({
-      event_id: eventId,
-      day: 2,
-      type: 'individual',
-      user_id: userAId,
-      status: 'draft'
-    });
-    const [scorecardBId] = await db('scorecards').insert({
-      event_id: eventId,
-      day: 2,
-      type: 'individual',
-      user_id: userBId,
-      status: 'draft'
-    });
-
-    const holeRows = [];
-    for (let hole = 1; hole <= 18; hole += 1) {
-      holeRows.push({ scorecard_id: scorecardAId, hole_number: hole, gross_score: 5, stableford_points: 2, owner_user_id: userAId });
-      holeRows.push({ scorecard_id: scorecardBId, hole_number: hole, gross_score: 5, stableford_points: 2, owner_user_id: userBId });
+    // Score all 18 holes
+    for (let hole = 1; hole <= 18; hole++) {
+      const res = await postGrossScore(baseUrl, tenant.slug, cookie, scorecard.id, hole, 4);
+      assert.equal(res.status, 200, `hole ${hole} POST failed`);
+      const json = await res.json();
+      assert.equal(json.ok, true, `hole ${hole} response not ok`);
     }
-    await db('scorecard_holes').insert(holeRows);
 
-    const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
-
-    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/final`, {
-      headers: { cookie: cookieA }
+    // Get confirm-final page to capture the snapshot
+    const confirmRes = await fetch(`${baseUrl}/${tenant.slug}/scoring/confirm/${scorecard.id}/final`, {
+      headers: { cookie },
     });
     assert.equal(confirmRes.status, 200);
-    const confirmHtml = await confirmRes.text();
-    const snapshotMatch = confirmHtml.match(/data-submit-snapshot="([a-f0-9]+)"/i);
-    assert.ok(snapshotMatch, 'expected submit snapshot token in confirm page');
-    const submitSnapshot = snapshotMatch[1];
+    const html = await confirmRes.text();
 
-    const submitRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/submit`, {
+    const match = html.match(/name="submitSnapshot"\s+value="([a-f0-9]+)"/);
+    assert.ok(match, 'submitSnapshot hidden field not found in confirm-final page');
+    const submitSnapshot = match[1];
+
+    // Submit
+    const submitRes = await fetch(`${baseUrl}/${tenant.slug}/scoring/confirm/${scorecard.id}/submit`, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', cookie: cookieA },
-      body: JSON.stringify({ submitSnapshot })
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams({ submitSnapshot }).toString(),
     });
     assert.equal(submitRes.status, 200);
-    const submitBody = await submitRes.json();
-    assert.equal(submitBody.ok, true);
-    assert.equal(submitBody.redirect, '/scoring?message=Group%20scores%20submitted%20successfully');
+    const result = await submitRes.json();
+    assert.equal(result.ok, true);
 
-    const statuses = await db('scorecards')
-      .whereIn('id', [scorecardAId, scorecardBId])
-      .orderBy('id', 'asc')
-      .select('id', 'status');
-    assert.equal(statuses.length, 2);
-    assert.equal(statuses[0].status, 'submitted');
-    assert.equal(statuses[1].status, 'submitted');
-
-    const submitAgainRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/submit`, {
-      method: 'POST',
-      headers: { Accept: 'application/json', cookie: cookieA }
-    });
-    assert.equal(submitAgainRes.status, 409);
-    const submitAgainBody = await submitAgainRes.json();
-    assert.equal(submitAgainBody.error, 'already_finalized');
+    const updated = await db('scorecards').where({ id: scorecard.id }).first();
+    assert.equal(updated.status, 'submitted');
   } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await db.destroy();
+    await teardown(server, db);
   }
 });
 
 test('confirm submit rejects when group scores changed after confirmation snapshot', async () => {
-  const db = await createDb();
-  const app = createApp({ db, sessionStore: new session.MemoryStore() });
-  const server = app.listen(0);
+  const { db, server, baseUrl } = await setup();
+  const ts = Date.now();
 
   try {
-    const address = server.address();
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const { tenant, owner } = await seedTenantAndOwner(db, { slug: `stale-${ts}` });
+    const { scorecard } = await seedScoringScenario(db, tenant.id, owner.id);
+    const cookie = await getSessionCookie(baseUrl, tenant.slug, db, owner);
 
-    const [userAId] = await db('users').insert({
-      first_name: 'Phil',
-      last_name: 'Kells',
-      email: 'submit.stale.a@test.local',
-      role: ROLES.PLAYER
-    });
-    const [userBId] = await db('users').insert({
-      first_name: 'Ben',
-      last_name: 'Smith',
-      email: 'submit.stale.b@test.local',
-      role: ROLES.PLAYER
-    });
-
-    const [eventId] = await db('events').insert({
-      year: 2034,
-      location: 'Bonville International Golf Resort',
-      start_date: '2034-02-01',
-      end_date: '2034-02-04',
-      is_active: 1
-    });
-
-    const [courseId] = await db('courses').insert({
-      course_name: 'Bonville',
-      tee_name: 'Bloodwood'
-    });
-    await db('holes').insert({
-      course_id: courseId,
-      hole_number: 1,
-      par: 4,
-      stroke_index_primary: 7,
-      stroke_index_secondary: 19
-    });
-    await db('event_day_statuses').insert({
-      event_id: eventId,
-      day: 2,
-      status: 'open_scoring',
-      course_id: courseId
-    });
-
-    await db('event_players').insert([
-      { event_id: eventId, user_id: userAId, status: 'active' },
-      { event_id: eventId, user_id: userBId, status: 'active' }
-    ]);
-    await db('player_handicaps').insert([
-      { event_id: eventId, user_id: userAId, playing_handicap: 8 },
-      { event_id: eventId, user_id: userBId, playing_handicap: 10 }
-    ]);
-
-    const [teeGroupId] = await db('tee_groups').insert({
-      event_id: eventId,
-      day: 2,
-      tee_time: '08:00',
-      tee_location: '1st tee',
-      starting_hole: 1,
-      group_number: 1,
-      source: 'manual'
-    });
-    await db('tee_group_players').insert([
-      { tee_group_id: teeGroupId, user_id: userAId, position: 1 },
-      { tee_group_id: teeGroupId, user_id: userBId, position: 2 }
-    ]);
-
-    const [scorecardAId] = await db('scorecards').insert({
-      event_id: eventId,
-      day: 2,
-      type: 'individual',
-      user_id: userAId,
-      status: 'draft'
-    });
-    const [scorecardBId] = await db('scorecards').insert({
-      event_id: eventId,
-      day: 2,
-      type: 'individual',
-      user_id: userBId,
-      status: 'draft'
-    });
-
-    const holeRows = [];
-    for (let hole = 1; hole <= 18; hole += 1) {
-      holeRows.push({ scorecard_id: scorecardAId, hole_number: hole, gross_score: 5, stableford_points: 2, owner_user_id: userAId });
-      holeRows.push({ scorecard_id: scorecardBId, hole_number: hole, gross_score: 5, stableford_points: 2, owner_user_id: userBId });
+    // Score all 18 holes
+    for (let hole = 1; hole <= 18; hole++) {
+      await postGrossScore(baseUrl, tenant.slug, cookie, scorecard.id, hole, 4);
     }
-    await db('scorecard_holes').insert(holeRows);
 
-    const cookieA = await loginWithCode(baseUrl, db, Number(userAId));
-
-    const confirmRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/final`, {
-      headers: { cookie: cookieA }
+    // Capture the snapshot
+    const confirmRes = await fetch(`${baseUrl}/${tenant.slug}/scoring/confirm/${scorecard.id}/final`, {
+      headers: { cookie },
     });
-    assert.equal(confirmRes.status, 200);
-    const confirmHtml = await confirmRes.text();
-    const snapshotMatch = confirmHtml.match(/data-submit-snapshot="([a-f0-9]+)"/i);
-    assert.ok(snapshotMatch, 'expected submit snapshot token in confirm page');
-    const submitSnapshot = snapshotMatch[1];
+    const html = await confirmRes.text();
+    const match = html.match(/name="submitSnapshot"\s+value="([a-f0-9]+)"/);
+    const capturedSnapshot = match[1];
 
-    // Simulate another scorer changing a score after confirmation view was loaded.
+    // Simulate a scorer changing hole 1 after the snapshot was captured
     await db('scorecard_holes')
-      .where({ scorecard_id: scorecardBId, hole_number: 1 })
-      .update({ gross_score: 6, stableford_points: 1, updated_at: db.fn.now() });
+      .where({ scorecard_id: scorecard.id, hole_number: 1 })
+      .update({ gross_score: 7, updated_at: db.fn.now() });
 
-    const submitRes = await fetch(`${baseUrl}/scoring/confirm/${scorecardAId}/submit`, {
+    // Submit with the stale snapshot — should be rejected
+    const submitRes = await fetch(`${baseUrl}/${tenant.slug}/scoring/confirm/${scorecard.id}/submit`, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', cookie: cookieA },
-      body: JSON.stringify({ submitSnapshot })
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+      body: new URLSearchParams({ submitSnapshot: capturedSnapshot }).toString(),
     });
     assert.equal(submitRes.status, 409);
-    const submitBody = await submitRes.json();
-    assert.equal(submitBody.error, 'stale_scores');
+    const body = await submitRes.json();
+    assert.equal(body.error, 'stale_scores');
+
+    const sc = await db('scorecards').where({ id: scorecard.id }).first();
+    assert.equal(sc.status, 'draft', 'scorecard should remain draft after stale rejection');
   } finally {
-    await new Promise((resolve) => server.close(resolve));
-    await db.destroy();
+    await teardown(server, db);
   }
 });

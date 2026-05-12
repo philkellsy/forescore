@@ -1,18 +1,18 @@
 'use strict';
 
-const DAY_SEQUENCE = [1, 2, 3, 4];
 const HOLE_SEQUENCE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const SKIN_STAKE_PER_PLAYER = 1;
 
-function nextHole(day, holeNumber) {
-  if (holeNumber < 18) return { day, holeNumber: holeNumber + 1 };
-  if (day < 4) return { day: day + 1, holeNumber: 1 };
+function nextHole(roundNumbers, roundNumber, holeNumber) {
+  if (holeNumber < 18) return { roundNumber, holeNumber: holeNumber + 1 };
+  const idx = roundNumbers.indexOf(roundNumber);
+  if (idx < roundNumbers.length - 1) return { roundNumber: roundNumbers[idx + 1], holeNumber: 1 };
   return null;
 }
 
-async function getActivePlayerCount(db, eventId) {
+async function getActivePlayerCount(db, tourId) {
   const row = await db('event_players')
-    .where({ event_id: eventId })
+    .where({ tour_id: tourId })
     .andWhere((q) => q.where('status', 'active').orWhereNull('status'))
     .count({ total: '*' })
     .first();
@@ -20,37 +20,41 @@ async function getActivePlayerCount(db, eventId) {
   return Number(row?.total || 0);
 }
 
-function findOutrightWinner(rows) {
-  if (!rows.length) return null;
+function analyzeHole(rows) {
+  if (!rows.length) return { winner: null, tiedCount: 0, topStableford: 0 };
   const maxPoints = Math.max(...rows.map((r) => Number(r.stableford || 0)));
-  const winners = rows.filter((r) => Number(r.stableford || 0) === maxPoints);
-  if (winners.length !== 1) return null;
+  const topScorers = rows.filter((r) => Number(r.stableford || 0) === maxPoints);
+  if (topScorers.length !== 1) return { winner: null, tiedCount: topScorers.length, topStableford: maxPoints };
   return {
-    participantId: winners[0].participant_id,
-    stableford: maxPoints,
-    gross: Number(winners[0].gross || 0)
+    winner: {
+      participantId: topScorers[0].participant_id,
+      stableford: maxPoints,
+      gross: Number(topScorers[0].gross || 0)
+    },
+    tiedCount: 1,
+    topStableford: maxPoints
   };
 }
 
-async function getHoleResults(db, eventId, day, holeNumber) {
-  if (day === 1) {
+async function getHoleResults(db, tourId, roundNumber, holeNumber, participantType) {
+  if (participantType === 'team') {
     return db('scorecards as s')
       .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .where({ 's.event_id': eventId, 's.day': day, 's.type': 'team', 'sh.hole_number': holeNumber })
+      .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'team', 'sh.hole_number': holeNumber })
       .whereNotNull('s.team_id')
       .select({ participant_id: 's.team_id', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
   }
 
   return db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-    .where({ 's.event_id': eventId, 's.day': day, 's.type': 'individual', 'sh.hole_number': holeNumber })
+    .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'individual', 'sh.hole_number': holeNumber })
     .whereNotNull('s.user_id')
     .select({ participant_id: 's.user_id', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
 }
 
 async function writeSkinsHole(db, row) {
   const existing = await db('skins_holes')
-    .where({ event_id: row.event_id, day: row.day, hole_number: row.hole_number })
+    .where({ tour_id: row.tour_id, round_number: row.round_number, hole_number: row.hole_number })
     .first();
 
   if (existing) {
@@ -61,50 +65,55 @@ async function writeSkinsHole(db, row) {
   await db('skins_holes').insert(row);
 }
 
-async function calculateEventSkins(db, eventId) {
-  return calculateEventSkinsForDays(db, eventId, DAY_SEQUENCE);
-}
-
-function normalizedFinalizedDays(finalizedDays = DAY_SEQUENCE) {
-  const finalizedSet = new Set((Array.isArray(finalizedDays) ? finalizedDays : DAY_SEQUENCE).map((d) => Number(d)));
-  const contiguous = [];
-  for (const day of DAY_SEQUENCE) {
-    if (!finalizedSet.has(day)) break;
-    contiguous.push(day);
-  }
-  return contiguous;
-}
-
-async function calculateEventSkinsForDays(db, eventId, finalizedDays = DAY_SEQUENCE) {
-  const activePlayerCount = await getActivePlayerCount(db, eventId);
+async function calculateEventSkinsForDays(db, tourId, finalizedRoundNumbers = [], options = {}) {
+  const activePlayerCount = await getActivePlayerCount(db, tourId);
   const basePot = Number(activePlayerCount * SKIN_STAKE_PER_PLAYER);
-  const daysToProcess = normalizedFinalizedDays(finalizedDays);
+  const initialCarryInSkins = Math.max(0, Math.trunc(Number(options.initialCarryInSkins || 0)));
 
-  await db('skins_holes').where({ event_id: eventId }).del();
-  await db('skins_carry').where({ event_id: eventId }).del();
+  await db('skins_holes').where({ tour_id: tourId }).del();
+  await db('skins_carry').where({ tour_id: tourId }).del();
 
-  if (!daysToProcess.length) {
+  if (!finalizedRoundNumbers.length) {
     return {
       stakePerPlayer: SKIN_STAKE_PER_PLAYER,
       activePlayerCount,
+      initialCarryInSkins,
       holes: [],
       winners: []
     };
   }
 
-  let carryIn = 0;
+  // Determine participant type per round from golf_rounds.calc_type
+  const roundRows = await db('golf_rounds')
+    .where({ tour_id: tourId })
+    .whereIn('round_number', finalizedRoundNumbers)
+    .orderBy('round_number')
+    .select('round_number', 'calc_type');
 
-  for (const day of daysToProcess) {
+  const roundTypeMap = new Map(roundRows.map((r) => [Number(r.round_number), r.calc_type]));
+  const orderedRounds = roundRows.map((r) => Number(r.round_number));
+
+  let carryIn = basePot > 0 ? initialCarryInSkins * basePot : 0;
+  const tiedCountMap = new Map();
+  const topStablefordMap = new Map();
+
+  for (const roundNumber of orderedRounds) {
+    const calcType = roundTypeMap.get(roundNumber);
+    const participantType = calcType === 'ambrose_nett' ? 'team' : 'player';
+
     for (const holeNumber of HOLE_SEQUENCE) {
-      const results = await getHoleResults(db, eventId, day, holeNumber);
-      const participantType = day === 1 ? 'team' : 'player';
+      const results = await getHoleResults(db, tourId, roundNumber, holeNumber, participantType);
+      if (!results.length) continue; // hole not yet scored — no pot contribution, no carry change
       const totalPot = basePot + carryIn;
-      const winner = findOutrightWinner(results);
+      const { winner, tiedCount, topStableford } = analyzeHole(results);
       const status = winner ? 'won' : 'jackpot';
 
+      tiedCountMap.set(`${roundNumber}:${holeNumber}`, tiedCount);
+      topStablefordMap.set(`${roundNumber}:${holeNumber}`, topStableford);
+
       await writeSkinsHole(db, {
-        event_id: eventId,
-        day,
+        tour_id: tourId,
+        round_number: roundNumber,
         hole_number: holeNumber,
         participant_type: participantType,
         winning_participant_id: winner ? winner.participantId : null,
@@ -117,12 +126,12 @@ async function calculateEventSkinsForDays(db, eventId, finalizedDays = DAY_SEQUE
       });
 
       if (!winner) {
-        const next = nextHole(day, holeNumber);
+        const next = nextHole(orderedRounds, roundNumber, holeNumber);
         await db('skins_carry').insert({
-          event_id: eventId,
-          from_day: day,
+          tour_id: tourId,
+          from_round_number: roundNumber,
           from_hole: holeNumber,
-          to_day: next ? next.day : null,
+          to_round_number: next ? next.roundNumber : null,
           to_hole: next ? next.holeNumber : null,
           carry_amount: totalPot
         });
@@ -133,10 +142,10 @@ async function calculateEventSkinsForDays(db, eventId, finalizedDays = DAY_SEQUE
   }
 
   const holes = await db('skins_holes')
-    .where({ event_id: eventId })
-    .orderBy([{ column: 'day', order: 'asc' }, { column: 'hole_number', order: 'asc' }]);
+    .where({ tour_id: tourId })
+    .orderBy([{ column: 'round_number', order: 'asc' }, { column: 'hole_number', order: 'asc' }]);
 
-  const teamNames = await db('teams').where({ event_id: eventId }).select('id', 'name');
+  const teamNames = await db('teams').where({ tour_id: tourId }).select('id', 'name');
   const userNames = await db('users').select('id', 'first_name', 'last_name');
 
   const teamNameMap = new Map(teamNames.map((t) => [t.id, t.name]));
@@ -175,19 +184,21 @@ async function calculateEventSkinsForDays(db, eventId, finalizedDays = DAY_SEQUE
         : null;
     return {
       ...hole,
-      winner_name: winnerName || null
+      winner_name: winnerName || null,
+      tied_count: tiedCountMap.get(`${hole.round_number}:${hole.hole_number}`) || 0,
+      top_stableford: topStablefordMap.get(`${hole.round_number}:${hole.hole_number}`) || 0
     };
   });
 
   return {
     stakePerPlayer: SKIN_STAKE_PER_PLAYER,
     activePlayerCount,
+    initialCarryInSkins,
     holes: enrichedHoles,
     winners: [...byWinner.values()].sort((a, b) => b.totalWon - a.totalWon)
   };
 }
 
 module.exports = {
-  calculateEventSkins,
   calculateEventSkinsForDays
 };

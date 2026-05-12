@@ -1,4 +1,4 @@
-const CACHE_NAME = 'legends-cache-v1';
+const CACHE_NAME = 'forescore-cache-v1';
 const OFFLINE_URL = '/offline.html';
 
 self.addEventListener('install', (event) => {

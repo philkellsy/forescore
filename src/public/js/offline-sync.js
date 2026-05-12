@@ -98,6 +98,6 @@
     return { start, stop, trigger };
   }
 
-  global.LegendsOfflineSync = { create };
+  global.ForeScoreOfflineSync = { create };
 })(window);
 

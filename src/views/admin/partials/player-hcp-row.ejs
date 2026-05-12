@@ -1,0 +1,44 @@
+<%#
+  Inline handicap display + round-override form for a single player on the tee-times page.
+  Expected locals: p (player object), tourId, roundNumber, isLocked
+%>
+<div class="d-flex align-items-center gap-2 flex-wrap">
+  <% if (p.courseHandicap !== null) { %>
+    <span class="badge text-bg-light border small" title="Computed course handicap">
+      Hcp <strong><%= p.courseHandicap %></strong>
+    </span>
+  <% } %>
+  <% if (p.effectiveHandicapIndex !== null) { %>
+    <span class="text-muted small">
+      (Idx <%= p.effectiveHandicapIndex %><%= p.dayHandicapOverride !== null ? ' — round override' : '' %>)
+    </span>
+  <% } %>
+  <% if (!isLocked) { %>
+    <button class="btn btn-sm btn-link py-0 px-1 small text-muted"
+      data-bs-toggle="collapse"
+      data-bs-target="#hcpEdit<%= p.user_id %>"
+      aria-expanded="false">
+      <i class="fa-solid fa-pen fa-xs"></i>
+    </button>
+  <% } %>
+</div>
+<% if (!isLocked) { %>
+  <div class="collapse mt-1" id="hcpEdit<%= p.user_id %>">
+    <form action="<%= tenantPath(`/admin/tours/${tourId}/players/${p.user_id}/round-handicap`) %>" method="post"
+          class="d-flex gap-1 align-items-center mb-1">
+      <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+      <input type="number" name="handicapIndex" class="form-control form-control-sm"
+        style="width:90px" step="0.1" min="-10" max="54"
+        value="<%= p.dayHandicapOverride !== null ? p.dayHandicapOverride : (p.eventHandicapIndex !== null ? p.eventHandicapIndex : '') %>"
+        placeholder="Index" />
+      <button class="btn btn-sm btn-legends">Save</button>
+    </form>
+    <% if (p.dayHandicapOverride !== null) { %>
+      <form action="<%= tenantPath(`/admin/tours/${tourId}/players/${p.user_id}/round-handicap`) %>" method="post">
+        <input type="hidden" name="roundNumber" value="<%= roundNumber %>" />
+        <input type="hidden" name="handicapIndex" value="" />
+        <button class="btn btn-sm btn-outline-secondary">Remove override</button>
+      </form>
+    <% } %>
+  </div>
+<% } %>

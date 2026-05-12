@@ -1,11 +1,11 @@
 {
-  "name": "Legends Golf",
-  "short_name": "Legends",
+  "name": "ForeScore",
+  "short_name": "ForeScore",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8f9f4",
-  "theme_color": "#0e5135",
-  "description": "Scoring and leaderboards for the annual Legends golf trip.",
+  "background_color": "#E5E6E3",
+  "theme_color": "#215463",
+  "description": "Golf trip scoring and leaderboards.",
   "icons": [
     {
       "src": "/img/icons/icon-192.png",

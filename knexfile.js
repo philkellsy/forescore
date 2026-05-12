@@ -2,22 +2,35 @@
 
 const path = require('path');
 
-const dbFile = process.env.DB_FILE || path.join(__dirname, 'data', 'legends.sqlite');
+const migrationsDir = path.join(__dirname, 'migrations');
+
+const base = {
+  client: 'pg',
+  migrations: {
+    directory: migrationsDir,
+    // Exclude the legacy SQLite migration archive
+    loadExtensions: ['.js'],
+    schemaName: 'public',
+  },
+};
 
 module.exports = {
   development: {
-    client: 'sqlite3',
+    ...base,
+    connection: process.env.DATABASE_URL || 'postgresql://localhost:5432/forescore_dev',
+  },
+
+  test: {
+    ...base,
+    connection: process.env.TEST_DATABASE_URL || 'postgresql://localhost:5432/forescore_test',
+  },
+
+  production: {
+    ...base,
     connection: {
-      filename: dbFile
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
     },
-    migrations: {
-      directory: path.join(__dirname, 'migrations')
-    },
-    useNullAsDefault: true,
-    pool: {
-      afterCreate: (conn, done) => {
-        conn.run('PRAGMA foreign_keys = ON;', done);
-      }
-    }
-  }
+    pool: { min: 2, max: 10 },
+  },
 };

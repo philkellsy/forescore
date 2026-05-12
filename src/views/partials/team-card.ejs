@@ -5,7 +5,7 @@
   const safeCanDelete = typeof canDelete !== 'undefined' ? Boolean(canDelete) : false;
   const safeDeleteAction = typeof deleteAction !== 'undefined' ? String(deleteAction) : '';
   const safeSummary = typeof summary !== 'undefined' ? summary : null;
-  const safeEventId = typeof eventId !== 'undefined' ? Number(eventId) : 0;
+  const safeTourId = typeof tourId !== 'undefined' ? Number(tourId) : (typeof eventId !== 'undefined' ? Number(eventId) : 0);
   const safeDayPublished = typeof dayPublished !== 'undefined' ? Boolean(dayPublished) : false;
   const safeReturnTo = typeof returnTo !== 'undefined' ? String(returnTo) : '';
   const safeClassName = typeof className !== 'undefined' && className ? String(className) : '';
@@ -21,7 +21,7 @@
     ? 'grid-template-columns: repeat(2, minmax(0, 1fr));'
     : '';
   const reviewHref = safeSummary && Number(safeSummary.scorecardId || 0) > 0
-    ? `/admin/events/${safeEventId}/scorecards/team/${Number(safeSummary.scorecardId)}?returnTo=${encodeURIComponent(safeReturnTo)}`
+    ? `/leaderboards/tour/${safeTourId}/scorecards/team/${Number(safeSummary.scorecardId)}?returnTo=${encodeURIComponent(safeReturnTo)}`
     : null;
 %>
 <div class="team-card border rounded p-2 <%= safeClassName || 'mb-2' %>">
@@ -40,8 +40,6 @@
         <%- include('./participant-card', {
           name: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
           handicapText: m.handicap_display || '',
-          isDefendingChampion: Number(m.is_previous_year_winner || 0) === 1,
-          isPreviousWinner: Number(m.is_previous_winner || 0) === 1,
           isGhost: safeShowGhostTag && Number(m.is_dual_assigned || 0) === 1,
           className: 'border rounded px-2 py-1 bg-light small d-inline-flex align-items-center gap-1'
         }) %>

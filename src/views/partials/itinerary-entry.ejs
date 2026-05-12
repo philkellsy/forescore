@@ -1,0 +1,132 @@
+<% if (entry._kind === 'round') { %>
+  <div class="card-body <%= i > 0 ? 'border-top' : '' %> py-2 d-flex align-items-start gap-3"
+       style="background-color:#eaf6ea">
+    <div class="mt-1 flex-shrink-0" style="width:20px;text-align:center;color:#3a7a3a">
+      <i class="fa-solid fa-golf-ball-tee fa-fw"></i>
+    </div>
+    <div class="flex-grow-1 min-w-0">
+      <div class="fw-semibold">Round <%= entry.round_number %> &mdash; <%= entry.course_name %></div>
+      <div class="small text-muted">
+        <%= entry.tee_name %> &middot; <%= CALC_LABELS[entry.calc_type] || entry.calc_type %>
+        <% if (entry.first_tee_time) { %>
+          <span class="ms-2 text-muted"><%= fmtTime(entry.first_tee_time) %> first tee</span>
+        <% } %>
+      </div>
+      <% if (entry.my_group) { %>
+        <div class="small mt-1">
+          <% if (entry.my_group.teeTime) { %>
+            <span class="fw-medium"><%= entry.my_group.teeTime %></span> &middot;
+          <% } %>
+          Group <%= entry.my_group.groupNumber %> &middot; Tee <%= entry.my_group.startingHole || '-' %>
+        </div>
+        <div class="d-flex flex-wrap gap-1 mt-1">
+          <% entry.my_group.players.forEach(function(p) { %>
+            <span class="badge <%= p.isMe ? 'text-bg-dark' : 'text-bg-light border' %>" style="font-size:.7rem"><%= p.name %></span>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+  </div>
+<% } else { %>
+  <%
+    const _meta   = TYPE_META[entry.type] || { label: entry.type, icon: 'fa-circle' };
+    const _det    = entry.details
+      ? (typeof entry.details === 'string' ? JSON.parse(entry.details) : entry.details)
+      : {};
+    const _nights = entry.type === 'accommodation' && entry.end_date
+      ? Math.round((new Date(entry.end_date) - new Date(entry.item_date)) / 86400000)
+      : null;
+    const _isPersonal = !!entry.user_id;
+  %>
+  <div class="card-body <%= i > 0 ? 'border-top' : '' %> py-2 d-flex align-items-start gap-3">
+    <div class="text-muted mt-1 flex-shrink-0" style="width:20px;text-align:center">
+      <i class="fa-solid <%= _meta.icon %> fa-fw"></i>
+    </div>
+    <div class="flex-grow-1 min-w-0">
+      <div class="d-flex align-items-baseline gap-2 flex-wrap">
+        <span class="fw-semibold"><%= entry.title %></span>
+        <% if (_isPersonal) { %>
+          <span class="badge text-bg-light border fw-normal" style="font-size:.65rem">Only visible by you</span>
+        <% } %>
+      </div>
+
+      <% if (entry.type === 'accommodation') { %>
+        <% if (entry._display === 'checkout') { %>
+          <div class="small fw-medium">Check-out<% if (entry.end_time) { %> <%= fmtTime(entry.end_time) %><% } %>
+            <% if (_nights) { %><span class="ms-1 badge text-bg-light border fw-normal"><%= _nights %> night<%= _nights !== 1 ? 's' : '' %></span><% } %>
+          </div>
+          <% if (_det.checkout_notes) { %><div class="small text-muted"><%= _det.checkout_notes %></div><% } %>
+        <% } else { %>
+          <div class="small fw-medium">Check-in<% if (entry.start_time) { %> <%= fmtTime(entry.start_time) %><% } %>
+            <% if (_nights) { %><span class="ms-1 badge text-bg-light border fw-normal"><%= _nights %> night<%= _nights !== 1 ? 's' : '' %></span><% } %>
+          </div>
+          <% if (_det.checkin_notes) { %><div class="small text-muted"><%= _det.checkin_notes %></div><% } %>
+        <% } %>
+      <% } %>
+
+      <% if (entry.type === 'flight') { %>
+        <% if (_det.departure_airport || _det.arrival_airport) { %>
+          <div class="small fw-medium">
+            <%= _det.departure_airport || '?' %>
+            <i class="fa-solid fa-arrow-right mx-1" style="font-size:.65rem"></i>
+            <%= _det.arrival_airport || '?' %>
+            <% if (_det.flight_number) { %><span class="ms-2 text-muted"><%= _det.flight_number %></span><% } %>
+          </div>
+        <% } %>
+        <% if (entry.start_time || entry.end_time) { %>
+          <div class="small text-muted">
+            <% if (entry.start_time) { %><%= fmtTime(entry.start_time) %><% } %>
+            <% if (entry.start_time && entry.end_time) { %> &ndash; <% } %>
+            <% if (entry.end_time) { %><%= fmtTime(entry.end_time) %><% } %>
+          </div>
+        <% } %>
+        <% if (_det.airline || _det.terminal || _det.booking_ref) { %>
+          <div class="small text-muted">
+            <% if (_det.airline) { %><%= _det.airline %><% } %>
+            <% if (_det.terminal) { %><span class="ms-1">&middot; Terminal <%= _det.terminal %></span><% } %>
+            <% if (_det.booking_ref) { %><span class="ms-1">&middot; Ref: <%= _det.booking_ref %></span><% } %>
+          </div>
+        <% } %>
+      <% } %>
+
+      <% if (entry.type === 'transfer') { %>
+        <% if (_det.from || _det.to) { %>
+          <div class="small text-muted">
+            <%= _det.from || '' %><% if (_det.from && _det.to) { %> &rarr; <% } %><%= _det.to || '' %>
+            <% if (_det.vehicle) { %><span class="ms-1">&middot; <%= _det.vehicle %></span><% } %>
+          </div>
+        <% } %>
+        <% if (entry.start_time) { %><div class="small fw-medium"><%= fmtTime(entry.start_time) %></div><% } %>
+        <% if (_det.notes) { %><div class="small text-muted"><%= _det.notes %></div><% } %>
+      <% } %>
+
+      <% if ((entry.type === 'meal' || entry.type === 'activity') && _det.venue) { %>
+        <div class="small text-muted"><%= _det.venue %></div>
+      <% } %>
+
+      <% if (entry.type !== 'accommodation' && entry.type !== 'transfer' && entry.type !== 'flight' && entry.start_time) { %>
+        <div class="small fw-medium">
+          <%= fmtTime(entry.start_time) %><% if (entry.end_time) { %> &ndash; <%= fmtTime(entry.end_time) %><% } %>
+        </div>
+      <% } %>
+
+      <% if (entry.location) { %>
+        <div class="small text-muted"><i class="fa-solid fa-location-dot fa-fw me-1 opacity-50"></i><%= entry.location %></div>
+      <% } %>
+      <% if (entry.description) { %><div class="small text-muted mt-1" style="white-space:pre-wrap"><%= entry.description %></div><% } %>
+
+      <% if (locals.canEditPersonal && _isPersonal) { %>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-sm btn-outline-secondary py-0 personal-edit-btn"
+                  style="font-size:.75rem"
+                  data-bs-toggle="modal" data-bs-target="#personalItemModal"
+                  data-item="<%= JSON.stringify(entry).replace(/"/g, '&quot;') %>">Edit</button>
+          <button type="button" class="btn btn-sm btn-outline-danger py-0" style="font-size:.75rem"
+                  data-bs-toggle="modal" data-bs-target="#deleteModal"
+                  data-delete-url="<%= tenantPath(`/itinerary/personal/${entry.id}/delete`) %>"
+                  data-item-title="<%= entry.title %>">Delete</button>
+        </div>
+      <% } %>
+    </div>
+  </div>
+<% } %>

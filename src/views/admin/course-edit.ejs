@@ -1,146 +1,178 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %> | Legends</title>
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#0e5135" />
-    <link rel="icon" type="image/png" href="/img/icons/icon-192.png?v=<%= assetVersion %>" />
-    <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
-    <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
-  </head>
-  <body>
-    <%- include('../partials/nav') %>
-    <main class="container py-3 py-md-4">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h1 class="h4 mb-1"><%= course.course_name %> - <%= course.tee_name %></h1>
-          <p class="text-muted mb-0">Global course definition</p>
-        </div>
-        <div class="d-flex gap-2">
-          <% if (!courseEditLocked) { %>
-            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteCourseModal">
-              Delete
-            </button>
-          <% } %>
-          <a class="btn btn-outline-dark" href="/admin/courses">Back</a>
-        </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h1 class="h4 mb-0"><%= course.course_name %> — <%= course.tee_name %></h1>
       </div>
+      <div class="d-flex gap-2">
+        <% if (!courseEditLocked) { %>
+          <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteCourseModal">
+            Delete
+          </button>
+        <% } %>
+        <a class="btn btn-outline-secondary btn-sm" href="<%= tenantPath('/admin/courses') %>">Back</a>
+      </div>
+    </div>
 
-      <% if (message) { %>
-        <div class="alert alert-success"><%= message %></div>
-      <% } %>
-      <% if (error) { %>
-        <div class="alert alert-danger"><%= error %></div>
-      <% } %>
-      <% if (courseEditLocked) { %>
-        <div class="alert alert-warning">Editing locked: active event has entered scores.</div>
-      <% } %>
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+    <% if (courseEditLocked) { %>
+      <div class="alert alert-warning">
+        <i class="fa-solid fa-lock me-1"></i>Editing locked — scores have been entered using this course.
+      </div>
+    <% } %>
 
-      <% if (!holes.length) { %>
-        <div class="card border-0 shadow-sm mb-3">
-          <div class="card-body d-flex align-items-center justify-content-between gap-3">
-            <p class="mb-0 text-muted">No holes configured yet.</p>
-            <form action="/admin/courses/<%= course.id %>/seed-holes" method="post" class="m-0">
-              <button type="submit" class="btn btn-legends"><i class="fa-solid fa-plus me-1"></i>Add 18 Holes</button>
-            </form>
-          </div>
-        </div>
-      <% } else { %>
-        <section class="card border-0 shadow-sm">
-          <div class="card-body p-0">
-            <form action="/admin/courses/<%= course.id %>" method="post">
-              <div class="p-3 border-bottom">
-                <div class="row g-3">
-                  <div class="col-12 col-md-8">
-                    <label class="form-label">Course Name</label>
-                    <input
-                      class="form-control"
-                      name="courseName"
-                      type="text"
-                      value="<%= course.course_name %>"
-                      <%= courseEditLocked ? 'disabled' : '' %>
-                      required
-                    />
-                  </div>
-                  <div class="col-12 col-md-4">
-                    <label class="form-label">Tee Name</label>
-                    <input
-                      class="form-control"
-                      name="teeName"
-                      type="text"
-                      value="<%= course.tee_name %>"
-                      <%= courseEditLocked ? 'disabled' : '' %>
-                      required
-                    />
-                  </div>
-                </div>
+    <section class="card border-0 shadow-sm">
+      <div class="card-body p-0">
+        <form action="<%= tenantPath(`/admin/courses/${course.id}`) %>" method="post">
+          <div class="p-3 border-bottom">
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label">Course Name</label>
+                <input class="form-control" name="courseName" type="text"
+                  value="<%= course.course_name %>"
+                  <%= courseEditLocked ? 'disabled' : '' %> required />
               </div>
-              <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                  <thead>
+              <div class="col-12 col-md-3">
+                <label class="form-label">Tee Name</label>
+                <input class="form-control" name="teeName" type="text"
+                  value="<%= course.tee_name %>"
+                  <%= courseEditLocked ? 'disabled' : '' %> required />
+              </div>
+              <div class="col-12 col-md-3">
+                <label class="form-label">Gender</label>
+                <select class="form-select" name="gender" <%= courseEditLocked ? 'disabled' : '' %>>
+                  <option value="mens" <%= course.gender === 'mens' ? 'selected' : '' %>>Men's</option>
+                  <option value="womens" <%= course.gender === 'womens' ? 'selected' : '' %>>Women's</option>
+                  <option value="open" <%= course.gender === 'open' ? 'selected' : '' %>>Open (all)</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label">Course Rating</label>
+                <input class="form-control" name="courseRating" type="number" step="0.1" min="50" max="85"
+                  value="<%= course.course_rating != null ? course.course_rating : '' %>"
+                  <%= courseEditLocked ? 'disabled' : '' %> />
+              </div>
+              <div class="col-6 col-md-3">
+                <label class="form-label">Slope Rating</label>
+                <input class="form-control" name="slopeRating" type="number" min="55" max="155"
+                  value="<%= course.slope_rating != null ? course.slope_rating : '' %>"
+                  <%= courseEditLocked ? 'disabled' : '' %> />
+              </div>
+            </div>
+          </div>
+
+          <% if (holes.length) { %>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th class="ps-3">Hole</th>
+                    <th>Par</th>
+                    <th>Metres</th>
+                    <th>SI Primary</th>
+                    <th>SI Secondary</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% holes.forEach((hole) => { %>
                     <tr>
-                      <th>Hole</th>
-                      <th>Par</th>
-                      <th>Meters</th>
-                      <th>SI Primary</th>
-                      <th>SI Secondary</th>
+                      <td class="ps-3 fw-semibold"><%= hole.hole_number %></td>
+                      <td>
+                        <input class="form-control form-control-sm" style="width:70px"
+                          name="par_<%= hole.id %>" type="number" min="3" max="5"
+                          value="<%= hole.par %>"
+                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                      </td>
+                      <td>
+                        <input class="form-control form-control-sm" style="width:80px"
+                          name="meters_<%= hole.id %>" type="number" min="50" max="700"
+                          value="<%= hole.length_meters || '' %>"
+                          <%= courseEditLocked ? 'disabled' : '' %> />
+                      </td>
+                      <td>
+                        <input class="form-control form-control-sm" style="width:70px"
+                          name="si_primary_<%= hole.id %>" type="number" min="1" max="18"
+                          value="<%= hole.stroke_index_primary %>"
+                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                      </td>
+                      <td>
+                        <input class="form-control form-control-sm" style="width:70px"
+                          name="si_secondary_<%= hole.id %>" type="number" min="19" max="36"
+                          value="<%= hole.stroke_index_secondary %>"
+                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    <% holes.forEach((hole) => { %>
-                      <tr>
-                        <td><%= hole.hole_number %></td>
-                        <td>
-                          <input class="form-control form-control-sm" name="par_<%= hole.id %>" type="number" min="3" max="5" value="<%= hole.par %>" <%= courseEditLocked ? 'disabled' : '' %> required />
-                        </td>
-                        <td>
-                          <input class="form-control form-control-sm" name="meters_<%= hole.id %>" type="number" min="50" max="700" value="<%= hole.length_meters || '' %>" <%= courseEditLocked ? 'disabled' : '' %> required />
-                        </td>
-                        <td>
-                          <input class="form-control form-control-sm" name="si_primary_<%= hole.id %>" type="number" min="1" max="18" value="<%= hole.stroke_index_primary %>" <%= courseEditLocked ? 'disabled' : '' %> required />
-                        </td>
-                        <td>
-                          <input class="form-control form-control-sm" name="si_secondary_<%= hole.id %>" type="number" min="19" max="36" value="<%= hole.stroke_index_secondary %>" <%= courseEditLocked ? 'disabled' : '' %> required />
-                        </td>
-                      </tr>
-                    <% }) %>
-                  </tbody>
-                </table>
-              </div>
-              <div class="p-3 border-top d-flex justify-content-end">
-                <button class="btn btn-legends" type="submit" <%= courseEditLocked ? 'disabled' : '' %>>Save Course</button>
-              </div>
-            </form>
-          </div>
-        </section>
-      <% } %>
+                  <% }) %>
+                </tbody>
+                <tfoot class="table-light">
+                  <tr>
+                    <td class="ps-3 fw-semibold">Total</td>
+                    <td id="parTotal" class="fw-semibold"></td>
+                    <td></td><td></td><td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          <% } %>
 
-      <!-- Delete Course Modal -->
-      <div class="modal fade" id="deleteCourseModal" tabindex="-1" aria-labelledby="deleteCourseModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content">
-            <div class="modal-header">
-              <h2 class="modal-title fs-5" id="deleteCourseModalLabel">Delete Course</h2>
-              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          <% if (!courseEditLocked) { %>
+            <div class="p-3 border-top d-flex justify-content-end">
+              <button class="btn btn-legends" type="submit">Save Course</button>
             </div>
-            <div class="modal-body">
-              <p>Are you sure you want to delete <strong><%= course.course_name %> — <%= course.tee_name %></strong>? This will remove all hole data and cannot be undone.</p>
-              <p class="text-muted small mb-0">Courses assigned to event days cannot be deleted.</p>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-              <form action="/admin/courses/<%= course.id %>/delete" method="post" class="m-0">
-                <button type="submit" class="btn btn-danger">Delete Course</button>
-              </form>
-            </div>
-          </div>
+          <% } %>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <%# Delete Course Modal %>
+  <div class="modal fade" id="deleteCourseModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5">Delete Course</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Delete <strong><%= course.course_name %> — <%= course.tee_name %></strong>? All hole data will be removed.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <form action="<%= tenantPath(`/admin/courses/${course.id}/delete`) %>" method="post" class="m-0">
+            <button type="submit" class="btn btn-danger">Delete Course</button>
+          </form>
         </div>
       </div>
-    </main>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
-  </body>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script>
+    // Live par total
+    function updateParTotal() {
+      const inputs = document.querySelectorAll('[name^="par_"]');
+      let total = 0;
+      inputs.forEach(i => { total += parseInt(i.value, 10) || 0; });
+      const el = document.getElementById('parTotal');
+      if (el) el.textContent = total || '';
+    }
+    document.querySelectorAll('[name^="par_"]').forEach(i => i.addEventListener('input', updateParTotal));
+    updateParTotal();
+  </script>
+</body>
 </html>

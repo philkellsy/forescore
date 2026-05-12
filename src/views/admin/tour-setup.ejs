@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> | ForeScore</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#215463" />
+  <link rel="icon" type="image/svg+xml" href="/img/forescore-shield.svg" />
+  <link rel="apple-touch-icon" href="/img/icons/apple-touch-icon.png?v=<%= assetVersion %>" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+  <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
+</head>
+<body>
+  <%- include('../partials/nav') %>
+  <main class="container py-3 py-md-4" style="max-width:720px">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h1 class="h5 mb-0">Tour Setup</h1>
+        <p class="text-muted small mb-0"><%= tour.label %></p>
+      </div>
+      <a href="<%= tenantPath(`/admin/tours/${tour.id}`) %>" class="btn btn-sm btn-outline-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i>Back
+      </a>
+    </div>
+
+    <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+    <%
+      const tourPrizes = Array.isArray(tour.tour_prizes) ? tour.tour_prizes : (typeof tour.tour_prizes === 'string' ? JSON.parse(tour.tour_prizes || '[]') : []);
+      const dailyPrizes = Array.isArray(tour.daily_prizes) ? tour.daily_prizes : (typeof tour.daily_prizes === 'string' ? JSON.parse(tour.daily_prizes || '[]') : []);
+    %>
+
+    <form action="<%= tenantPath(`/admin/tours/${tour.id}/setup`) %>" method="post">
+
+      <%# ── 1. Leaderboard Rules ── %>
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body border-bottom">
+          <h2 class="h6 mb-0"><i class="fa-solid fa-trophy fa-fw me-1 text-muted"></i>Leaderboard Rules</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 col-sm-6">
+              <label class="form-label">Count best rounds</label>
+              <select name="leaderboard_best_of_rounds" class="form-select" id="bestOfSelect">
+                <option value="" <%= !tour.leaderboard_best_of_rounds ? 'selected' : '' %>>All rounds count</option>
+                <% for (let r = 1; r < roundCount; r++) { %>
+                  <option value="<%= r %>" <%= Number(tour.leaderboard_best_of_rounds) === r ? 'selected' : '' %>>
+                    Best <%= r %> of <%= roundCount %> rounds
+                  </option>
+                <% } %>
+              </select>
+              <div class="form-text">Leave as "All rounds" if every round's score counts.</div>
+            </div>
+            <div class="col-12 col-sm-6 d-flex align-items-end" id="lastRoundWrap">
+              <div class="form-check mb-2">
+                <input type="checkbox" name="leaderboard_last_round_required" id="lastRoundRequired"
+                  class="form-check-input" value="1"
+                  <%= tour.leaderboard_last_round_required ? 'checked' : '' %> />
+                <label class="form-check-label" for="lastRoundRequired">
+                  Last round must count
+                  <small class="text-muted d-block">Final round always included regardless of score</small>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%# ── 2. Skins ── %>
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body border-bottom">
+          <h2 class="h6 mb-0"><i class="fa-solid fa-dollar-sign fa-fw me-1 text-muted"></i>Skins</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 align-items-center">
+            <div class="col-12 col-sm-5">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch"
+                  name="skins_enabled" id="skinsEnabled" value="1"
+                  <%= tour.skins_enabled ? 'checked' : '' %> />
+                <label class="form-check-label fw-semibold" for="skinsEnabled">Skins enabled</label>
+              </div>
+              <div class="form-text">Players compete hole-by-hole for pot money.</div>
+            </div>
+            <div class="col-12 col-sm-7">
+              <label class="form-label mb-1">Amount per player per hole</label>
+              <div class="input-group" style="max-width:200px">
+                <span class="input-group-text">$</span>
+                <input type="number" name="skins_amount_per_player_per_hole"
+                  class="form-control" min="0" step="0.50"
+                  value="<%= Number(tour.skins_amount_per_player_per_hole || 0).toFixed(2) %>" />
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label mb-1">Carry-in skins from prior year</label>
+              <input type="number" name="skins_carry_in_skins"
+                class="form-control" min="0" step="1" style="max-width:120px"
+                value="<%= Number(tour.skins_carry_in_skins || 0) %>" />
+              <div class="form-text">Number of skins carried into Round 1 Hole 1 from a previous tour. Leave 0 if none.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%# ── 3. Daily Prizes ── %>
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body border-bottom">
+          <h2 class="h6 mb-0"><i class="fa-solid fa-calendar-day fa-fw me-1 text-muted"></i>Daily Prizes</h2>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            Cash prizes for the individual stableford leaderboard, paid each round.
+            Ambrose round prizes are configured on each round's configuration screen.
+          </p>
+          <div id="dailyPrizeRows">
+            <% dailyPrizes.forEach((p, i) => { %>
+              <div class="row g-2 align-items-center mb-2 prize-row">
+                <div class="col-5 col-sm-4">
+                  <input type="text" name="daily_prize_label[]" class="form-control form-control-sm"
+                    placeholder="e.g. 1st" value="<%= p.label %>" />
+                </div>
+                <div class="col-5 col-sm-5">
+                  <div class="input-group input-group-sm">
+                    <span class="input-group-text">$</span>
+                    <input type="number" name="daily_prize_amount[]" class="form-control"
+                      min="0" step="1" value="<%= Number(p.amount || 0).toFixed(0) %>" />
+                  </div>
+                </div>
+                <div class="col-2 col-sm-3">
+                  <button type="button" class="btn btn-sm btn-outline-danger" onclick="removePrizeRow(this)">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
+            onclick="addPrizeRow('dailyPrizeRows', 'daily_prize_label', 'daily_prize_amount')">
+            <i class="fa-solid fa-plus me-1"></i>Add Place
+          </button>
+        </div>
+      </div>
+
+      <%# ── 4. Tour Prizes ── %>
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body border-bottom">
+          <h2 class="h6 mb-0"><i class="fa-solid fa-medal fa-fw me-1 text-muted"></i>Tour Prizes</h2>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Overall prizes based on aggregate results across all playing rounds.</p>
+          <div id="tourPrizeRows">
+            <% tourPrizes.forEach((p, i) => { %>
+              <div class="row g-2 align-items-center mb-2 prize-row">
+                <div class="col-5 col-sm-4">
+                  <input type="text" name="tour_prize_label[]" class="form-control form-control-sm"
+                    placeholder="e.g. 1st" value="<%= p.label %>" />
+                </div>
+                <div class="col-5 col-sm-5">
+                  <div class="input-group input-group-sm">
+                    <span class="input-group-text">$</span>
+                    <input type="number" name="tour_prize_amount[]" class="form-control"
+                      min="0" step="1" value="<%= Number(p.amount || 0).toFixed(0) %>" />
+                  </div>
+                </div>
+                <div class="col-2 col-sm-3">
+                  <button type="button" class="btn btn-sm btn-outline-danger" onclick="removePrizeRow(this)">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
+            onclick="addPrizeRow('tourPrizeRows', 'tour_prize_label', 'tour_prize_amount')">
+            <i class="fa-solid fa-plus me-1"></i>Add Place
+          </button>
+        </div>
+      </div>
+
+      <%# ── 5. Novelty Events ── %>
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body border-bottom">
+          <h2 class="h6 mb-0"><i class="fa-solid fa-flag fa-fw me-1 text-muted"></i>Novelty Events</h2>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            Prize values for novelty competitions.
+            Assign specific holes per round from each <strong>Round Configuration</strong> screen.
+          </p>
+          <div class="row g-3">
+            <div class="col-6 col-sm-4">
+              <label class="form-label">Nearest to Pin</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input type="number" name="prize_ntp_amount" class="form-control"
+                  min="0" step="1"
+                  value="<%= Number(tour.prize_ntp_amount || 0).toFixed(0) %>" />
+              </div>
+            </div>
+            <div class="col-6 col-sm-4">
+              <label class="form-label">Long Drive</label>
+              <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input type="number" name="prize_long_drive_amount" class="form-control"
+                  min="0" step="1"
+                  value="<%= Number(tour.prize_long_drive_amount || 0).toFixed(0) %>" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-grid mb-4">
+        <button type="submit" class="btn btn-legends btn-lg">Save Setup</button>
+      </div>
+    </form>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script>
+    const ORDINALS = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th'];
+
+    function rowCount(containerId) {
+      return document.getElementById(containerId).querySelectorAll('.prize-row').length;
+    }
+
+    function addPrizeRow(containerId, labelName, amountName) {
+      const container = document.getElementById(containerId);
+      const idx = rowCount(containerId);
+      const label = ORDINALS[idx] || (idx + 1) + 'th';
+      const row = document.createElement('div');
+      row.className = 'row g-2 align-items-center mb-2 prize-row';
+      row.innerHTML = `
+        <div class="col-5 col-sm-4">
+          <input type="text" name="${labelName}[]" class="form-control form-control-sm"
+            placeholder="e.g. ${label}" value="${label}" />
+        </div>
+        <div class="col-5 col-sm-5">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text">$</span>
+            <input type="number" name="${amountName}[]" class="form-control"
+              min="0" step="1" value="0" />
+          </div>
+        </div>
+        <div class="col-2 col-sm-3">
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="removePrizeRow(this)">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>`;
+      container.appendChild(row);
+      row.querySelector('input[type="number"]').focus();
+    }
+
+    function removePrizeRow(btn) {
+      btn.closest('.prize-row').remove();
+    }
+
+    // Best-of → grey out last-round-required when all rounds count
+    const bestOf = document.getElementById('bestOfSelect');
+    const lastRoundWrap = document.getElementById('lastRoundWrap');
+    const lastRoundCb = document.getElementById('lastRoundRequired');
+    function syncLastRound() {
+      const hasLimit = bestOf.value !== '';
+      lastRoundWrap.style.opacity = hasLimit ? '1' : '0.4';
+      lastRoundCb.disabled = !hasLimit;
+    }
+    bestOf.addEventListener('change', syncLastRound);
+    syncLastRound();
+
+  </script>
+</body>
+</html>

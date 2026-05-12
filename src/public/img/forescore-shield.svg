@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 116" role="img" aria-label="ForeScore">
+  <defs>
+    <clipPath id="inner-shield">
+      <path d="M50 11 L86 22 L86 67 Q86 89 50 105 Q14 89 14 67 L14 22 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Shield outer border (Deep Navy) -->
+  <path d="M50 3 L93 16 L93 67 Q93 93 50 113 Q7 93 7 67 L7 16 Z" fill="#215463"/>
+
+  <!-- Shield inner face (white) -->
+  <path d="M50 11 L86 22 L86 67 Q86 89 50 105 Q14 89 14 67 L14 22 Z" fill="#ffffff"/>
+
+  <g clip-path="url(#inner-shield)">
+
+    <!-- Rising bar chart (left=short green, centre=tall navy, right=medium green) -->
+    <rect x="17" y="62" width="14" height="44" rx="1.5" fill="#8AD84A"/>
+    <rect x="33" y="48" width="14" height="58" rx="1.5" fill="#215463"/>
+    <rect x="49" y="36" width="13" height="70" rx="1.5" fill="#8AD84A"/>
+
+    <!-- Golf putting green (grass dome) -->
+    <ellipse cx="50" cy="91" rx="36" ry="17" fill="#5ab81a"/>
+    <ellipse cx="50" cy="88" rx="34" ry="14" fill="#6bc832"/>
+
+    <!-- Golf hole -->
+    <ellipse cx="64" cy="87" rx="3.8" ry="2" fill="#1a2e3a"/>
+
+    <!-- Flagstick -->
+    <rect x="63" y="24" width="2.5" height="64" rx="0.8" fill="#2d2d2d"/>
+
+    <!-- Red pennant flag -->
+    <polygon points="65.5,24 83,33 65.5,44" fill="#e02020"/>
+
+    <!-- Golf ball -->
+    <circle cx="40" cy="85" r="9" fill="white"/>
+    <circle cx="40" cy="85" r="9" fill="white" stroke="#d8d8d8" stroke-width="0.6"/>
+
+  </g>
+</svg>
