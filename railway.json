@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "node scripts/check-db.js && echo '[deploy] DB ok, running migrations...' && npm run migrate && echo '[deploy] Migrations done, starting server...' && npm start",
+    "startCommand": "sh scripts/start.sh",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
