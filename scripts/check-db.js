@@ -38,9 +38,10 @@ const ssl = hostname.includes('localhost') || hostname.includes('127.0.0.1') || 
 const client = new Client({ connectionString: url, ssl });
 
 client.connect()
+  .then(() => client.end())
   .then(() => {
     console.log('[check-db] Connection OK');
-    return client.end();
+    process.exit(0);
   })
   .catch((err) => {
     console.error('[check-db] Connection FAILED:', err.message);
