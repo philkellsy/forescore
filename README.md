@@ -1,83 +1,94 @@
-# Legends Scoring PWA
+# ForeScore
 
-Node.js monolith for the Legends annual golf trip at Bonville International Golf Resort.
+Multi-tenant SaaS platform for managing golf tours — scoring, leaderboards, calcutta auctions, skins, tee times, and itinerary.
 
 ## Stack
-- Express 4 + EJS + Bootstrap 5
-- SQLite + Knex
-- Session auth (`express-session`, `connect-sqlite3`)
-- Passwordless one-time code auth (email delivery)
-- PWA manifest + service worker
 
-## Local Run
-1. Copy env:
-   - `cp .env.example .env`
-2. Install deps:
-   - `npm install`
-3. Start on port `5050`:
-   - `npm run dev`
-4. Open:
-   - `http://localhost:5050/auth/login`
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js ≥ 20 |
+| Framework | Express 4 + EJS + Bootstrap 5 |
+| Database | PostgreSQL via Knex 3 |
+| Auth | Passwordless 6-digit one-time codes (emailed via Brevo) |
+| Sessions | connect-pg-simple (Postgres-backed) |
+| Hosting | Railway |
 
-## Test Scripts
-- `npm test` (unit + integration)
-- `npm run test:unit`
-- `npm run test:integration`
-- `npm run test:watch`
+## Local Development
 
-Detailed test strategy: `TESTING.md`.
+**Prerequisites:** PostgreSQL running on `:5432`
 
-## Security / Dependency Scripts
-- `npm run audit` (online npm advisory check)
-- `npm run audit:offline` (offline local check)
-- `npm run audit:fix` (apply non-breaking audit fixes)
-- `npm run deps:update` (update within semver ranges)
+```bash
+createdb forescore_dev
+createdb forescore_test
+cp .env.example .env
+npm install
+npm run migrate
+npm run dev        # http://localhost:2080
+```
 
-## Seeded Admin
-- Name: Phil Kells
-- Email: phil@kellsy.com
-- Phone: 0404878210
+Super admin login: `http://localhost:2080/auth/login` → `phil@kellsy.com`
 
-## Login Code Email (Brevo)
-Set these environment variables:
-- `APP_BASE_URL` (used for absolute logo URLs in emails)
-- `BREVO_API_KEY`
-- `BREVO_SENDER_EMAIL` (must be verified in Brevo)
-- `BREVO_SENDER_NAME` (optional; default `Legends Golf`)
+Dev tenant: `http://localhost:2080/init/admin`
 
-If Brevo vars are missing, login codes are logged to server stdout in development (`[login-code] ...`).
-If Brevo send fails, the login page still returns the generic success message and the error is logged server-side.
+If Brevo vars are absent, login codes are printed to stdout: `[login-code] ...`
 
-### Fly.io secrets
-Example commands:
-- `fly secrets set APP_BASE_URL=https://<your-app>.fly.dev`
-- `fly secrets set BREVO_API_KEY=<your_brevo_api_key>`
-- `fly secrets set BREVO_SENDER_EMAIL=<verified_sender_email>`
-- `fly secrets set BREVO_SENDER_NAME=\"Legends Golf\"`
+## Scripts
 
-## Fly.io Deployment (New App)
-For a fresh Fly app deployment:
+```bash
+npm run dev              # nodemon dev server
+npm run migrate          # run pending migrations
+npm run migrate:make     # create a new migration file
+npm test                 # lint + unit + integration
+npm run test:unit
+npm run test:integration
+npm run test:watch
+npm run audit            # npm advisory check
+npm run audit:fix        # apply non-breaking audit fixes
+```
 
-1. Login:
-- `flyctl auth login`
+## Environment Variables
 
-2. Create a new app and volume:
-- `scripts/fly-new-app-setup.sh <app-name> syd legends_data 1`
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | Postgres connection string |
+| `SESSION_SECRET` | Yes | Strong random string for session signing |
+| `NODE_ENV` | Yes | `development` / `test` / `production` |
+| `APP_BASE_URL` | Yes | Absolute base URL used in emails |
+| `BREVO_API_KEY` | Prod | Brevo transactional email API key |
+| `BREVO_SENDER_EMAIL` | Prod | Verified Brevo sender address |
+| `BREVO_SENDER_NAME` | No | Display name (default: `ForeScore`) |
+| `GOLF_COURSE_API_KEY` | No | External course data API (course importer) |
+| `PORT` | No | HTTP port (default: `2080`; Railway injects automatically) |
+| `TEST_DATABASE_URL` | Test | Postgres DB for integration tests |
 
-3. Set required secrets:
-- `flyctl secrets set SESSION_SECRET=\"<strong-random-secret>\" --app <app-name>`
-- `flyctl secrets set APP_BASE_URL=\"https://<app-name>.fly.dev\" --app <app-name>`
-- `flyctl secrets set BREVO_API_KEY=\"<brevo-api-key>\" --app <app-name>`
-- `flyctl secrets set BREVO_SENDER_EMAIL=\"<verified-sender-email>\" --app <app-name>`
-- `flyctl secrets set BREVO_SENDER_NAME=\"Legends Golf\" --app <app-name>`
+Generate a strong session secret:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
-4. Deploy:
-- `flyctl deploy --app <app-name>`
+## Railway Deployment
 
-5. Smoke check:
-- `flyctl status --app <app-name>`
-- `flyctl open --app <app-name>`
+Railway auto-deploys on push to `main`. Each deploy runs `npm run migrate && npm start` — migrations run before the server accepts traffic.
 
-## Notes
-- Session cookie duration is 30 days (`rolling: true`), until logout.
-- Database schema is bootstrapped at runtime by `src/bootstrap.js`.
+**Initial setup:**
+1. Create a Railway project and connect this repo
+2. Add a **PostgreSQL** service — `DATABASE_URL` is injected automatically
+3. Set environment variables in the Railway dashboard:
+   - `NODE_ENV=production`
+   - `SESSION_SECRET=<generated above>`
+   - `APP_BASE_URL=https://<your-service>.railway.app`
+   - `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`
+
+Health check: `GET /health` → `{ ok: true }`
+
+## Versioning
+
+Version lives in `package.json`. It is used as the asset cache-bust string in production (`?v=1.0.0`). Use semver:
+
+```bash
+npm version patch   # bug fixes
+npm version minor   # new features
+npm version major   # breaking changes
+```
+
+Bump the version before pushing a production release.
