@@ -263,6 +263,28 @@ body {
   color: #842029;
 }
 
+/* Page loading progress bar */
+#fs-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 0%;
+  background: var(--fs-green);
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: width 0.3s ease, opacity 0.2s ease;
+}
+#fs-loading-bar.is-active {
+  opacity: 1;
+}
+#fs-loading-bar.is-complete {
+  width: 100% !important;
+  opacity: 0;
+  transition: width 0.15s ease, opacity 0.3s ease 0.1s;
+}
+
 .login-version-tag {
   position: fixed;
   right: 0.65rem;

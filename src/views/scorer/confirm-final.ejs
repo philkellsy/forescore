@@ -110,7 +110,7 @@
         <div class="alert alert-info">This scorecard has been submitted and locked.</div>
         <a class="btn btn-outline-secondary" href="<%= tenantPath('/scoring') %>">Back to Scoring</a>
       <% } else { %>
-        <form id="submitScorecardForm" data-submit-snapshot="<%= submitSnapshot || '' %>" action="<%= tenantPath(`/scoring/confirm/${scorecard.id}/submit`) %>" method="post" class="d-flex gap-2">
+        <form id="submitScorecardForm" data-no-loading data-submit-snapshot="<%= submitSnapshot || '' %>" action="<%= tenantPath(`/scoring/confirm/${scorecard.id}/submit`) %>" method="post" class="d-flex gap-2">
           <input type="hidden" name="submitSnapshot" value="<%= submitSnapshot || '' %>">
           <button id="submitBtn" type="submit" class="btn btn-success" <%= canSubmit ? '' : 'disabled' %>>
             Submit Scores
