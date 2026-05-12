@@ -3,6 +3,12 @@
 // Runs before migrations on startup. Surfaces the real connection error instead of
 // Knex's generic pool timeout message.
 
+// Print which DB/Railway env vars are present (names only, no values)
+const dbKeys = Object.keys(process.env).filter(k =>
+  k.includes('DATABASE') || k.includes('PG') || k.includes('RAILWAY') || k.includes('POSTGRES')
+);
+console.log('[check-db] DB-related env vars present:', dbKeys.join(', ') || '(none)');
+
 const url = process.env.DATABASE_URL;
 
 if (!url) {
