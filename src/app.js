@@ -39,7 +39,7 @@ function createApp({ db, sessionStore } = {}) {
   app.use(upload.none());
   app.use(express.static(path.join(__dirname, 'public')));
 
-  const isRemoteDb = databaseUrl && !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1');
+  const isRemoteDb = databaseUrl && !databaseUrl.includes('localhost') && !databaseUrl.includes('127.0.0.1') && !databaseUrl.includes('.railway.internal');
   const store = sessionStore || new PgSession({
     conObject: {
       connectionString: databaseUrl,

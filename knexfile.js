@@ -14,7 +14,12 @@ const base = {
 };
 
 function isRemote(url) {
-  return url && !url.includes('localhost') && !url.includes('127.0.0.1');
+  // Railway's private network (*.railway.internal) is VPC-encrypted — no app-level SSL needed.
+  // Only add SSL for public/external connections.
+  if (!url) return false;
+  if (url.includes('localhost') || url.includes('127.0.0.1')) return false;
+  if (url.includes('.railway.internal')) return false;
+  return true;
 }
 
 function pgConnection(url) {
