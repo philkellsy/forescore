@@ -3,16 +3,19 @@
 // Runs before migrations on startup. Surfaces the real connection error instead of
 // Knex's generic pool timeout message.
 
-// Print which DB/Railway env vars are present (names only, no values)
-const dbKeys = Object.keys(process.env).filter(k =>
-  k.includes('DATABASE') || k.includes('PG') || k.includes('RAILWAY') || k.includes('POSTGRES')
-);
-console.log('[check-db] DB-related env vars present:', dbKeys.join(', ') || '(none)');
+let url = process.env.DATABASE_URL;
 
-const url = process.env.DATABASE_URL;
+if (!url && process.env.PGHOST) {
+  const { PGUSER, PGPASSWORD, PGHOST, PGPORT, PGDATABASE } = process.env;
+  url = `postgresql://${PGUSER}:${encodeURIComponent(PGPASSWORD || '')}@${PGHOST}:${PGPORT || 5432}/${PGDATABASE}`;
+  console.log('[check-db] Built URL from PG* vars, host:', PGHOST);
+}
 
 if (!url) {
-  console.error('[check-db] FATAL: DATABASE_URL is not set. Set it in Railway → app service → Variables.');
+  const dbKeys = Object.keys(process.env).filter(k =>
+    k.includes('DATABASE') || k.includes('PG') || k.includes('RAILWAY') || k.includes('POSTGRES')
+  );
+  console.error('[check-db] FATAL: No database config found. Present DB-related vars:', dbKeys.join(', ') || '(none)');
   process.exit(1);
 }
 
