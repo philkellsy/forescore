@@ -29,8 +29,18 @@ function pgConnection(url) {
   return url;
 }
 
-const devUrl = process.env.DATABASE_URL || 'postgresql://localhost:5432/forescore_dev';
-const testUrl = process.env.TEST_DATABASE_URL || 'postgresql://localhost:5432/forescore_test';
+function buildUrl(urlEnvVar, pgHostEnvVar, fallback) {
+  if (process.env[urlEnvVar]) return process.env[urlEnvVar];
+  if (process.env[pgHostEnvVar]) {
+    const { PGUSER, PGPASSWORD, PGDATABASE, PGPORT } = process.env;
+    return `postgresql://${PGUSER}:${encodeURIComponent(PGPASSWORD || '')}@${process.env[pgHostEnvVar]}:${PGPORT || 5432}/${PGDATABASE}`;
+  }
+  return fallback;
+}
+
+const devUrl = buildUrl('DATABASE_URL', 'PGHOST', 'postgresql://localhost:5432/forescore_dev');
+const testUrl = buildUrl('TEST_DATABASE_URL', null, 'postgresql://localhost:5432/forescore_test');
+const prodUrl = buildUrl('DATABASE_URL', 'PGHOST', null);
 
 module.exports = {
   development: {
@@ -45,7 +55,7 @@ module.exports = {
 
   production: {
     ...base,
-    connection: pgConnection(process.env.DATABASE_URL),
+    connection: pgConnection(prodUrl),
     pool: { min: 2, max: 10 },
   },
 };
