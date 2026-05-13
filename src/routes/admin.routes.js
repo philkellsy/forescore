@@ -1096,20 +1096,28 @@ function adminRouter(db) {
           .onConflict(['tour_id', 'user_id']).merge({ playing_handicap: handicap });
       }
 
-      // Fire welcome email — non-blocking, errors logged but don't fail the request
       const inviter = req.session.user;
       const inviterName = `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || 'Your tour admin';
-      sendWelcomeEmail({
-        email: user.email,
-        firstName: user.first_name,
-        tourLabel: tour.label,
-        tenantName: req.tenant.name,
-        tenantSlug: req.tenant.slug,
-        inviterName,
-        isNewUser,
-      }).catch((err) => console.error('[welcome-email] failed:', err?.message));
+      let emailWarning = null;
+      try {
+        await sendWelcomeEmail({
+          email: user.email,
+          firstName: user.first_name,
+          tourLabel: tour.label,
+          tenantName: req.tenant.name,
+          tenantSlug: req.tenant.slug,
+          inviterName,
+          isNewUser,
+        });
+      } catch (emailErr) {
+        console.error('[welcome-email] failed:', emailErr?.message);
+        emailWarning = `Player enrolled, but the welcome email to ${user.email} could not be sent — please follow up manually.`;
+      }
 
-      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?message=Player+enrolled`);
+      const qs = emailWarning
+        ? `error=${encodeURIComponent(emailWarning)}`
+        : `message=Player+enrolled+%E2%80%94+welcome+email+sent`;
+      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?${qs}`);
     } catch (err) { return next(err); }
   });
 
