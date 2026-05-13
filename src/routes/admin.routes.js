@@ -1147,7 +1147,7 @@ function adminRouter(db) {
           tenantName: req.tenant.name,
           tenantSlug: req.tenant.slug,
           inviterName,
-          isNewUser: false,
+          isNewUser: true,
         });
         return res.redirect(`${base}?message=${encodeURIComponent(`Welcome email resent to ${user.email}`)}`);
       } catch (emailErr) {
