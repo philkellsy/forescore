@@ -368,7 +368,16 @@ function playerRouter(db) {
 
   router.get('/itinerary', requireAuth, async (req, res, next) => {
     try {
-      const { tour: activeTour, needsPicker, tours } = await resolveActiveTour(req.tenant.id, req.query.tourId);
+      // Fall back to the most recent draft tour if no active tour exists, so
+      // admins can view/plan itinerary before the tour is approved and activated.
+      let { tour: activeTour, needsPicker, tours } = await resolveActiveTour(req.tenant.id, req.query.tourId);
+
+      if (!activeTour && !needsPicker) {
+        activeTour = await db('tours')
+          .where({ tenant_id: req.tenant.id, status: 'draft' })
+          .orderBy('year', 'desc')
+          .first() || null;
+      }
 
       if (needsPicker) {
         return res.render('player/tour-picker', { title: 'Your Tours', tours });
