@@ -4,3 +4,4 @@ node_modules
 *.sqlite3
 data/
 backups/
+.DS_Store
