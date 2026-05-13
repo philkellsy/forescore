@@ -14,7 +14,7 @@ const { layout, ctaButton, divider } = require('../layout');
  */
 function buildContent({ firstName, tourLabel, tenantName, inviterName, tenantUrl }) {
   const subject = `You've been added to ${tourLabel}`;
-  const preheader = `${inviterName} has added you to ${tourLabel}. Your scorecard, itinerary and leaderboards are waiting.`;
+  const preheader = `${inviterName} has added you to ${tourLabel}. Your itinerary, scorecards and leaderboards are waiting.`;
 
   const body = `
     <h2 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#215463;">
