@@ -14,6 +14,7 @@ const { calculateEventSkinsForDays } = require('../services/scoring/skins.servic
 const { calculateVirtualTeamResults } = require('../services/scoring/virtual-teams.service');
 const { dayLabel } = require('../services/events/day-label.service');
 const virtualTeamsRepo = require('../db/repositories/virtual-teams');
+const { sendWelcomeEmail } = require('../services/email/mailer');
 
 const NOVELTY_TYPES = ['NTP', 'Long Drive'];
 
@@ -1058,6 +1059,7 @@ function adminRouter(db) {
       const handicap = parseFloat(req.body.playingHandicap);
 
       let user = await db('users').whereRaw('lower(email) = ?', [email]).first();
+      const isNewUser = !user;
       if (!user) {
         if (!firstName || !lastName) {
           return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?error=First+and+last+name+required+for+new+players`);
@@ -1093,6 +1095,19 @@ function adminRouter(db) {
           .insert({ tour_id: tourId, user_id: user.id, playing_handicap: handicap })
           .onConflict(['tour_id', 'user_id']).merge({ playing_handicap: handicap });
       }
+
+      // Fire welcome email — non-blocking, errors logged but don't fail the request
+      const inviter = req.session.user;
+      const inviterName = `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || 'Your tour admin';
+      sendWelcomeEmail({
+        email: user.email,
+        firstName: user.first_name,
+        tourLabel: tour.label,
+        tenantName: req.tenant.name,
+        tenantSlug: req.tenant.slug,
+        inviterName,
+        isNewUser,
+      }).catch((err) => console.error('[welcome-email] failed:', err?.message));
 
       return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?message=Player+enrolled`);
     } catch (err) { return next(err); }
