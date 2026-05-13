@@ -37,11 +37,15 @@
           if (!t) return '';
           return String(t).slice(0, 5);
         }
-        // Compute once, used for default tab selection and in each tab
-        const todayItems    = (byDate[todayKey]    || []).filter(e => e._kind === 'item');
-        const tomorrowEntries = byDate[tomorrowKey] || [];
-        const defaultTab = (openRound || todayItems.length || tomorrowEntries.length) ? 'today' : 'tomorrow';
-      %>
+        <%
+          const todayItems      = (byDate[todayKey]    || []).filter(e => e._kind === 'item');
+          const tomorrowEntries = byDate[tomorrowKey] || [];
+          const todayHasContent    = !!(openRound || championshipStanding || skinsSummary || todayItems.length);
+          const tomorrowHasContent = tomorrowEntries.length > 0;
+          const showTabs  = todayHasContent || tomorrowHasContent;
+          const activeTab = todayHasContent ? 'today' : 'tomorrow';
+          const allDateKeys = Object.keys(byDate).sort();
+        %>
 
       <% if (!activeTour) { %>
         <div class="alert alert-info">No active tour at the moment. Check back soon.</div>
@@ -49,149 +53,172 @@
 
         <div class="d-flex justify-content-between align-items-center mb-3">
           <h1 class="h5 mb-0"><%= activeTour.label %></h1>
-          <a href="<%= tenantPath('/itinerary') %>" class="btn btn-sm btn-outline-secondary">
-            <i class="fa-solid fa-calendar-days me-1"></i>Itinerary
-          </a>
+          <% if (showTabs) { %>
+            <a href="<%= tenantPath('/itinerary') %>" class="btn btn-sm btn-outline-secondary">
+              <i class="fa-solid fa-calendar-days me-1"></i>Itinerary
+            </a>
+          <% } %>
         </div>
 
-        <div class="d-flex align-items-end mb-3">
-          <ul class="nav nav-tabs flex-grow-1" id="dashTabs" role="tablist" style="border-bottom:0">
-            <li class="nav-item" role="presentation">
-              <button class="nav-link <%= defaultTab === 'today' ? 'active' : '' %>" id="tab-today-btn"
-                data-bs-toggle="tab" data-bs-target="#tab-today" type="button" role="tab"
-                aria-controls="tab-today" aria-selected="<%= defaultTab === 'today' %>">Today</button>
-            </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link <%= defaultTab === 'tomorrow' ? 'active' : '' %>" id="tab-tomorrow-btn"
-                data-bs-toggle="tab" data-bs-target="#tab-tomorrow" type="button" role="tab"
-                aria-controls="tab-tomorrow" aria-selected="<%= defaultTab === 'tomorrow' %>">Tomorrow</button>
-            </li>
-          </ul>
-        </div>
-        <div style="border-top:1px solid var(--bs-border-color);margin-top:-1px;margin-bottom:1rem"></div>
+        <% if (showTabs) { %>
 
-        <div class="tab-content" id="dashTabContent">
+          <%# Tab nav — only render tabs that have content %>
+          <div class="d-flex align-items-end mb-3">
+            <ul class="nav nav-tabs flex-grow-1" id="dashTabs" role="tablist" style="border-bottom:0">
+              <% if (todayHasContent) { %>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link <%= activeTab === 'today' ? 'active' : '' %>" id="tab-today-btn"
+                    data-bs-toggle="tab" data-bs-target="#tab-today" type="button" role="tab"
+                    aria-controls="tab-today" aria-selected="<%= activeTab === 'today' %>">Today</button>
+                </li>
+              <% } %>
+              <% if (tomorrowHasContent) { %>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link <%= activeTab === 'tomorrow' ? 'active' : '' %>" id="tab-tomorrow-btn"
+                    data-bs-toggle="tab" data-bs-target="#tab-tomorrow" type="button" role="tab"
+                    aria-controls="tab-tomorrow" aria-selected="<%= activeTab === 'tomorrow' %>">Tomorrow</button>
+                </li>
+              <% } %>
+            </ul>
+          </div>
+          <div style="border-top:1px solid var(--bs-border-color);margin-top:-1px;margin-bottom:1rem"></div>
 
-          <%# ── TODAY TAB ── %>
-          <div class="tab-pane fade <%= defaultTab === 'today' ? 'show active' : '' %>"
-               id="tab-today" role="tabpanel" aria-labelledby="tab-today-btn">
+          <div class="tab-content" id="dashTabContent">
 
-            <%# Open round golf section %>
-            <% if (openRound) { %>
-              <section class="card border-0 shadow-sm mb-3">
-                <div class="card-body">
-                  <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">
-                    Today &middot; <%= dayLabel(openRound.round_number) %>
-                  </h2>
-                  <% if (todayGroup) { %>
-                    <div class="d-flex justify-content-between align-items-start mb-3">
-                      <div>
-                        <div class="fw-semibold">Group <%= todayGroup.groupNumber %></div>
-                        <div class="small text-muted">
-                          Tee <%= todayGroup.startingHole || '-' %>
-                          <% if (todayGroup.teeLocation) { %> &middot; <%= todayGroup.teeLocation %><% } %>
+            <%# ── TODAY TAB ── %>
+            <% if (todayHasContent) { %>
+              <div class="tab-pane fade <%= activeTab === 'today' ? 'show active' : '' %>"
+                   id="tab-today" role="tabpanel" aria-labelledby="tab-today-btn">
+
+                <%# Open round %>
+                <% if (openRound) { %>
+                  <section class="card border-0 shadow-sm mb-3">
+                    <div class="card-body">
+                      <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">
+                        Today &middot; <%= dayLabel(openRound.round_number) %>
+                      </h2>
+                      <% if (todayGroup) { %>
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                          <div>
+                            <div class="fw-semibold">Group <%= todayGroup.groupNumber %></div>
+                            <div class="small text-muted">
+                              Tee <%= todayGroup.startingHole || '-' %>
+                              <% if (todayGroup.teeLocation) { %> &middot; <%= todayGroup.teeLocation %><% } %>
+                            </div>
+                          </div>
+                          <div class="text-end">
+                            <div class="fs-5 fw-bold"><%= todayGroup.teeTime || '-' %></div>
+                            <% if (todayHandicap !== null) { %>
+                              <div class="small text-muted">Hcp <%= todayHandicap %></div>
+                            <% } %>
+                          </div>
                         </div>
-                      </div>
-                      <div class="text-end">
-                        <div class="fs-5 fw-bold"><%= todayGroup.teeTime || '-' %></div>
-                        <% if (todayHandicap !== null) { %>
-                          <div class="small text-muted">Hcp <%= todayHandicap %></div>
+                        <div class="d-flex flex-wrap gap-2 mb-3">
+                          <% todayGroup.players.forEach((p) => { %>
+                            <span class="badge <%= p.isMe ? 'text-bg-dark' : 'text-bg-light border' %>"><%= p.name %></span>
+                          <% }) %>
+                        </div>
+                        <% if (todayGroup.scorecard) { %>
+                          <% if (todayGroup.scorecard.status === 'submitted') { %>
+                            <span class="badge text-bg-secondary">Submitted</span>
+                          <% } else { %>
+                            <a href="<%= tenantPath(`/scoring/live/${todayGroup.scorecard.id}`) %>" class="btn btn-success btn-sm">
+                              <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                            </a>
+                          <% } %>
+                        <% } else { %>
+                          <p class="small text-muted mb-0">Scorecard not yet available.</p>
+                        <% } %>
+                      <% } else { %>
+                        <p class="text-muted small mb-0">You are not in a tee group for today.</p>
+                      <% } %>
+                    </div>
+                  </section>
+                <% } %>
+
+                <%# Standings %>
+                <% if (championshipStanding || skinsSummary) { %>
+                  <section class="card border-0 shadow-sm mb-3">
+                    <div class="card-body">
+                      <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">Standings</h2>
+                      <div class="row g-3">
+                        <% if (championshipStanding) { %>
+                          <div class="col">
+                            <div class="border rounded p-3 text-center h-100">
+                              <div class="text-muted small mb-1">Championship</div>
+                              <div class="display-6 fw-bold lh-1">#<%= championshipStanding.place %></div>
+                              <div class="fw-semibold mt-1"><%= championshipStanding.points %> pts</div>
+                              <div class="small text-muted mt-1">
+                                <%= championshipStanding.pointsFromLeader === 0 ? 'Leader' : `${championshipStanding.pointsFromLeader} from lead` %>
+                              </div>
+                            </div>
+                          </div>
+                        <% } %>
+                        <% if (skinsSummary) { %>
+                          <div class="col">
+                            <div class="border rounded p-3 text-center h-100">
+                              <div class="text-muted small mb-1">Skins</div>
+                              <div class="display-6 fw-bold lh-1"><%= skinsSummary.totalSkins %></div>
+                              <div class="fw-semibold text-success mt-1">$<%= skinsSummary.totalPayout.toFixed(2) %></div>
+                              <div class="small text-muted mt-1">$<%= skinsSummary.baseSkinPot.toFixed(2) %> / skin</div>
+                            </div>
+                          </div>
                         <% } %>
                       </div>
                     </div>
-                    <div class="d-flex flex-wrap gap-2 mb-3">
-                      <% todayGroup.players.forEach((p) => { %>
-                        <span class="badge <%= p.isMe ? 'text-bg-dark' : 'text-bg-light border' %>"><%= p.name %></span>
-                      <% }) %>
-                    </div>
-                    <% if (todayGroup.scorecard) { %>
-                      <% if (todayGroup.scorecard.status === 'submitted') { %>
-                        <span class="badge text-bg-secondary">Submitted</span>
-                      <% } else { %>
-                        <a href="<%= tenantPath(`/scoring/live/${todayGroup.scorecard.id}`) %>" class="btn btn-success btn-sm">
-                          <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
-                        </a>
-                      <% } %>
-                    <% } else { %>
-                      <p class="small text-muted mb-0">Scorecard not yet available.</p>
-                    <% } %>
-                  <% } else { %>
-                    <p class="text-muted small mb-0">You are not in a tee group for today.</p>
-                  <% } %>
+                  </section>
+                <% } %>
+
+                <%# Today's non-golf itinerary items %>
+                <% if (todayItems.length) { %>
+                  <section class="card border-0 shadow-sm mb-3">
+                    <% todayItems.forEach((entry, i) => { %>
+                      <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
+                    <% }) %>
+                  </section>
+                <% } %>
+
+              </div>
+            <% } %>
+
+            <%# ── TOMORROW TAB ── %>
+            <% if (tomorrowHasContent) { %>
+              <div class="tab-pane fade <%= activeTab === 'tomorrow' ? 'show active' : '' %>"
+                   id="tab-tomorrow" role="tabpanel" aria-labelledby="tab-tomorrow-btn">
+                <h2 class="h6 text-muted text-uppercase small fw-semibold mb-2 ps-1"><%= fmtDate(tomorrowKey) %></h2>
+                <div class="card border-0 shadow-sm mb-3">
+                  <% tomorrowEntries.forEach((entry, i) => { %>
+                    <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
+                  <% }) %>
                 </div>
-              </section>
-            <% } %>
-
-            <%# Standings %>
-            <% if (championshipStanding || skinsSummary) { %>
-              <section class="card border-0 shadow-sm mb-3">
-                <div class="card-body">
-                  <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">Standings</h2>
-                  <div class="row g-3">
-                    <% if (championshipStanding) { %>
-                      <div class="col">
-                        <div class="border rounded p-3 text-center h-100">
-                          <div class="text-muted small mb-1">Championship</div>
-                          <div class="display-6 fw-bold lh-1">#<%= championshipStanding.place %></div>
-                          <div class="fw-semibold mt-1"><%= championshipStanding.points %> pts</div>
-                          <div class="small text-muted mt-1">
-                            <%= championshipStanding.pointsFromLeader === 0 ? 'Leader' : `${championshipStanding.pointsFromLeader} from lead` %>
-                          </div>
-                        </div>
-                      </div>
-                    <% } %>
-                    <% if (skinsSummary) { %>
-                      <div class="col">
-                        <div class="border rounded p-3 text-center h-100">
-                          <div class="text-muted small mb-1">Skins</div>
-                          <div class="display-6 fw-bold lh-1"><%= skinsSummary.totalSkins %></div>
-                          <div class="fw-semibold text-success mt-1">$<%= skinsSummary.totalPayout.toFixed(2) %></div>
-                          <div class="small text-muted mt-1">$<%= skinsSummary.baseSkinPot.toFixed(2) %> / skin</div>
-                        </div>
-                      </div>
-                    <% } %>
-                  </div>
-                </div>
-              </section>
-            <% } %>
-
-            <%# Today's non-golf itinerary items %>
-            <% if (todayItems.length) { %>
-              <section class="card border-0 shadow-sm mb-3">
-                <% todayItems.forEach((entry, i) => { %>
-                  <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
-                <% }) %>
-              </section>
-            <% } %>
-
-            <%# Empty state %>
-            <% if (!openRound && !championshipStanding && !skinsSummary && !todayItems.length) { %>
-              <div class="text-center py-5 text-muted">
-                <i class="fa-solid fa-calendar-days fa-3x mb-3 opacity-25"></i>
-                <p class="mb-0">Nothing scheduled for today.</p>
               </div>
             <% } %>
 
           </div>
 
-          <%# ── TOMORROW TAB ── %>
-          <div class="tab-pane fade" id="tab-tomorrow" role="tabpanel" aria-labelledby="tab-tomorrow-btn">
-            <% if (!tomorrowEntries.length) { %>
-              <div class="text-center py-5 text-muted">
-                <i class="fa-solid fa-calendar-check fa-3x mb-3 opacity-25"></i>
-                <p class="mb-0">Nothing scheduled for tomorrow.</p>
-              </div>
-            <% } else { %>
-              <h2 class="h6 text-muted text-uppercase small fw-semibold mb-2 ps-1"><%= fmtDate(tomorrowKey) %></h2>
-              <div class="card border-0 shadow-sm mb-3">
-                <% tomorrowEntries.forEach((entry, i) => { %>
-                  <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
-                <% }) %>
-              </div>
-            <% } %>
-          </div>
+        <% } else { %>
 
-        </div>
+          <%# Both tabs empty — show full itinerary %>
+          <% if (allDateKeys.length) { %>
+            <% allDateKeys.forEach((dateKey) => { %>
+              <section class="mb-4">
+                <h2 class="h6 text-muted text-uppercase small fw-semibold mb-2 ps-1"><%= fmtDate(dateKey) %></h2>
+                <div class="card border-0 shadow-sm">
+                  <% byDate[dateKey].forEach((entry, i) => { %>
+                    <%- include('../partials/itinerary-entry', { entry, i, TYPE_META, CALC_LABELS, fmtTime }) %>
+                  <% }) %>
+                </div>
+              </section>
+            <% }) %>
+          <% } else { %>
+            <div class="text-center py-5 text-muted">
+              <i class="fa-solid fa-calendar-days fa-3x mb-3 opacity-25"></i>
+              <p class="mb-0">Nothing scheduled yet — check back soon.</p>
+            </div>
+          <% } %>
+
+        <% } %>
+
       <% } %>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
