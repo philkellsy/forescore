@@ -37,15 +37,14 @@
           if (!t) return '';
           return String(t).slice(0, 5);
         }
-        <%
-          const todayItems      = (byDate[todayKey]    || []).filter(e => e._kind === 'item');
-          const tomorrowEntries = byDate[tomorrowKey] || [];
-          const todayHasContent    = !!(openRound || championshipStanding || skinsSummary || todayItems.length);
-          const tomorrowHasContent = tomorrowEntries.length > 0;
-          const showTabs  = todayHasContent || tomorrowHasContent;
-          const activeTab = todayHasContent ? 'today' : 'tomorrow';
-          const allDateKeys = Object.keys(byDate).sort();
-        %>
+        const todayItems      = (byDate[todayKey]    || []).filter(e => e._kind === 'item');
+        const tomorrowEntries = byDate[tomorrowKey] || [];
+        const todayHasContent    = !!(openRound || championshipStanding || skinsSummary || todayItems.length);
+        const tomorrowHasContent = tomorrowEntries.length > 0;
+        const showTabs  = todayHasContent || tomorrowHasContent;
+        const activeTab = todayHasContent ? 'today' : 'tomorrow';
+        const allDateKeys = Object.keys(byDate).sort();
+      %>
 
       <% if (!activeTour) { %>
         <div class="alert alert-info">No active tour at the moment. Check back soon.</div>
