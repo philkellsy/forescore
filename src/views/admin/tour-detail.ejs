@@ -218,8 +218,13 @@
                       </h3>
                       <p class="small text-muted mb-0"><%= p.email %></p>
                     </div>
-                    <% if (!hasAnyScores) { %>
-                      <div class="d-flex gap-1">
+                    <div class="d-flex gap-1">
+                      <form action="<%= tenantPath(`/admin/tours/${tour.id}/players/${p.user_id}/send-welcome`) %>" method="post">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Resend welcome email">
+                          <i class="fa-solid fa-envelope"></i>
+                        </button>
+                      </form>
+                      <% if (!hasAnyScores) { %>
                         <button
                           type="button"
                           class="btn btn-sm btn-outline-dark"
@@ -237,8 +242,8 @@
                             <i class="fa-solid fa-trash"></i>
                           </button>
                         </form>
-                      </div>
-                    <% } %>
+                      <% } %>
+                    </div>
                   </div>
                   <div class="mt-2 d-flex flex-wrap gap-2">
                     <span class="badge text-bg-light border">Handicap: <%= p.playing_handicap != null ? parseFloat(p.playing_handicap) : '—' %></span>

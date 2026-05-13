@@ -1122,6 +1122,42 @@ function adminRouter(db) {
   });
 
   // -------------------------------------------------------------------------
+  // Resend welcome email to a player
+  // -------------------------------------------------------------------------
+  router.post('/tours/:tourId/players/:userId/send-welcome', tourGuard, async (req, res, next) => {
+    try {
+      const tourId = parseInt(req.params.tourId, 10);
+      const userId = parseInt(req.params.userId, 10);
+      const base = res.locals.tenantPath(`/admin/tours/${tourId}`);
+
+      const [tour, user] = await Promise.all([
+        db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first(),
+        db('users').where({ id: userId }).first(),
+      ]);
+      if (!tour || !user) return res.status(404).send('Not found');
+
+      const inviter = req.session.user;
+      const inviterName = `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || 'Your tour admin';
+
+      try {
+        await sendWelcomeEmail({
+          email: user.email,
+          firstName: user.first_name,
+          tourLabel: tour.label,
+          tenantName: req.tenant.name,
+          tenantSlug: req.tenant.slug,
+          inviterName,
+          isNewUser: false,
+        });
+        return res.redirect(`${base}?message=${encodeURIComponent(`Welcome email resent to ${user.email}`)}`);
+      } catch (emailErr) {
+        console.error('[welcome-email] resend failed:', emailErr?.message);
+        return res.redirect(`${base}?error=${encodeURIComponent(`Could not send email to ${user.email} — please try again or contact them directly.`)}`);
+      }
+    } catch (err) { return next(err); }
+  });
+
+  // -------------------------------------------------------------------------
   // Update player (handicap)
   // -------------------------------------------------------------------------
   router.post('/tours/:tourId/players/:userId/update', tourGuard, async (req, res, next) => {
