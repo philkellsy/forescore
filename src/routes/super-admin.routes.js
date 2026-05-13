@@ -319,6 +319,30 @@ function superAdminRouter(db) {
     }
   });
 
+  router.post('/tenants/:tenantId', requireSuperAdmin, async (req, res, next) => {
+    try {
+      const tenantId = parseInt(req.params.tenantId, 10);
+      const tenant = await db('tenants').where({ id: tenantId }).first();
+      if (!tenant) return res.redirect('/?error=Tenant+not+found');
+
+      const name = String(req.body.name || '').trim();
+      const slug = String(req.body.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const plan = ['free', 'starter', 'pro'].includes(req.body.plan) ? req.body.plan : tenant.plan;
+
+      if (!name || !slug) {
+        return res.redirect(`/?error=${encodeURIComponent('Name and slug are required.')}`);
+      }
+
+      if (slug !== tenant.slug) {
+        const taken = await db('tenants').where({ slug }).whereNot({ id: tenantId }).first();
+        if (taken) return res.redirect(`/?error=${encodeURIComponent('That slug is already taken.')}`);
+      }
+
+      await db('tenants').where({ id: tenantId }).update({ name, slug, plan });
+      return res.redirect(`/?message=${encodeURIComponent(`"${name}" updated`)}`);
+    } catch (err) { return next(err); }
+  });
+
   router.post('/tenants/:tenantId/delete', requireSuperAdmin, async (req, res, next) => {
     try {
       const tenantId = parseInt(req.params.tenantId, 10);
