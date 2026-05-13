@@ -527,7 +527,7 @@ function playerRouter(db) {
       const firstName   = (req.body.firstName   || '').trim();
       const lastName    = (req.body.lastName    || '').trim();
       const phoneNumber = (req.body.phoneNumber || '').trim() || null;
-      const gender      = ['male', 'female'].includes(req.body.gender) ? req.body.gender : null;
+      const gender      = ['male', 'female'].includes(req.body.gender) ? req.body.gender : 'male';
 
       const errors = [];
       if (!firstName && !lastName) errors.push('Please enter at least a first or last name.');
