@@ -1514,11 +1514,13 @@ function adminRouter(db) {
 
       const validCourseGenders = ['mens', 'womens', 'open'];
       const courseGender = validCourseGenders.includes(req.body.gender) ? req.body.gender : 'mens';
+      const supportsSplitRatings = req.body.supportsSplitRatings === '1';
       const [course] = await db('courses').insert({
         tenant_id: req.tenant.id,
         course_name: courseName,
         tee_name: teeName,
         gender: courseGender,
+        supports_split_ratings: supportsSplitRatings,
       }).returning('*');
 
       const blankHoles = Array.from({ length: 18 }, (_, i) => ({
@@ -1675,12 +1677,14 @@ function adminRouter(db) {
       const updatedCourseGender = validCourseGenders.includes(req.body.gender) ? req.body.gender : course.gender;
       const courseRating = req.body.courseRating !== '' ? parseFloat(req.body.courseRating) : null;
       const slopeRating = req.body.slopeRating !== '' ? parseInt(req.body.slopeRating, 10) : null;
+      const supportsSplitRatings = req.body.supportsSplitRatings === '1';
       await db('courses').where({ id: courseId }).update({
         course_name: courseName,
         tee_name: teeName,
         gender: updatedCourseGender,
         course_rating: Number.isFinite(courseRating) ? courseRating : null,
         slope_rating: Number.isFinite(slopeRating) ? slopeRating : null,
+        supports_split_ratings: supportsSplitRatings,
       });
 
       const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
@@ -1689,8 +1693,10 @@ function adminRouter(db) {
           const par = parseInt(req.body[`par_${hole.id}`], 10);
           const meters = req.body[`meters_${hole.id}`] !== '' ? parseInt(req.body[`meters_${hole.id}`], 10) : null;
           const siP = parseInt(req.body[`si_primary_${hole.id}`], 10);
-          const siS = parseInt(req.body[`si_secondary_${hole.id}`], 10);
-          if (Number.isFinite(par) && Number.isFinite(siP) && Number.isFinite(siS)) {
+          const siS = supportsSplitRatings
+            ? parseInt(req.body[`si_secondary_${hole.id}`], 10)
+            : siP + 18;
+          if (Number.isFinite(par) && Number.isFinite(siP)) {
             await trx('holes').where({ id: hole.id }).update({
               par,
               length_meters: Number.isFinite(meters) ? meters : null,
@@ -1724,6 +1730,46 @@ function adminRouter(db) {
 
       await db('courses').where({ id: courseId }).delete();
       res.redirect(`${res.locals.tenantPath('/admin/courses')}?message=Course+deleted`);
+    } catch (err) { next(err); }
+  });
+
+  // -------------------------------------------------------------------------
+  // Course duplicate
+  // -------------------------------------------------------------------------
+  router.post('/courses/:courseId/duplicate', anyAdminGuard, async (req, res, next) => {
+    try {
+      const courseId = parseInt(req.params.courseId, 10);
+      const source = await db('courses').where({ id: courseId, tenant_id: req.tenant.id }).first();
+      if (!source) return res.status(404).send('Course not found');
+
+      const teeName = String(req.body.teeName || '').trim();
+      if (!teeName) {
+        return res.redirect(`${res.locals.tenantPath(`/admin/courses/${courseId}`)}?error=Tee+name+is+required`);
+      }
+
+      const sourceHoles = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
+
+      const [newCourse] = await db('courses').insert({
+        tenant_id: req.tenant.id,
+        course_name: source.course_name,
+        tee_name: teeName,
+        gender: source.gender,
+        course_rating: source.course_rating,
+        slope_rating: source.slope_rating,
+        supports_split_ratings: source.supports_split_ratings,
+        // API identifiers are intentionally omitted — the duplicate is a new tee variant
+      }).returning('*');
+
+      await db('holes').insert(sourceHoles.map((h) => ({
+        course_id: newCourse.id,
+        hole_number: h.hole_number,
+        par: h.par,
+        length_meters: h.length_meters,
+        stroke_index_primary: h.stroke_index_primary,
+        stroke_index_secondary: h.stroke_index_secondary,
+      })));
+
+      res.redirect(`${res.locals.tenantPath(`/admin/courses/${newCourse.id}`)}?message=Course+duplicated+-+update+tee+details+below`);
     } catch (err) { next(err); }
   });
 

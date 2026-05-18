@@ -19,6 +19,10 @@
         <h1 class="h4 mb-0"><%= course.course_name %> — <%= course.tee_name %></h1>
       </div>
       <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm"
+          data-bs-toggle="modal" data-bs-target="#duplicateCourseModal">
+          <i class="fa-solid fa-copy me-1"></i>Duplicate
+        </button>
         <% if (!courseEditLocked) { %>
           <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteCourseModal">
             Delete
@@ -73,6 +77,17 @@
                   value="<%= course.slope_rating != null ? course.slope_rating : '' %>"
                   <%= courseEditLocked ? 'disabled' : '' %> />
               </div>
+              <div class="col-12">
+                <div class="form-check form-switch mt-1">
+                  <input class="form-check-input" type="checkbox" role="switch"
+                    id="splitRatingsToggle" name="supportsSplitRatings" value="1"
+                    <%= course.supports_split_ratings ? 'checked' : '' %>
+                    <%= courseEditLocked ? 'disabled' : '' %> />
+                  <label class="form-check-label" for="splitRatingsToggle">
+                    Split ratings — set SI Secondary (19–36) independently per hole
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -85,7 +100,7 @@
                     <th>Par</th>
                     <th>Metres</th>
                     <th>SI Primary</th>
-                    <th>SI Secondary</th>
+                    <th id="siSecondaryHeader">SI Secondary</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -108,13 +123,22 @@
                         <input class="form-control form-control-sm" style="width:70px"
                           name="si_primary_<%= hole.id %>" type="number" min="1" max="18"
                           value="<%= hole.stroke_index_primary %>"
+                          data-hole-id="<%= hole.id %>"
                           <%= courseEditLocked ? 'disabled' : '' %> required />
                       </td>
                       <td>
-                        <input class="form-control form-control-sm" style="width:70px"
-                          name="si_secondary_<%= hole.id %>" type="number" min="19" max="36"
+                        <%# Editable input — shown when split ratings on %>
+                        <input class="form-control form-control-sm si-secondary-input <%= course.supports_split_ratings ? '' : 'd-none' %>"
+                          style="width:70px"
+                          name="si_secondary_<%= hole.id %>" type="number" min="1" max="36"
                           value="<%= hole.stroke_index_secondary %>"
-                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                          data-hole-id="<%= hole.id %>"
+                          <%= (!course.supports_split_ratings || courseEditLocked) ? 'disabled' : '' %> />
+                        <%# Calculated display — shown when split ratings off %>
+                        <span class="si-secondary-calc text-muted small <%= course.supports_split_ratings ? 'd-none' : '' %>"
+                          data-hole-id="<%= hole.id %>">
+                          <%= hole.stroke_index_primary + 18 %>
+                        </span>
                       </td>
                     </tr>
                   <% }) %>
@@ -139,6 +163,33 @@
       </div>
     </section>
   </main>
+
+  <%# Duplicate Course Modal %>
+  <div class="modal fade" id="duplicateCourseModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title fs-5">Duplicate Course</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form action="<%= tenantPath(`/admin/courses/${course.id}/duplicate`) %>" method="post">
+          <div class="modal-body">
+            <p class="text-muted small mb-3">
+              Creates a copy of <strong><%= course.course_name %></strong> with all 18 holes.
+              Useful for adding a new tee set.
+            </p>
+            <label class="form-label">New Tee Name</label>
+            <input type="text" name="teeName" class="form-control"
+              value="<%= course.tee_name %>" required autofocus />
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-legends">Duplicate</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <%# Delete Course Modal %>
   <div class="modal fade" id="deleteCourseModal" tabindex="-1" aria-hidden="true">
@@ -173,6 +224,52 @@
     }
     document.querySelectorAll('[name^="par_"]').forEach(i => i.addEventListener('input', updateParTotal));
     updateParTotal();
+
+    // Split ratings toggle
+    const splitToggle = document.getElementById('splitRatingsToggle');
+    splitToggle?.addEventListener('change', function () {
+      const isOn = this.checked;
+      const inputs  = document.querySelectorAll('.si-secondary-input');
+      const calcs   = document.querySelectorAll('.si-secondary-calc');
+
+      inputs.forEach((input) => {
+        if (isOn) {
+          // Seed from primary + 18 when first enabling
+          const holeId  = input.dataset.holeId;
+          const primary = document.querySelector(`[name="si_primary_${holeId}"]`);
+          input.value   = (parseInt(primary?.value, 10) || 0) + 18;
+          input.disabled = false;
+          input.classList.remove('d-none');
+        } else {
+          input.disabled = true;
+          input.classList.add('d-none');
+        }
+      });
+
+      calcs.forEach((span) => {
+        if (isOn) {
+          span.classList.add('d-none');
+        } else {
+          // Refresh displayed calc from current primary value
+          const holeId  = span.dataset.holeId;
+          const primary = document.querySelector(`[name="si_primary_${holeId}"]`);
+          span.textContent = (parseInt(primary?.value, 10) || 0) + 18;
+          span.classList.remove('d-none');
+        }
+      });
+    });
+
+    // Keep calc spans in sync when primary changes (split ratings off)
+    document.querySelectorAll('[data-hole-id]').forEach((input) => {
+      if (!input.name?.startsWith('si_primary_')) return;
+      input.addEventListener('input', function () {
+        const holeId = this.dataset.holeId;
+        const calc   = document.querySelector(`.si-secondary-calc[data-hole-id="${holeId}"]`);
+        if (calc && !calc.classList.contains('d-none')) {
+          calc.textContent = (parseInt(this.value, 10) || 0) + 18;
+        }
+      });
+    });
   </script>
 </body>
 </html>

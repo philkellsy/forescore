@@ -46,7 +46,7 @@
     <% if (!primaryCourses.length) { %>
       <div class="alert alert-warning">
         No <%= tour.gender === 'womens' ? "women's" : "men's" %> courses configured.
-        <a href="<%= tenantPath('/admin/courses') %>">Add a course</a> first.
+        <a href="<%= tenantPath('/admin/courses') %>" target="_blank">Add a course</a> first.
       </div>
     <% } else { %>
       <%
@@ -69,7 +69,12 @@
             </div>
 
             <div class="mb-3">
-              <label class="form-label"><%= tour.gender === 'mixed' ? "Men's Course" : "Course" %></label>
+              <div class="d-flex justify-content-between align-items-baseline mb-1">
+                <label class="form-label mb-0"><%= tour.gender === 'mixed' ? "Men's Course" : "Course" %></label>
+                <a href="<%= tenantPath('/admin/courses') %>" target="_blank" class="small text-muted">
+                  <i class="fa-solid fa-arrow-up-right-from-square me-1" style="font-size:.7rem"></i>Manage courses
+                </a>
+              </div>
               <select name="courseId" class="form-select" required>
                 <option value="">Select course...</option>
                 <% primaryCourses.forEach((c) => { %>
@@ -82,7 +87,12 @@
 
             <% if (tour.gender === 'mixed') { %>
               <div class="mb-3">
-                <label class="form-label">Women's Course</label>
+                <div class="d-flex justify-content-between align-items-baseline mb-1">
+                  <label class="form-label mb-0">Women's Course</label>
+                  <a href="<%= tenantPath('/admin/courses') %>" target="_blank" class="small text-muted">
+                    <i class="fa-solid fa-arrow-up-right-from-square me-1" style="font-size:.7rem"></i>Manage courses
+                  </a>
+                </div>
                 <select name="femaleCourseId" class="form-select">
                   <option value="">Select course...</option>
                   <% womensCourses.forEach((c) => { %>
