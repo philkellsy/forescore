@@ -12,6 +12,7 @@ const {
   consumeLoginCode,
 } = require('../services/auth/login-code.service');
 const { sendLoginCode } = require('../services/auth/mailer.service');
+const { logSessionEvent } = require('../services/auth/session-logger.service');
 const { isProd } = require('../config/env');
 const { LOGIN_CODE_EXPIRY_MINUTES, LOGIN_CODE_LENGTH } = require('../config/constants');
 
@@ -248,6 +249,7 @@ function authRouter(db) {
       const codeRow = await consumeLoginCode(db, Number(user.id), code);
       if (!codeRow) {
         const remaining = await getResendRemainingSeconds(db, Number(user.id));
+        await logSessionEvent(db, { event: 'code_invalid', userId: user.id, tenantId: req.tenant?.id, req });
         return renderLogin(res.status(400), {
           codeStage: true,
           sent: true,
@@ -261,6 +263,7 @@ function authRouter(db) {
       // Super admins can log in to any tenant — no membership check required
       if (user.is_super_admin) {
         await establishSession(req, res, next, user, { rememberMe });
+        await logSessionEvent(db, { event: 'login_success', userId: user.id, tenantId: null, req });
         req.session.pendingLoginLookup = null;
         req.session.pendingRememberMe = null;
         return res.redirect('/');
@@ -272,12 +275,14 @@ function authRouter(db) {
         .first();
 
       if (!membership) {
+        await logSessionEvent(db, { event: 'no_membership', userId: user.id, tenantId: req.tenant.id, req });
         return renderLogin(res.status(403), {
           error: `You don't have access to ${req.tenant.name}. Contact your tour administrator.`,
         });
       }
 
       await establishSession(req, res, next, user, { rememberMe });
+      await logSessionEvent(db, { event: 'login_success', userId: user.id, tenantId: req.tenant.id, req });
       req.session.pendingLoginLookup = null;
       req.session.pendingRememberMe = null;
       return res.redirect(`/${req.tenant.slug}/`);
@@ -286,8 +291,11 @@ function authRouter(db) {
     }
   });
 
-  router.post('/logout', (req, res) => {
+  router.post('/logout', async (req, res) => {
     const slug = req.tenant?.slug;
+    const userId = req.session?.user?.id ?? null;
+    const tenantId = req.tenant?.id ?? null;
+    await logSessionEvent(db, { event: 'logout', userId, tenantId, req });
     req.session.destroy(() => {
       res.clearCookie('connect.sid');
       res.clearCookie(LOGIN_LOOKUP_COOKIE, { sameSite: 'lax', secure: isProd, path: '/' });

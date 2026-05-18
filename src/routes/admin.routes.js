@@ -108,6 +108,13 @@ function adminRouter(db) {
   // Used for shared resources like courses and player roster.
   const anyAdminGuard = [requireAuth, requireDashboardAccess];
 
+  function requireSuperAdmin(req, res, next) {
+    if (req.session?.user?.isSuperAdmin) return next();
+    return forbidden(res);
+  }
+
+  const superAdminGuard = [requireAuth, requireSuperAdmin];
+
   // -------------------------------------------------------------------------
   // Dashboard — tour list
   // -------------------------------------------------------------------------
@@ -1345,6 +1352,50 @@ function adminRouter(db) {
   // -------------------------------------------------------------------------
   // Members — list
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Session logs
+  // -------------------------------------------------------------------------
+  router.get('/session-logs', superAdminGuard, async (req, res, next) => {
+    try {
+      const PAGE_SIZE = 50;
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const userId = req.query.userId ? parseInt(req.query.userId, 10) : null;
+
+      const query = db('session_logs as sl')
+        .leftJoin('users as u', 'u.id', 'sl.user_id')
+        .where('sl.tenant_id', req.tenant.id)
+        .select(
+          'sl.id', 'sl.event', 'sl.ip_address', 'sl.user_agent', 'sl.created_at',
+          'u.id as userId', 'u.first_name', 'u.last_name', 'u.email'
+        )
+        .orderBy('sl.created_at', 'desc');
+
+      if (userId) query.where('sl.user_id', userId);
+
+      const [{ count }] = await query.clone().count('sl.id as count');
+      const logs = await query.limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
+
+      const members = await db('tenant_memberships as m')
+        .join('users as u', 'u.id', 'm.user_id')
+        .where('m.tenant_id', req.tenant.id)
+        .select('u.id', 'u.first_name', 'u.last_name', 'u.email')
+        .orderBy(['u.first_name', 'u.last_name']);
+
+      res.render('admin/session-logs', {
+        title: 'Session Logs',
+        user: req.session.user,
+        logs,
+        members,
+        page,
+        pageSize: PAGE_SIZE,
+        total: Number(count),
+        filterUserId: userId,
+        message: req.query.message || null,
+        error: req.query.error || null,
+      });
+    } catch (err) { next(err); }
+  });
+
   router.get('/players', guard, async (req, res, next) => {
     try {
       const members = await db('tenant_memberships as m')
@@ -1638,6 +1689,23 @@ function adminRouter(db) {
       const course = await db('courses').where({ id: courseId, tenant_id: req.tenant.id }).first();
       if (!course) return res.status(404).send('Course not found');
 
+      // Tour admins cannot edit a course that is currently assigned to an open round
+      if (!isTenantAdmin(req.tenantMembership)) {
+        const openRound = await db('golf_rounds as gr')
+          .join('tours as t', 't.id', 'gr.tour_id')
+          .where('t.tenant_id', req.tenant.id)
+          .where('gr.status', 'open')
+          .where(function () {
+            this.where('gr.course_id', courseId).orWhere('gr.female_course_id', courseId);
+          })
+          .first();
+        if (openRound) {
+          return res.redirect(
+            `${res.locals.tenantPath('/admin/courses')}?error=${encodeURIComponent('This course is in use in an open round and cannot be edited right now.')}`
+          );
+        }
+      }
+
       const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
 
       const hasScores = await db('scorecard_holes as sh')
@@ -1668,6 +1736,18 @@ function adminRouter(db) {
       const courseId = parseInt(req.params.courseId, 10);
       const course = await db('courses').where({ id: courseId, tenant_id: req.tenant.id }).first();
       if (!course) return res.status(404).send('Course not found');
+
+      if (!isTenantAdmin(req.tenantMembership)) {
+        const openRound = await db('golf_rounds as gr')
+          .join('tours as t', 't.id', 'gr.tour_id')
+          .where('t.tenant_id', req.tenant.id)
+          .where('gr.status', 'open')
+          .where(function () {
+            this.where('gr.course_id', courseId).orWhere('gr.female_course_id', courseId);
+          })
+          .first();
+        if (openRound) return res.status(403).send('Course is in use in an open round');
+      }
 
       const courseName = String(req.body.courseName || '').trim();
       const teeName = String(req.body.teeName || '').trim();

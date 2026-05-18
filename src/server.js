@@ -44,6 +44,22 @@ async function checkBrevoOnStartup() {
   }
 }
 
+const SESSION_LOG_RETENTION_DAYS = 180;
+const SESSION_LOG_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function cleanupSessionLogs() {
+  try {
+    const deleted = await db('session_logs')
+      .where('created_at', '<', db.raw(`NOW() - INTERVAL '${SESSION_LOG_RETENTION_DAYS} days'`))
+      .delete();
+    if (deleted > 0) {
+      console.log('[session-log] cleanup_complete', { deleted, retentionDays: SESSION_LOG_RETENTION_DAYS });
+    }
+  } catch (err) {
+    console.error('[session-log] cleanup_failed', err?.message);
+  }
+}
+
 async function start() {
   await bootstrap(db);
   const app = createApp({ db });
@@ -51,6 +67,8 @@ async function start() {
   app.listen(port, () => {
     console.log(`ForeScore listening on http://localhost:${port}`);
     checkBrevoOnStartup();
+    cleanupSessionLogs();
+    setInterval(cleanupSessionLogs, SESSION_LOG_CLEANUP_INTERVAL_MS);
   });
 }
 
