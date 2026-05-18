@@ -34,9 +34,9 @@
 
     <% if (message) { %><div class="alert alert-success"><%= message %></div><% } %>
     <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
-    <% if (courseEditLocked) { %>
+    <% if (holesLocked) { %>
       <div class="alert alert-warning">
-        <i class="fa-solid fa-lock me-1"></i>Editing locked — scores have been entered using this course.
+        <i class="fa-solid fa-lock me-1"></i>Hole data is locked — scores have been entered using this course. Course name and ratings can still be updated.
       </div>
     <% } %>
 
@@ -48,18 +48,16 @@
               <div class="col-12 col-md-6">
                 <label class="form-label">Course Name</label>
                 <input class="form-control" name="courseName" type="text"
-                  value="<%= course.course_name %>"
-                  <%= courseEditLocked ? 'disabled' : '' %> required />
+                  value="<%= course.course_name %>" required />
               </div>
               <div class="col-12 col-md-3">
                 <label class="form-label">Tee Name</label>
                 <input class="form-control" name="teeName" type="text"
-                  value="<%= course.tee_name %>"
-                  <%= courseEditLocked ? 'disabled' : '' %> required />
+                  value="<%= course.tee_name %>" required />
               </div>
               <div class="col-12 col-md-3">
                 <label class="form-label">Gender</label>
-                <select class="form-select" name="gender" <%= courseEditLocked ? 'disabled' : '' %>>
+                <select class="form-select" name="gender">
                   <option value="mens" <%= course.gender === 'mens' ? 'selected' : '' %>>Men's</option>
                   <option value="womens" <%= course.gender === 'womens' ? 'selected' : '' %>>Women's</option>
                   <option value="open" <%= course.gender === 'open' ? 'selected' : '' %>>Open (all)</option>
@@ -68,21 +66,19 @@
               <div class="col-6 col-md-3">
                 <label class="form-label">Course Rating</label>
                 <input class="form-control" name="courseRating" type="number" step="0.1" min="50" max="85"
-                  value="<%= course.course_rating != null ? course.course_rating : '' %>"
-                  <%= courseEditLocked ? 'disabled' : '' %> />
+                  value="<%= course.course_rating != null ? course.course_rating : '' %>" />
               </div>
               <div class="col-6 col-md-3">
                 <label class="form-label">Slope Rating</label>
                 <input class="form-control" name="slopeRating" type="number" min="55" max="155"
-                  value="<%= course.slope_rating != null ? course.slope_rating : '' %>"
-                  <%= courseEditLocked ? 'disabled' : '' %> />
+                  value="<%= course.slope_rating != null ? course.slope_rating : '' %>" />
               </div>
               <div class="col-12">
                 <div class="form-check form-switch mt-1">
                   <input class="form-check-input" type="checkbox" role="switch"
                     id="splitRatingsToggle" name="supportsSplitRatings" value="1"
                     <%= course.supports_split_ratings ? 'checked' : '' %>
-                    <%= courseEditLocked ? 'disabled' : '' %> />
+                    <%= holesLocked ? 'disabled' : '' %> />
                   <label class="form-check-label" for="splitRatingsToggle">
                     Split ratings — set SI Secondary (19–36) independently per hole
                   </label>
@@ -111,20 +107,20 @@
                         <input class="form-control form-control-sm" style="width:70px"
                           name="par_<%= hole.id %>" type="number" min="3" max="5"
                           value="<%= hole.par %>"
-                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                          <%= holesLocked ? 'disabled' : '' %> required />
                       </td>
                       <td>
                         <input class="form-control form-control-sm" style="width:80px"
                           name="meters_<%= hole.id %>" type="number" min="50" max="700"
                           value="<%= hole.length_meters || '' %>"
-                          <%= courseEditLocked ? 'disabled' : '' %> />
+                          <%= holesLocked ? 'disabled' : '' %> />
                       </td>
                       <td>
                         <input class="form-control form-control-sm" style="width:70px"
                           name="si_primary_<%= hole.id %>" type="number" min="1" max="18"
                           value="<%= hole.stroke_index_primary %>"
                           data-hole-id="<%= hole.id %>"
-                          <%= courseEditLocked ? 'disabled' : '' %> required />
+                          <%= holesLocked ? 'disabled' : '' %> required />
                       </td>
                       <td>
                         <%# Editable input — shown when split ratings on %>
@@ -154,11 +150,9 @@
             </div>
           <% } %>
 
-          <% if (!courseEditLocked) { %>
-            <div class="p-3 border-top d-flex justify-content-end">
-              <button class="btn btn-legends" type="submit">Save Course</button>
-            </div>
-          <% } %>
+          <div class="p-3 border-top d-flex justify-content-end">
+            <button class="btn btn-legends" type="submit">Save Course</button>
+          </div>
         </form>
       </div>
     </section>

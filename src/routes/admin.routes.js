@@ -1656,6 +1656,7 @@ function adminRouter(db) {
         course,
         holes,
         courseEditLocked: Boolean(hasScores),
+        holesLocked: Boolean(hasScores),
         message: req.query.message || null,
         error: req.query.error || null,
       });
@@ -1687,25 +1688,37 @@ function adminRouter(db) {
         supports_split_ratings: supportsSplitRatings,
       });
 
-      const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
-      await db.transaction(async (trx) => {
-        for (const hole of holes) {
-          const par = parseInt(req.body[`par_${hole.id}`], 10);
-          const meters = req.body[`meters_${hole.id}`] !== '' ? parseInt(req.body[`meters_${hole.id}`], 10) : null;
-          const siP = parseInt(req.body[`si_primary_${hole.id}`], 10);
-          const siS = supportsSplitRatings
-            ? parseInt(req.body[`si_secondary_${hole.id}`], 10)
-            : siP + 18;
-          if (Number.isFinite(par) && Number.isFinite(siP)) {
-            await trx('holes').where({ id: hole.id }).update({
-              par,
-              length_meters: Number.isFinite(meters) ? meters : null,
-              stroke_index_primary: siP,
-              stroke_index_secondary: siS,
-            });
+      const hasScores = await db('scorecard_holes as sh')
+        .join('scorecards as s', 's.id', 'sh.scorecard_id')
+        .join('golf_rounds as gr', function joinGr() {
+          this.on('gr.tour_id', '=', 's.tour_id').andOn('gr.round_number', '=', 's.round_number');
+        })
+        .join('tours as t', 't.id', 's.tour_id')
+        .where('t.tenant_id', req.tenant.id)
+        .where('gr.course_id', courseId)
+        .first();
+
+      if (!hasScores) {
+        const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
+        await db.transaction(async (trx) => {
+          for (const hole of holes) {
+            const par = parseInt(req.body[`par_${hole.id}`], 10);
+            const meters = req.body[`meters_${hole.id}`] !== '' ? parseInt(req.body[`meters_${hole.id}`], 10) : null;
+            const siP = parseInt(req.body[`si_primary_${hole.id}`], 10);
+            const siS = supportsSplitRatings
+              ? parseInt(req.body[`si_secondary_${hole.id}`], 10)
+              : siP + 18;
+            if (Number.isFinite(par) && Number.isFinite(siP)) {
+              await trx('holes').where({ id: hole.id }).update({
+                par,
+                length_meters: Number.isFinite(meters) ? meters : null,
+                stroke_index_primary: siP,
+                stroke_index_secondary: siS,
+              });
+            }
           }
-        }
-      });
+        });
+      }
 
       res.redirect(`${res.locals.tenantPath(`/admin/courses/${courseId}`)}?message=Course+saved`);
     } catch (err) { next(err); }
