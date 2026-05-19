@@ -377,7 +377,7 @@ function superAdminRouter(db) {
       if (tenantId) query.where('sl.tenant_id', tenantId);
       if (userId) query.where('sl.user_id', userId);
 
-      const [{ count }] = await query.clone().clearSelect().count('sl.id as count');
+      const [{ count }] = await query.clone().clearSelect().clearOrder().count('sl.id as count');
       const logs = await query.limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
 
       const tenants = await db('tenants').select('id', 'name', 'slug').orderBy('name');

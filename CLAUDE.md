@@ -80,8 +80,8 @@ resolved fresh from DB on each request via tenant middleware).
 
 ## Super admins
 
-`users.is_super_admin` (boolean, migration 003) — a cross-tenant flag, not a role. Multiple
-super admins are supported.
+`users.is_super_admin` (boolean) — a cross-tenant flag, not a role. Multiple super admins
+are supported.
 
 Super admin login lives at `/auth/login` (no tenant slug) and is handled by
 `src/routes/super-admin.routes.js`. After login, super admins land at `/` which renders
@@ -97,6 +97,9 @@ indistinguishable from a real owner membership at the middleware layer.
 
 `POST /tenants` (create tenant) requires super admin. Tenant creation redirects to the
 new tenant's admin page.
+
+Super admin nav links: tenant picker (`/`), all-tours list (`/tours`), system-wide session
+logs (`/session-logs`).
 
 ## Key domain concepts
 
@@ -198,36 +201,38 @@ src/
     authorize.js     requireRole(...roles) + requireMinRole(minRole)
     rate-limit.js    Auth endpoint rate limiter
   routes/
-    auth.routes.js        Login/logout — tenant-aware, checks membership on verify
-    super-admin.routes.js Global auth (/auth/login, /auth/send-code, /auth/verify-code), tenant picker (/), create tenant (/tenants)
-    admin.routes.js       /:tenantSlug/admin — tour setup, round config, player roster, members, tee times
+    auth.routes.js        Login/logout — tenant-aware, checks membership on verify; logs session events
+    super-admin.routes.js Global auth (/auth/login, /auth/send-code, /auth/verify-code), tenant picker (/),
+                          create tenant (/tenants), all-tours list (/tours), session logs (/session-logs)
+    admin.routes.js       /:tenantSlug/admin — tour setup, round config, player roster, members, tee times,
+                          courses (split ratings, duplication), session logs (super admin only)
   services/
+    auth/
+      login-code.service.js          createLoginCode, consumeLoginCode, findUserByLookup
+      session-logger.service.js      logSessionEvent — fire-and-forget DB write to session_logs
+      mailer.service.js              sendLoginCode, sendEmailChangeCode (uses HTML template skin)
+    email/templates/
+      login-code.js                  HTML email template for sign-in OTP
+      email-change.js                HTML email template for email-change OTP
+      layout.js                      Shared HTML email wrapper/skin
     event-status.service.js          canActivate, canComplete
     scoring/
       handicap.service.js            strokesForHole, computeCourseHandicap
       stableford-leaderboard.service.js  calculateStablefordLeaderboards (dynamic rounds + bestOf)
       group-generator.service.js     groupSizes, distributeGroups, reverseLeaderboardGroups
   views/
-    super-admin/     login.ejs, tenants.ejs — global super admin UI
+    super-admin/     login.ejs, tenants.ejs, session-logs.ejs — global super admin UI
     admin/           dashboard.ejs, tour-detail.ejs, round-config.ejs, tour-setup.ejs,
-                     members.ejs, tee-times.ejs, courses.ejs, course-edit.ejs, course-import.ejs
+                     members.ejs, tee-times.ejs, courses.ejs, course-edit.ejs, course-import.ejs,
+                     session-logs.ejs (tenant-scoped, super admin only)
     admin/partials/  player-hcp-row.ejs — handicap display + round override inline form
     partials/nav.ejs ForeScore branding, tenantPath() URLs, role-based admin link
   public/            Static assets, PWA manifest + service worker
 migrations/
-  001_tenants_users_auth_courses.js   Baseline schema
-  002_events_and_scoring.js           Baseline events/scoring schema (pre-rename; run before 012)
-  003_super_admin.js                  is_super_admin on users
-  004_course_ratings.js               slope_rating + course_rating on courses
-  005_event_status.js                 status enum (draft/active/completed) + is_paid/paid_at
-  006_event_config.js                 skins_enabled, leaderboard_best_of_rounds, leaderboard_last_round_required
-  007_rest_days.js                    rest_days integer[] on events (removed by 012)
-  008_prize_config.js                 calcutta_enabled, tour_prizes, daily_prizes jsonb; ambrose_prizes on days
-  009_tee_times.js                    two_ball_enabled/type on event_day_statuses; player_day_handicaps table
-  010_day_dates.js                    date column on event_day_statuses (becomes tour_date in 012)
-  011_remove_sultans_and_prev_winner.js  Drops is_previous_year_winner from event_players
-  012_events_to_tours.js              Renames events→tours, event_day_statuses→golf_rounds, event_id→tour_id,
-                                      day→round_number; drops start_date/end_date/rest_days; adds itinerary_items
+  001_initial_schema.js         Consolidated baseline — all tables (tenants, users, tours, courses,
+                                  scoring, tee times, calcutta, skins, leaderboard, itinerary, etc.)
+  002_course_split_ratings.js   supports_split_ratings boolean on courses (default false)
+  003_session_logs.js           session_logs table with indexes on user_id, tenant_id, created_at
   legacy/            Archived SQLite migrations from Legends — reference only
 test/
   helpers/
@@ -266,20 +271,26 @@ All DB access goes through `src/db/repositories/`. Each file exports pure functi
 ## What's built vs pending
 
 ### Built ✅
-- Postgres schema (15 migrations, all tables)
+- Postgres schema (3 migrations: consolidated baseline + 2 additive)
 - Tenant middleware + `/:tenantSlug` router
 - Auth flow (login codes, tenant membership check, Postgres session store)
 - `requireAuth`, `requireRole`, `requireMinRole` middleware
 - `bootstrap.js` — seeds `init` tenant + Phil (is_super_admin) as owner in dev (email: phil@kellsy.com)
 - Repository layer (18 repositories)
-- **Super admin**: global login, tenant picker, create tenant, tours list, payment approval
+- **Email templates** — HTML skin (`layout.js`) used for sign-in OTP and email-change OTP emails
+- **Session logging** — all auth events (login_success, logout, code_invalid, no_membership) written to `session_logs`; cleanup job deletes rows older than 180 days on startup and every 24h
+- **Super admin**: global login, tenant picker, create tenant, tours list, payment approval, system-wide session logs (`/session-logs` — filterable by tenant)
 - **Admin routes** (`/:tenantSlug/admin`):
   - Tour CRUD (create/edit/activate/complete) — `/admin/tours/:tourId`
   - Round configuration (course, calc_type, status, tour_date, leaderboard publish, 2-ball, ambrose prizes) — `/admin/tours/:tourId/rounds/:roundNumber`
+  - Round config has "Manage courses" link (opens new tab) next to each course dropdown
   - Tour setup (leaderboard rules, skins, prizes, calcutta) — `/admin/tours/:tourId/setup`
   - Player roster (add/edit handicap/remove)
   - Member management
-  - Courses (create/edit/holes/import from API)
+  - Courses (create/edit/holes/import from API, duplicate tee set)
+    - `supports_split_ratings`: when off, SI Secondary = Primary + 18 (computed); when on, all 36 SI values editable independently
+    - Hole data locked (par, metres, SI) when scores exist — metadata (name, tee, ratings) always editable
+    - Tour admins can edit courses not currently assigned to an open round
   - **Tee times**: manual groups, player assignment, generate (distribute/reverse leaderboard), round handicap overrides, round subnav
   - **Itinerary**: create/edit/delete items by type (golf, accommodation, transfer, meal, activity, note) — `/admin/tours/:tourId/itinerary`
 - Services: `event-status`, `handicap` (strokesForHole + computeCourseHandicap), `stableford-leaderboard`, `group-generator`
@@ -293,7 +304,7 @@ All DB access goes through `src/db/repositories/`. Each file exports pure functi
   - `ensureRoundScorecards` creates individual (and team) scorecards when a round is opened
 - `src/services/events/day-label.service.js` — `dayLabel(roundNumber)` returns `"Day N"`
 - Player dashboard (`/:tenantSlug/`) — shows active tour, open round, scorecard links
-- Leaderboard routes (`/:tenantSlug/leaderboards`) — stableford championship + day boards, eclectic, skins, ambrose
+- Leaderboard routes (`/:tenantSlug/leaderboards`) — stableford championship + day boards, eclectic, skins, ambrose; shows "not yet released" message when no boards published
 - Test suite (56 unit tests passing)
 
 ### Planned (not yet started)
@@ -310,11 +321,13 @@ Refresh the SQL dump: `bash scripts/dump-schema.sh` → writes `docs/schema.sql`
 MCP Postgres server is configured in [.vscode/mcp.json](.vscode/mcp.json) for in-session DB queries.
 
 Key schema notes:
-- `event_players` table is still named that in the DB (not renamed by migration 012)
+- `event_players` table is still named that in the DB (not renamed by original migration)
 - `golf_rounds` id sequence is still named `event_day_statuses_id_seq` internally
 - `tours` id sequence is still named `events_id_seq` internally
 - `golf_rounds.female_course_id` is the women's tee set for mixed tours (nullable)
 - `courses.gender` (`mens|womens|open`) filters round-config course dropdowns
+- `courses.supports_split_ratings` (boolean, default false) — controls whether SI Secondary is editable or auto-computed
+- `session_logs` — auth event log; 180-day retention enforced by server.js cleanup job
 
 ## Environment variables
 

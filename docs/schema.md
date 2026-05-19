@@ -70,6 +70,7 @@ erDiagram
         varchar gender "mens|womens|open"
         numeric course_rating
         int slope_rating
+        boolean supports_split_ratings
         int api_course_id
         varchar api_tee_key
     }
@@ -254,6 +255,15 @@ erDiagram
         jsonb details
         int sort_order
     }
+    session_logs {
+        int id PK
+        int user_id FK
+        int tenant_id FK
+        varchar event "login_success|logout|code_invalid|no_membership"
+        varchar ip_address
+        text user_agent
+        timestamptz created_at
+    }
 
     tenants ||--o{ tenant_memberships : ""
     tenants ||--o{ tours : ""
@@ -295,6 +305,8 @@ erDiagram
     scorecards ||--o{ scorecard_edit_logs : ""
     scorecards ||--o{ ambrose_drives : ""
     novelty_events ||--o{ novelty_results : ""
+    users ||--o{ session_logs : ""
+    tenants ||--o{ session_logs : ""
 ```
 
 ## Table Descriptions
@@ -321,7 +333,7 @@ erDiagram
 
 ### Courses
 
-**`courses`** — Each row is a specific tee set at a course (e.g. "Bonville — Blue Tees"). `gender` (`mens|womens|open`) determines which picker it appears in — `open` shows in both men's and women's dropdowns. `api_course_id` and `api_tee_key` link to the external Golf Course API; `api_tee_key` uses `m:`/`f:` prefix for API calls (separate from stored `gender`). `course_rating` and `slope_rating` are used for WHS handicap calculation.
+**`courses`** — Each row is a specific tee set at a course (e.g. "Bonville — Blue Tees"). `gender` (`mens|womens|open`) determines which picker it appears in — `open` shows in both men's and women's dropdowns. `api_course_id` and `api_tee_key` link to the external Golf Course API; `api_tee_key` uses `m:`/`f:` prefix for API calls (separate from stored `gender`). `course_rating` and `slope_rating` are used for WHS handicap calculation. `supports_split_ratings` (boolean, default false) — when false, `stroke_index_secondary` is computed as `stroke_index_primary + 18` and not stored independently; when true, all 36 SI values are editable and stored.
 
 **`holes`** — 18 (or 9) holes per course. `stroke_index_primary` (1–18) is the standard SI; `stroke_index_secondary` (19–36) is used when a player's handicap exceeds 18 strokes.
 
@@ -374,3 +386,7 @@ erDiagram
 ### Leaderboard
 
 **`leaderboard_snapshots`** — Cached leaderboard payloads. `competition_type` identifies which board (championship, day, eclectic, skins, ambrose). Rebuilt when `tours.leaderboard_dirty_at` is set.
+
+### Auth / session
+
+**`session_logs`** — Immutable audit log of auth events. `event` values: `login_success`, `logout`, `code_invalid`, `no_membership`. `tenant_id` is null for super admin logins (which have no tenant context). Rows older than 180 days are deleted by a cleanup job in `server.js` that runs on startup and every 24 hours. Viewable system-wide at `/session-logs` (super admin only).
