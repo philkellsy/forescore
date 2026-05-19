@@ -1372,7 +1372,7 @@ function adminRouter(db) {
 
       if (userId) query.where('sl.user_id', userId);
 
-      const [{ count }] = await query.clone().count('sl.id as count');
+      const [{ count }] = await query.clone().clearSelect().count('sl.id as count');
       const logs = await query.limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
 
       const members = await db('tenant_memberships as m')
