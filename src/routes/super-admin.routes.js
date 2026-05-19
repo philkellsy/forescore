@@ -355,6 +355,50 @@ function superAdminRouter(db) {
   });
 
   // -------------------------------------------------------------------------
+  // Session logs — system-wide
+  // -------------------------------------------------------------------------
+  router.get('/session-logs', requireSuperAdmin, async (req, res, next) => {
+    try {
+      const PAGE_SIZE = 50;
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const tenantId = req.query.tenantId ? parseInt(req.query.tenantId, 10) : null;
+      const userId = req.query.userId ? parseInt(req.query.userId, 10) : null;
+
+      const query = db('session_logs as sl')
+        .leftJoin('users as u', 'u.id', 'sl.user_id')
+        .leftJoin('tenants as t', 't.id', 'sl.tenant_id')
+        .select(
+          'sl.id', 'sl.event', 'sl.ip_address', 'sl.user_agent', 'sl.created_at',
+          'u.id as userId', 'u.first_name', 'u.last_name', 'u.email',
+          't.id as tenantId', 't.name as tenant_name', 't.slug as tenant_slug'
+        )
+        .orderBy('sl.created_at', 'desc');
+
+      if (tenantId) query.where('sl.tenant_id', tenantId);
+      if (userId) query.where('sl.user_id', userId);
+
+      const [{ count }] = await query.clone().count('sl.id as count');
+      const logs = await query.limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE);
+
+      const tenants = await db('tenants').select('id', 'name', 'slug').orderBy('name');
+
+      return res.render('super-admin/session-logs', {
+        title: 'Session Logs',
+        user: req.session.user,
+        logs,
+        tenants,
+        page,
+        pageSize: PAGE_SIZE,
+        total: Number(count),
+        filterTenantId: tenantId,
+        filterUserId: userId,
+        message: req.query.message || null,
+        error: req.query.error || null,
+      });
+    } catch (err) { return next(err); }
+  });
+
+  // -------------------------------------------------------------------------
   // Tours — all tours across all tenants, payment management
   // -------------------------------------------------------------------------
   router.get('/tours', requireSuperAdmin, async (req, res, next) => {
