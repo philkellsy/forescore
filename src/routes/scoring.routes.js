@@ -8,6 +8,7 @@ const { canEditAllScores } = require('../services/permissions/scoring-permission
 const { upsertHoleScore, ScoreConflictError } = require('../services/scoring/score-entry.service');
 const { stablefordPoints } = require('../services/scoring/stableford.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
+const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
 const { computeCourseHandicap } = require('../services/scoring/handicap.service');
 
@@ -150,7 +151,9 @@ async function getOrCreateRoundStatus(db, tourId, roundNumber) {
   let row = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
   if (!row) {
     const tour = await db('tours').where({ id: tourId }).first();
-    const defaultCourse = await db('courses').where({ tenant_id: tour?.tenant_id }).orderBy('id', 'asc').first();
+    const defaultCourse = await db('courses')
+      .where(tour?.tenant_id === TEST_TENANT_ID ? {} : { tenant_id: tour?.tenant_id })
+      .orderBy('id', 'asc').first();
     if (!defaultCourse) throw new Error('No courses configured');
     await db('golf_rounds').insert({
       tour_id: tourId,

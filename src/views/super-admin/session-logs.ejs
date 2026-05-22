@@ -24,6 +24,9 @@
           <small class="text-light"><%= user.firstName %> <%= user.lastName %></small>
           <a href="/tours" class="btn btn-sm btn-outline-light">Tours</a>
           <a href="/session-logs" class="btn btn-sm btn-outline-light active">Session Logs</a>
+          <form action="/auth/logout" method="post" class="m-0">
+            <button type="submit" class="btn btn-sm btn-outline-light">Sign out</button>
+          </form>
         </div>
       <% } %>
     </div>
@@ -81,11 +84,9 @@
                 <% logs.forEach((log) => { %>
                   <tr>
                     <td class="ps-3 text-nowrap small text-muted">
-                      <%= new Date(log.created_at).toLocaleString('en-AU', {
-                        year: 'numeric', month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit', second: '2-digit',
-                        hour12: false
-                      }) %>
+                      <span class="local-time" data-utc="<%= new Date(log.created_at).toISOString() %>">
+                        <%= new Date(log.created_at).toISOString() %>
+                      </span>
                     </td>
                     <td>
                       <% if (log.event === 'login_success') { %>
@@ -163,5 +164,14 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script>
+    document.querySelectorAll('.local-time').forEach((el) => {
+      const d = new Date(el.dataset.utc);
+      el.textContent = d.toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
+    });
+  </script>
 </body>
 </html>

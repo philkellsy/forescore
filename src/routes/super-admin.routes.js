@@ -12,6 +12,7 @@ const {
   consumeLoginCode,
 } = require('../services/auth/login-code.service');
 const { sendLoginCode } = require('../services/auth/mailer.service');
+const { logSessionEvent } = require('../services/auth/session-logger.service');
 const { isProd } = require('../config/env');
 const { LOGIN_CODE_EXPIRY_MINUTES, LOGIN_CODE_LENGTH } = require('../config/constants');
 
@@ -183,6 +184,18 @@ function superAdminRouter(db) {
 
       return res.redirect('/');
     } catch (err) { return next(err); }
+  });
+
+  // -------------------------------------------------------------------------
+  // Logout
+  // -------------------------------------------------------------------------
+  router.post('/auth/logout', async (req, res) => {
+    const userId = req.session?.user?.id ?? null;
+    await logSessionEvent(db, { event: 'logout', userId, tenantId: null, req });
+    req.session.destroy(() => {
+      res.clearCookie('connect.sid');
+      res.redirect('/auth/login');
+    });
   });
 
   // -------------------------------------------------------------------------

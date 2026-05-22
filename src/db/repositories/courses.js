@@ -1,11 +1,15 @@
 'use strict';
 
+const { TEST_TENANT_ID } = require('../../config/constants');
+
 async function findById(db, id) {
   return db('courses').where({ id }).first();
 }
 
 async function findByTenant(db, tenantId) {
-  return db('courses').where({ tenant_id: tenantId }).orderBy('course_name');
+  const q = db('courses').orderBy('course_name');
+  if (tenantId !== TEST_TENANT_ID) q.where({ tenant_id: tenantId });
+  return q;
 }
 
 async function create(db, data) {

@@ -320,6 +320,10 @@ Refresh the SQL dump: `bash scripts/dump-schema.sh` → writes `docs/schema.sql`
 
 MCP Postgres server is configured in [.vscode/mcp.json](.vscode/mcp.json) for in-session DB queries.
 
+## Test tenant
+
+`TEST_TENANT_ID = 1` (defined in `src/config/constants.js`). This tenant sees **all courses system-wide** — the `tenant_id` filter is bypassed in course list queries, round-config dropdowns, and course edit/duplicate lookups. Delete remains strict: the test tenant can only delete courses it actually owns. Useful for replicating cross-tenant issues and testing with real course data from other tenants.
+
 Key schema notes:
 - `event_players` table is still named that in the DB (not renamed by original migration)
 - `golf_rounds` id sequence is still named `event_day_statuses_id_seq` internally

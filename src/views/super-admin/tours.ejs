@@ -22,6 +22,10 @@
       <div class="d-flex align-items-center gap-3">
         <% if (user) { %><small class="text-light"><%= user.firstName %> <%= user.lastName %></small><% } %>
         <a href="/" class="btn btn-sm btn-outline-light">Tenants</a>
+        <a href="/session-logs" class="btn btn-sm btn-outline-light">Session Logs</a>
+        <form action="/auth/logout" method="post" class="m-0">
+          <button type="submit" class="btn btn-sm btn-outline-light">Sign out</button>
+        </form>
       </div>
     </div>
   </nav>
