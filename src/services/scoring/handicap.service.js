@@ -54,6 +54,14 @@ function getCachedParByHole(tourId, roundNumber) {
   return _parByHoleCache.get(`${tourId}:${roundNumber}`) || null;
 }
 
+function isRoundCacheWarm(tourId, roundNumber) {
+  const prefix = `${tourId}:${roundNumber}:`;
+  for (const key of _roundCourseCache.keys()) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 function strokesForHole(playingHandicap, strokeIndexPrimary, strokeIndexSecondary) {
   const handicap = Math.trunc(Number(playingHandicap) || 0);
   const primary = Number(strokeIndexPrimary);
@@ -93,4 +101,5 @@ module.exports = {
   invalidateRoundCourseCache,
   getCachedCourseData,
   getCachedParByHole,
+  isRoundCacheWarm,
 };

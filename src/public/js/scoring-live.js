@@ -817,15 +817,9 @@
 
   async function navigateByOffset(offset) {
     if (isNavigating) return;
+    if (hasConflictsForHole(currentHole)) return;
     setHoleLoading(true);
     try {
-      try {
-        const beforeNav = await fetchHoleData(currentHole);
-        await render(beforeNav);
-        if (hasConflictsForHole(currentHole)) return;
-      } catch (_error) {
-        // continue navigation even if pre-check fails
-      }
       const nextIndex = currentHoleIndex() + Number(offset || 0);
       if (nextIndex > holeOrder.length - 1) {
         goToConfirmation();

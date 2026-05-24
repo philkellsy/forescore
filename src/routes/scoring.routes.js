@@ -10,7 +10,7 @@ const { stablefordPoints } = require('../services/scoring/stableford.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
 const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
-const { computeCourseHandicap, getCachedCourseData, getCachedParByHole } = require('../services/scoring/handicap.service');
+const { computeCourseHandicap, getCachedCourseData, getCachedParByHole, warmRoundCourseCache, isRoundCacheWarm } = require('../services/scoring/handicap.service');
 
 function toPlayerLabel(firstName, lastName) {
   const initial = lastName ? `${String(lastName).charAt(0)}.` : '';
@@ -1370,6 +1370,12 @@ function scoringRouter(db) {
       if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
       if (scorecard.status === 'submitted' && !isAdmin(req)) {
         return res.status(409).json({ error: 'Scorecard has been submitted and is locked' });
+      }
+
+      // Lazy-warm the module cache on first request after a process restart.
+      // isRoundCacheWarm is a pure Map scan — no DB cost when already warm.
+      if (!isRoundCacheWarm(scorecard.tour_id, scorecard.round_number)) {
+        await warmRoundCourseCache(db, scorecard.tour_id, scorecard.round_number);
       }
 
       // Fetch target group and hole config in parallel; reuse the group for the

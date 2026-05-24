@@ -3,7 +3,7 @@
 const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { strokesForHole, computeCourseHandicap, warmRoundCourseCache, invalidateRoundCourseCache, getCachedCourseData, getCachedParByHole } = require('../../src/services/scoring/handicap.service');
+const { strokesForHole, computeCourseHandicap, warmRoundCourseCache, invalidateRoundCourseCache, getCachedCourseData, getCachedParByHole, isRoundCacheWarm } = require('../../src/services/scoring/handicap.service');
 
 describe('strokesForHole', () => {
   it('returns base+remainder strokes correctly', () => {
@@ -110,6 +110,19 @@ describe('round course cache', () => {
 
   it('getCachedParByHole returns null before warming', () => {
     assert.equal(getCachedParByHole(99, 2), null);
+  });
+
+  it('isRoundCacheWarm returns false before warming and true after', async () => {
+    assert.equal(isRoundCacheWarm(99, 2), false);
+    const db = fakeDb(
+      { 10: { slope_rating: 120, course_rating: 72.5 }, 20: { slope_rating: 110, course_rating: 71.0 } },
+      { 10: { total: 72 }, 20: { total: 71 } },
+    );
+    await warmRoundCourseCache(db, 99, 1);
+    assert.equal(isRoundCacheWarm(99, 1), true);
+    assert.equal(isRoundCacheWarm(99, 2), false);
+    invalidateRoundCourseCache(99, 1);
+    assert.equal(isRoundCacheWarm(99, 1), false);
   });
 
   it('invalidateRoundCourseCache removes all entries for that round', async () => {
