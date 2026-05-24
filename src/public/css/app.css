@@ -285,7 +285,8 @@ body {
   transition: width 0.15s ease, opacity 0.3s ease 0.1s;
 }
 
-.login-version-tag {
+.login-version-tag,
+.app-version-tag {
   position: fixed;
   right: 0.65rem;
   bottom: 0.5rem;

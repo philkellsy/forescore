@@ -67,6 +67,7 @@ function createApp({ db, sessionStore } = {}) {
   app.use((req, res, next) => {
     res.locals.user = req.session?.user || null;
     res.locals.assetVersion = assetVersion;
+    res.locals.appVersion = version;
     res.locals.tenantPath = (p) => p;
     res.locals.isSuperAdmin = Boolean(req.session?.user?.isSuperAdmin);
     next();

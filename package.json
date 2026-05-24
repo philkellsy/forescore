@@ -17,7 +17,10 @@
     "audit": "npm audit --audit-level=moderate",
     "audit:offline": "npm audit --offline",
     "audit:fix": "npm audit fix",
-    "deps:update": "npm update"
+    "deps:update": "npm update",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:minor": "bash scripts/deploy.sh minor",
+    "deploy:major": "bash scripts/deploy.sh major"
   },
   "engines": {
     "node": ">=20"

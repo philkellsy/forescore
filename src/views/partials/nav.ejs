@@ -51,9 +51,15 @@
               </form>
             <% } %>
           </div>
+          <%# Version tag — visible in mobile menu only (footer handles desktop) %>
+          <div class="mt-4 d-lg-none">
+            <span class="text-muted" style="font-size:0.7rem;opacity:0.5">v<%= typeof appVersion !== 'undefined' ? appVersion : '' %></span>
+          </div>
         </div>
       </div>
     <% } %>
   </div>
 </nav>
+<%# Version tag — fixed bottom-right on desktop, hidden on mobile (menu handles it) %>
+<div class="app-version-tag d-none d-lg-block">v<%= typeof appVersion !== 'undefined' ? appVersion : '' %></div>
 <script src="/js/app.js?v=<%= assetVersion %>" defer></script>
