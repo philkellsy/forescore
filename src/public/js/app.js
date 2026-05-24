@@ -12,7 +12,7 @@ if (!window.__FORESCORE_APP_INIT__) {
     document.documentElement.appendChild(bar);
 
     let t1 = null, t2 = null, overlayTimer = null;
-    const OVERLAY_DELAY_MS = 250;
+    const OVERLAY_DELAY_MS = 80;
 
     function getOverlay() { return document.getElementById('fsPageOverlay'); }
 
@@ -46,7 +46,8 @@ if (!window.__FORESCORE_APP_INIT__) {
     return { start, done };
   })();
 
-  // Trigger on navigating links (not same-page, not new-tab, not download)
+  // Trigger on navigating links (not same-page, not new-tab, not download).
+  // Capture phase ensures we fire before Bootstrap can stopPropagation (e.g. inside offcanvas).
   document.addEventListener('click', (e) => {
     const link = e.target.closest('a[href]');
     if (!link) return;
@@ -56,7 +57,7 @@ if (!window.__FORESCORE_APP_INIT__) {
     const href = link.getAttribute('href') || '';
     if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
     loadingBar.start();
-  });
+  }, true);
 
   // Trigger on form submissions; disable submit button to prevent double-submit.
   // Add data-no-loading to a form or button to opt out (e.g. async-managed forms).

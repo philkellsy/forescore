@@ -178,15 +178,22 @@ function resolvePlayerCourseId(round, gender) {
   return Number(round.course_id);
 }
 
-async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null) {
-  const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
-  if (!round) return Math.round(Number(handicapIndex) || 0);
-  const courseId = resolvePlayerCourseId(round, gender);
-  if (!courseId) return Math.round(Number(handicapIndex) || 0);
-  const course = await db('courses').where({ id: courseId }).first();
-  if (!course) return Math.round(Number(handicapIndex) || 0);
-  const coursePar = await db('holes').where({ course_id: courseId }).sum({ total: 'par' }).first();
-  return computeCourseHandicap(handicapIndex, course.slope_rating, course.course_rating, coursePar?.total || 72);
+async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null, _cache = null) {
+  const cacheKey = `${tourId}:${roundNumber}:${gender || 'any'}`;
+  let cached = _cache?.get(cacheKey);
+  if (cached === undefined) {
+    const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
+    if (!round) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    const courseId = resolvePlayerCourseId(round, gender);
+    if (!courseId) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    const course = await db('courses').where({ id: courseId }).first();
+    if (!course) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    const coursePar = await db('holes').where({ course_id: courseId }).sum({ total: 'par' }).first();
+    cached = { course, coursePar };
+    _cache?.set(cacheKey, cached);
+  }
+  if (!cached) return Math.round(Number(handicapIndex) || 0);
+  return computeCourseHandicap(handicapIndex, cached.course.slope_rating, cached.course.course_rating, cached.coursePar?.total || 72);
 }
 
 async function getHoleConfig(db, tourId, roundNumber, holeNumber, courseIdOverride = null) {
@@ -942,6 +949,7 @@ function scoringRouter(db) {
       .whereIn('s.id', [...scorecardIds])
       .orderBy([{ column: 's.round_number', order: 'asc' }, { column: 's.id', order: 'asc' }]);
 
+    const hcpCache = new Map();
     const enrichedScorecards = await Promise.all(
       scorecards.map(async (scorecard) => {
         let otherPlayers = [];
@@ -953,7 +961,7 @@ function scoringRouter(db) {
           const roundHcp = await db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first();
           const tourHcp = await db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first();
           const idx = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-          const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, scorecard.user_gender || null);
+          const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, scorecard.user_gender || null, hcpCache);
           ownHandicapDisplay = formatHandicapDisplay(courseHcp);
         }
 
@@ -976,7 +984,7 @@ function scoringRouter(db) {
             .orderBy('u.first_name', 'asc');
           otherPlayers = await Promise.all(rawOtherPlayers.map(async (p) => {
             const idx = p.round_handicap_index != null ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
-            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, p.gender || null);
+            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, p.gender || null, hcpCache);
             return { ...p, playing_handicap: courseHcp };
           }));
         }
@@ -1006,7 +1014,7 @@ function scoringRouter(db) {
             .orderBy('u.first_name', 'asc');
           otherPlayers = await Promise.all(rawOtherTeamPlayers.map(async (p) => {
             const idx = p.round_handicap_index != null ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
-            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx);
+            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, hcpCache);
             return { ...p, playing_handicap: courseHcp };
           }));
 
