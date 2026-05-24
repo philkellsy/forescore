@@ -6,7 +6,7 @@ const { requireMinRole } = require('../middleware/authorize');
 const { CALC_TYPES } = require('../config/calc-types');
 const { golfCourseApiKey } = require('../config/env');
 const { canActivate, canComplete } = require('../services/event-status.service');
-const { computeCourseHandicap, strokesForHole } = require('../services/scoring/handicap.service');
+const { computeCourseHandicap, strokesForHole, warmRoundCourseCache, invalidateRoundCourseCache } = require('../services/scoring/handicap.service');
 const { groupSizes, distributeGroups, reverseLeaderboardGroups } = require('../services/scoring/group-generator.service');
 const { findByEventDay: findNoveltyEvents, create: createNoveltyEvent, remove: removeNoveltyEvent, setResult: setNoveltyResult } = require('../db/repositories/novelty-events');
 const { calculateStablefordLeaderboards } = require('../services/scoring/stableford-leaderboard.service');
@@ -995,6 +995,7 @@ function adminRouter(db) {
         }
         await db('scorecards').where({ tour_id: tourId, round_number: roundNumber }).delete();
         await db('novelty_results').where({ tour_id: tourId, round_number: roundNumber }).delete();
+        invalidateRoundCourseCache(tourId, roundNumber);
       }
 
       if (existing) {
@@ -1021,6 +1022,7 @@ function adminRouter(db) {
 
       if (status === 'open') {
         await ensureDayScorecards(db, tourId, roundNumber, calcType);
+        await warmRoundCourseCache(db, tourId, roundNumber);
       }
 
       return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?message=Round+${roundNumber}+saved`);

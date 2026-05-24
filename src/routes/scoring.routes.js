@@ -10,7 +10,7 @@ const { stablefordPoints } = require('../services/scoring/stableford.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
 const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
-const { computeCourseHandicap } = require('../services/scoring/handicap.service');
+const { computeCourseHandicap, getCachedCourseData } = require('../services/scoring/handicap.service');
 
 function toPlayerLabel(firstName, lastName) {
   const initial = lastName ? `${String(lastName).charAt(0)}.` : '';
@@ -178,19 +178,27 @@ function resolvePlayerCourseId(round, gender) {
   return Number(round.course_id);
 }
 
-async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null, _cache = null) {
-  const cacheKey = `${tourId}:${roundNumber}:${gender || 'any'}`;
-  let cached = _cache?.get(cacheKey);
+async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null, _reqCache = null) {
+  const reqCacheKey = `${tourId}:${roundNumber}:${gender || 'any'}`;
+  let cached = _reqCache?.get(reqCacheKey);
   if (cached === undefined) {
     const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
-    if (!round) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    if (!round) { _reqCache?.set(reqCacheKey, null); return Math.round(Number(handicapIndex) || 0); }
     const courseId = resolvePlayerCourseId(round, gender);
-    if (!courseId) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    if (!courseId) { _reqCache?.set(reqCacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+
+    // Module-level cache populated when the round was opened — zero extra DB queries.
+    const moduleCached = getCachedCourseData(tourId, roundNumber, courseId);
+    if (moduleCached) {
+      return computeCourseHandicap(handicapIndex, moduleCached.slope, moduleCached.rating, moduleCached.par);
+    }
+
+    // Fallback: round is still draft or cache missed (e.g. first boot) — query DB.
     const course = await db('courses').where({ id: courseId }).first();
-    if (!course) { _cache?.set(cacheKey, null); return Math.round(Number(handicapIndex) || 0); }
+    if (!course) { _reqCache?.set(reqCacheKey, null); return Math.round(Number(handicapIndex) || 0); }
     const coursePar = await db('holes').where({ course_id: courseId }).sum({ total: 'par' }).first();
     cached = { course, coursePar };
-    _cache?.set(cacheKey, cached);
+    _reqCache?.set(reqCacheKey, cached);
   }
   if (!cached) return Math.round(Number(handicapIndex) || 0);
   return computeCourseHandicap(handicapIndex, cached.course.slope_rating, cached.course.course_rating, cached.coursePar?.total || 72);

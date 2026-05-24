@@ -1,9 +1,9 @@
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { strokesForHole, computeCourseHandicap } = require('../../src/services/scoring/handicap.service');
+const { strokesForHole, computeCourseHandicap, warmRoundCourseCache, invalidateRoundCourseCache, getCachedCourseData } = require('../../src/services/scoring/handicap.service');
 
 describe('strokesForHole', () => {
   it('returns base+remainder strokes correctly', () => {
@@ -47,5 +47,58 @@ describe('computeCourseHandicap', () => {
   it('falls back gracefully when slope is missing', () => {
     // null slope → uses 113 → 10 × 1 + 0 = 10
     assert.equal(computeCourseHandicap(10, null, 72, 72), 10);
+  });
+});
+
+describe('round course cache', () => {
+  const fakeDb = (courseRows, parRows) => {
+    const q = {
+      where: () => q,
+      sum: () => q,
+      first: async () => null,
+    };
+    return Object.assign((table) => {
+      if (table === 'golf_rounds') {
+        return { where: () => ({ first: async () => ({ course_id: 10, female_course_id: 20, status: 'open' }) }) };
+      }
+      if (table === 'courses') {
+        return { where: ({ id }) => ({ first: async () => courseRows[id] || null }) };
+      }
+      if (table === 'holes') {
+        return { where: ({ course_id }) => ({ sum: () => ({ first: async () => parRows[course_id] || null }) }) };
+      }
+      return q;
+    });
+  };
+
+  beforeEach(() => {
+    invalidateRoundCourseCache(99, 1);
+    invalidateRoundCourseCache(99, 2);
+  });
+
+  it('warmRoundCourseCache populates entries for both male and female courses', async () => {
+    const db = fakeDb(
+      { 10: { slope_rating: 120, course_rating: 72.5 }, 20: { slope_rating: 110, course_rating: 71.0 } },
+      { 10: { total: 72 }, 20: { total: 71 } },
+    );
+    await warmRoundCourseCache(db, 99, 1);
+    assert.deepEqual(getCachedCourseData(99, 1, 10), { slope: 120, rating: 72.5, par: 72 });
+    assert.deepEqual(getCachedCourseData(99, 1, 20), { slope: 110, rating: 71.0, par: 71 });
+  });
+
+  it('getCachedCourseData returns null for unknown key', () => {
+    assert.equal(getCachedCourseData(99, 2, 99), null);
+  });
+
+  it('invalidateRoundCourseCache removes entries for that round only', async () => {
+    const db = fakeDb(
+      { 10: { slope_rating: 120, course_rating: 72.5 }, 20: { slope_rating: 110, course_rating: 71.0 } },
+      { 10: { total: 72 }, 20: { total: 71 } },
+    );
+    await warmRoundCourseCache(db, 99, 1);
+    assert.notEqual(getCachedCourseData(99, 1, 10), null);
+    invalidateRoundCourseCache(99, 1);
+    assert.equal(getCachedCourseData(99, 1, 10), null);
+    assert.equal(getCachedCourseData(99, 1, 20), null);
   });
 });
