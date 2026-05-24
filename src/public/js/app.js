@@ -14,7 +14,18 @@ if (!window.__FORESCORE_APP_INIT__) {
     let t1 = null, t2 = null, overlayTimer = null;
     const OVERLAY_DELAY_MS = 80;
 
-    function getOverlay() { return document.getElementById('fsPageOverlay'); }
+    function getOverlay() {
+      let el = document.getElementById('fsPageOverlay');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'fsPageOverlay';
+        el.className = 'page-loading-overlay';
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML = '<div class="spinner-border page-loading-spinner" role="status"><span class="visually-hidden">Loading…</span></div>';
+        document.body.appendChild(el);
+      }
+      return el;
+    }
 
     function start() {
       clearTimeout(t1); clearTimeout(t2); clearTimeout(overlayTimer);
@@ -62,6 +73,7 @@ if (!window.__FORESCORE_APP_INIT__) {
   // Trigger on form submissions; disable submit button to prevent double-submit.
   // Add data-no-loading to a form or button to opt out (e.g. async-managed forms).
   document.addEventListener('submit', (e) => {
+    if (e.defaultPrevented) return;
     const form = e.target;
     if (form.hasAttribute('data-no-loading')) return;
 

@@ -5,22 +5,37 @@
 // Cleared when a round reverts to draft.
 const _roundCourseCache = new Map();
 
+// Per-hole par cache: keyed by `${tourId}:${roundNumber}` → Map<holeNumber, par>.
+const _parByHoleCache = new Map();
+
 async function warmRoundCourseCache(db, tourId, roundNumber) {
   const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
   if (!round) return;
   const courseIds = [round.course_id, round.female_course_id].filter(Boolean).map(Number);
-  await Promise.all(courseIds.map(async (courseId) => {
-    const key = `${tourId}:${roundNumber}:${courseId}`;
-    if (_roundCourseCache.has(key)) return;
-    const course = await db('courses').where({ id: courseId }).first();
-    if (!course) return;
-    const parRow = await db('holes').where({ course_id: courseId }).sum({ total: 'par' }).first();
-    _roundCourseCache.set(key, {
-      slope: Number(course.slope_rating) || 113,
-      rating: Number(course.course_rating) || 0,
-      par: Number(parRow?.total) || 72,
-    });
-  }));
+
+  await Promise.all([
+    // Course slope/rating/totalPar per courseId
+    ...courseIds.map(async (courseId) => {
+      const key = `${tourId}:${roundNumber}:${courseId}`;
+      if (_roundCourseCache.has(key)) return;
+      const course = await db('courses').where({ id: courseId }).first();
+      if (!course) return;
+      const parRow = await db('holes').where({ course_id: courseId }).sum({ total: 'par' }).first();
+      _roundCourseCache.set(key, {
+        slope: Number(course.slope_rating) || 113,
+        rating: Number(course.course_rating) || 0,
+        par: Number(parRow?.total) || 72,
+      });
+    }),
+    // Per-hole par for the primary course (used by cumulative scoring)
+    (async () => {
+      const parKey = `${tourId}:${roundNumber}`;
+      if (_parByHoleCache.has(parKey)) return;
+      const holeRows = await db('holes').where({ course_id: round.course_id }).select('hole_number', 'par');
+      const map = new Map(holeRows.map((r) => [Number(r.hole_number), Number(r.par)]));
+      _parByHoleCache.set(parKey, map);
+    })(),
+  ]);
 }
 
 function invalidateRoundCourseCache(tourId, roundNumber) {
@@ -28,10 +43,15 @@ function invalidateRoundCourseCache(tourId, roundNumber) {
   for (const key of _roundCourseCache.keys()) {
     if (key.startsWith(prefix)) _roundCourseCache.delete(key);
   }
+  _parByHoleCache.delete(`${tourId}:${roundNumber}`);
 }
 
 function getCachedCourseData(tourId, roundNumber, courseId) {
   return _roundCourseCache.get(`${tourId}:${roundNumber}:${courseId}`) || null;
+}
+
+function getCachedParByHole(tourId, roundNumber) {
+  return _parByHoleCache.get(`${tourId}:${roundNumber}`) || null;
 }
 
 function strokesForHole(playingHandicap, strokeIndexPrimary, strokeIndexSecondary) {
@@ -72,4 +92,5 @@ module.exports = {
   warmRoundCourseCache,
   invalidateRoundCourseCache,
   getCachedCourseData,
+  getCachedParByHole,
 };

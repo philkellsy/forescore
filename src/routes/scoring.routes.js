@@ -10,7 +10,7 @@ const { stablefordPoints } = require('../services/scoring/stableford.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
 const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
-const { computeCourseHandicap, getCachedCourseData } = require('../services/scoring/handicap.service');
+const { computeCourseHandicap, getCachedCourseData, getCachedParByHole } = require('../services/scoring/handicap.service');
 
 function toPlayerLabel(firstName, lastName) {
   const initial = lastName ? `${String(lastName).charAt(0)}.` : '';
@@ -261,6 +261,8 @@ function isAdmin(req) {
 }
 
 async function getParByHole(db, tourId, roundNumber) {
+  const cached = getCachedParByHole(tourId, roundNumber);
+  if (cached) return cached;
   const rows = await db('holes as h')
     .join('golf_rounds as gr', 'gr.course_id', 'h.course_id')
     .where({ 'gr.tour_id': tourId, 'gr.round_number': roundNumber })
@@ -548,8 +550,10 @@ async function canUserEditScorecard(db, requester, scorecard) {
   return Boolean(requesterGroup);
 }
 
-async function getGroupEntriesForHole(db, scorecard, holeConfig) {
-  const targetGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id);
+async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTargetGroup = null) {
+  const targetGroup = preloadedTargetGroup !== null
+    ? preloadedTargetGroup
+    : await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id);
   if (!targetGroup) {
     const player = await db('users')
       .where({ id: scorecard.user_id })
@@ -607,10 +611,18 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig) {
 
   const players = await getTeeGroupPlayers(db, targetGroup.id);
   const playerIds = players.map((p) => Number(p.id));
-  const scorecardByUser = new Map();
-  for (const p of players) {
-    const sId = await ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(p.id));
-    scorecardByUser.set(Number(p.id), sId);
+  // Bulk fetch all scorecards for this group in one query; create any missing in parallel.
+  const existingCards = await db('scorecards')
+    .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, type: 'individual' })
+    .whereIn('user_id', playerIds)
+    .select('id', 'user_id');
+  const scorecardByUser = new Map(existingCards.map((r) => [Number(r.user_id), Number(r.id)]));
+  const missingIds = playerIds.filter((uid) => !scorecardByUser.has(uid));
+  if (missingIds.length) {
+    await Promise.all(missingIds.map(async (uid) => {
+      const sId = await ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, uid);
+      scorecardByUser.set(uid, sId);
+    }));
   }
 
   const round = await db('golf_rounds').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).first();
@@ -1360,15 +1372,31 @@ function scoringRouter(db) {
         return res.status(409).json({ error: 'Scorecard has been submitted and is locked' });
       }
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
-      if (!permitted) return res.status(403).json({ error: 'Not allowed' });
-
-      const holeConfig = await getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber);
+      // Fetch target group and hole config in parallel; reuse the group for the
+      // permission check so getGroupEntriesForHole doesn't fetch it a second time.
+      const [targetGroup, holeConfig] = await Promise.all([
+        scorecard.type === 'individual'
+          ? getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id)
+          : null,
+        getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber),
+      ]);
       if (!holeConfig) return res.status(400).json({ error: 'Hole configuration missing' });
+
+      if (!canEditAllScores(req.session.user)) {
+        if (scorecard.type === 'individual') {
+          const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+          if (!requesterGroup || !targetGroup || requesterGroup.id !== targetGroup.id) {
+            return res.status(403).json({ error: 'Not allowed' });
+          }
+        } else {
+          const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+          if (!requesterGroup) return res.status(403).json({ error: 'Not allowed' });
+        }
+      }
 
       const context =
         scorecard.type === 'individual'
-          ? await getGroupEntriesForHole(db, scorecard, holeConfig)
+          ? await getGroupEntriesForHole(db, scorecard, holeConfig, targetGroup)
           : await getAmbroseEntriesForHole(db, scorecard, holeConfig);
 
       return res.json({
