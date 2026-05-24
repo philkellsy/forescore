@@ -5,32 +5,41 @@ if (!window.__FORESCORE_APP_INIT__) {
   const AUTH_MARKER_COOKIE = 'forescore_auth=1';
   const AUTH_MARKER_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
-  // ── Page loading progress bar ──────────────────────────────────────────────
+  // ── Page loading indicator (bar + overlay) ────────────────────────────────
   const loadingBar = (function () {
-    const el = document.createElement('div');
-    el.id = 'fs-loading-bar';
-    document.documentElement.appendChild(el);
+    const bar = document.createElement('div');
+    bar.id = 'fs-loading-bar';
+    document.documentElement.appendChild(bar);
 
-    let t1 = null, t2 = null;
+    let t1 = null, t2 = null, overlayTimer = null;
+    const OVERLAY_DELAY_MS = 250;
+
+    function getOverlay() { return document.getElementById('fsPageOverlay'); }
 
     function start() {
-      clearTimeout(t1); clearTimeout(t2);
-      el.classList.remove('is-complete');
-      el.style.width = '0%';
-      el.classList.add('is-active');
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(overlayTimer);
+      bar.classList.remove('is-complete');
+      bar.style.width = '0%';
+      bar.classList.add('is-active');
       requestAnimationFrame(() => {
-        el.style.width = '30%';
-        t1 = setTimeout(() => { el.style.width = '60%'; }, 400);
-        t2 = setTimeout(() => { el.style.width = '85%'; }, 2500);
+        bar.style.width = '30%';
+        t1 = setTimeout(() => { bar.style.width = '60%'; }, 400);
+        t2 = setTimeout(() => { bar.style.width = '85%'; }, 2500);
       });
+      overlayTimer = setTimeout(() => {
+        const overlay = getOverlay();
+        if (overlay) overlay.classList.add('is-visible');
+      }, OVERLAY_DELAY_MS);
     }
 
     function done() {
-      clearTimeout(t1); clearTimeout(t2);
-      el.classList.add('is-complete');
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(overlayTimer);
+      bar.classList.add('is-complete');
+      const overlay = getOverlay();
+      if (overlay) overlay.classList.remove('is-visible');
       setTimeout(() => {
-        el.classList.remove('is-active', 'is-complete');
-        el.style.width = '0%';
+        bar.classList.remove('is-active', 'is-complete');
+        bar.style.width = '0%';
       }, 450);
     }
 

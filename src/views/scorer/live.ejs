@@ -13,6 +13,14 @@
     <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
   </head>
   <body>
+    <div id="holeLoadingOverlay" class="hole-loading-overlay" aria-hidden="true">
+      <div class="hole-loading-spinner">
+        <div class="spinner-border" style="width:3rem;height:3rem" role="status">
+          <span class="visually-hidden">Loading…</span>
+        </div>
+        <div class="hole-loading-label">Loading hole…</div>
+      </div>
+    </div>
     <%- include('../partials/nav') %>
     <main class="container py-3 py-md-4 live-score-main">
       <header class="mb-3">

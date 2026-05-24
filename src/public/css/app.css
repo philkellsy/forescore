@@ -324,6 +324,68 @@ body {
   font-size: 1.05rem;
 }
 
+.live-hole-nav-btn:disabled {
+  opacity: 0.35;
+}
+
+.page-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.page-loading-overlay.is-visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.page-loading-spinner {
+  width: 3rem;
+  height: 3rem;
+  color: var(--fs-green, #215463);
+}
+
+.hole-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.hole-loading-overlay.is-visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.hole-loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--fs-green, #215463);
+}
+
+.hole-loading-label {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #374151;
+}
+
 .entries-mode-individual .individual-entry-card .card-body {
   padding-top: 0.6rem !important;
   padding-bottom: 0.6rem !important;

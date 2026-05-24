@@ -23,6 +23,7 @@
   let transientStatusEl = null;
 
   let touchStartX = null;
+  let isNavigating = false;
   let currentHole = Number(state.holeNumber || state.startingHole || 1);
   let currentPar = Number(state.hole?.par || 0);
   let currentSiPrimary = Number(state.hole?.strokeIndexPrimary || 0);
@@ -121,6 +122,25 @@
 
     offlineCacheStatusEl.textContent = '';
     offlineCacheStatusEl.className = 'offline-cache-status d-none';
+  }
+
+  const holeLoadingOverlay = document.getElementById('holeLoadingOverlay');
+  let overlayShowTimer = null;
+
+  function setHoleLoading(loading) {
+    isNavigating = loading;
+    if (prevHoleBtn) prevHoleBtn.disabled = loading;
+    if (nextHoleBtn) nextHoleBtn.disabled = loading;
+
+    clearTimeout(overlayShowTimer);
+    if (loading) {
+      // Brief delay so instant cache hits don't flash the overlay
+      overlayShowTimer = setTimeout(() => {
+        if (holeLoadingOverlay) holeLoadingOverlay.classList.add('is-visible');
+      }, 120);
+    } else {
+      if (holeLoadingOverlay) holeLoadingOverlay.classList.remove('is-visible');
+    }
   }
 
   function newOpId() {
@@ -796,29 +816,35 @@
   }
 
   async function navigateByOffset(offset) {
+    if (isNavigating) return;
+    setHoleLoading(true);
     try {
-      const beforeNav = await fetchHoleData(currentHole);
-      await render(beforeNav);
-      if (hasConflictsForHole(currentHole)) return;
-    } catch (_error) {
-      // continue navigation even if pre-check fails
-    }
-    const nextIndex = currentHoleIndex() + Number(offset || 0);
-    if (nextIndex > holeOrder.length - 1) {
-      goToConfirmation();
-      return;
-    }
-    if (nextIndex < 0) return;
-    const nextHole = holeOrder[nextIndex];
-    try {
-      const holeData = await fetchHoleData(nextHole);
-      await render(holeData);
-    } catch (error) {
-      if (error && error.message === 'Offline') {
-        setTransientStatus(`Hole ${nextHole} is not cached for offline yet.`, 'warning');
-      } else {
-        setTransientStatus(`Could not load hole ${nextHole}. Please try again.`, 'danger');
+      try {
+        const beforeNav = await fetchHoleData(currentHole);
+        await render(beforeNav);
+        if (hasConflictsForHole(currentHole)) return;
+      } catch (_error) {
+        // continue navigation even if pre-check fails
       }
+      const nextIndex = currentHoleIndex() + Number(offset || 0);
+      if (nextIndex > holeOrder.length - 1) {
+        goToConfirmation();
+        return;
+      }
+      if (nextIndex < 0) return;
+      const nextHole = holeOrder[nextIndex];
+      try {
+        const holeData = await fetchHoleData(nextHole);
+        await render(holeData);
+      } catch (error) {
+        if (error && error.message === 'Offline') {
+          setTransientStatus(`Hole ${nextHole} is not cached for offline yet.`, 'warning');
+        } else {
+          setTransientStatus(`Could not load hole ${nextHole}. Please try again.`, 'danger');
+        }
+      }
+    } finally {
+      setHoleLoading(false);
     }
   }
 
@@ -985,10 +1011,10 @@
   hydrateConflictState();
 
   (async () => {
+    setHoleLoading(true);
     try {
       const holeData = await fetchHoleData(currentHole);
       await render(holeData);
-      warmOfflineCache().catch(() => {});
     } catch (_error) {
       await render({
         mode: state.mode,
@@ -998,6 +1024,8 @@
         ambroseContext: state.ambroseContext || null,
         individualContext: state.individualContext || null
       });
+    } finally {
+      setHoleLoading(false);
       warmOfflineCache().catch(() => {});
     }
   })();
