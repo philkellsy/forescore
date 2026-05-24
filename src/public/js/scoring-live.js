@@ -300,14 +300,24 @@
 
     warmCachePromise = (async () => {
       updateOfflineCacheStatus({ warming: true });
-      for (const hole of holeOrder) {
-        if (!force && warmedHoles.has(Number(hole))) continue;
-        try {
-          await fetchHoleDataFromServer(hole);
-          updateOfflineCacheStatus({ warming: true });
-        } catch (_error) {
-          break;
-        }
+      const MAX_ATTEMPTS = 3;
+      let pending = holeOrder.filter((h) => force || !warmedHoles.has(Number(h)));
+
+      for (let attempt = 0; attempt < MAX_ATTEMPTS && pending.length > 0; attempt++) {
+        if (!isEffectivelyOnline()) break;
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+
+        const failed = [];
+        await Promise.all(pending.map(async (hole) => {
+          if (!isEffectivelyOnline()) { failed.push(hole); return; }
+          try {
+            await fetchHoleDataFromServer(hole);
+            updateOfflineCacheStatus({ warming: true });
+          } catch (_error) {
+            failed.push(hole);
+          }
+        }));
+        pending = failed;
       }
     })();
 
