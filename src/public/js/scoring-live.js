@@ -556,11 +556,13 @@
                 </div>
               </div>
             </div>
-            <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
-              <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
-              <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
-              <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
-              <button type="button" class="btn btn-outline-dark btn-lg pickup-btn" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
+            <div class="d-flex align-items-center">
+              <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
+                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
+                <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
+                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
+              </div>
+              <button type="button" class="btn btn-outline-dark btn-lg pickup-btn ms-auto" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
             </div>
             ${conflictPanel ? `<div class="mt-1">${conflictPanel}</div>` : ''}
           </div>
