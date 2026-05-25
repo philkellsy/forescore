@@ -467,7 +467,7 @@
     const formatUpDn = (value) => {
       const num = Number(value || 0);
       if (!Number.isFinite(num) || num === 0) return 'E';
-      return num > 0 ? `${num}up` : `${Math.abs(num)}dn`;
+      return num > 0 ? `+${num}` : `${num}`;
     };
     const relativeClass = (value) => {
       const num = Number(value || 0);
@@ -771,7 +771,7 @@
     const relEl = card.querySelector('.entry-rel');
     if (relEl) {
       const rel = Number(stablefordRelative || 0);
-      relEl.textContent = rel === 0 ? 'E' : (rel > 0 ? `${rel}up` : `${Math.abs(rel)}dn`);
+      relEl.textContent = rel === 0 ? 'E' : (rel > 0 ? `+${rel}` : `${rel}`);
       relEl.className = `entry-metrics-value entry-rel ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
     }
     return true;
