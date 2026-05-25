@@ -798,9 +798,14 @@
     const playingHandicap = Number(prevEntry?.playingHandicap || 0);
     const nextStableford = normalizedGross === 0 ? null
       : stablefordForGross(normalizedGross, currentPar, currentSiPrimary, currentSiSecondary, playingHandicap);
-    const delta = (nextStableford ?? 0) - (prevStableford ?? 0);
-    const nextTotal = Number(prevEntry?.stablefordTotal || 0) + delta;
-    const nextRelative = Number(prevEntry?.stablefordRelative || 0) + delta;
+    const prevIsScored = prevStableford !== null;
+    const nextIsScored = nextStableford !== null;
+    const deltaTotal = (nextStableford ?? 0) - (prevStableford ?? 0);
+    // stablefordRelative = stablefordTotal - (holesPlayed * 2). When the hole transitions
+    // from unscored→scored or scored→unscored, holesPlayed changes by ±1, so add ∓2.
+    const deltaRelative = deltaTotal + (!prevIsScored && nextIsScored ? -2 : prevIsScored && !nextIsScored ? 2 : 0);
+    const nextTotal = Number(prevEntry?.stablefordTotal || 0) + deltaTotal;
+    const nextRelative = Number(prevEntry?.stablefordRelative || 0) + deltaRelative;
 
     updateCurrentHoleEntry(scorecardId, (entry) => {
       entry.grossScore = normalizedGross;
@@ -1056,7 +1061,7 @@
     if (!window.ForeScoreOfflineSync || typeof window.ForeScoreOfflineSync.create !== 'function') return;
     offlineSync = window.ForeScoreOfflineSync.create({
       store: offlineStore,
-      scorecardId: Number(state.scorecardId),
+      // No scorecardId filter — process ops for all group members, not just own scorecard.
       isEffectivelyOnline,
       sendGross: sendQueuedGrossOp,
       sendDrive: sendQueuedDriveOp,
