@@ -99,6 +99,14 @@ if (!window.__FORESCORE_APP_INIT__) {
     });
   }
 
+  // ── PWA install prompt ────────────────────────────────────────────────────
+  // Capture early — browser fires this before DOMContentLoaded on many devices.
+  let deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+  });
+
   function ensureToastContainer() {
     let container = document.getElementById('fsToastContainer');
     if (container) return container;
@@ -167,6 +175,30 @@ if (!window.__FORESCORE_APP_INIT__) {
     // (i.e. authenticated UI). Login page can poll this without needing server requests.
     if (document.querySelector('form[action="/auth/logout"]')) {
       document.cookie = `${AUTH_MARKER_COOKIE}; Path=/; Max-Age=${AUTH_MARKER_MAX_AGE_SECONDS}; SameSite=Lax`;
+    }
+
+    // Show "Install App" nav item when running in a browser (not as installed PWA).
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (!isStandalone) {
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && /macintosh/i.test(navigator.userAgent));
+      const installNavItem = document.getElementById('pwaInstallNavItem');
+      const installBtn = document.getElementById('pwaInstallBtn');
+      if (installNavItem && installBtn && (isIOS || deferredInstallPrompt)) {
+        installNavItem.classList.remove('d-none');
+        installBtn.addEventListener('click', () => {
+          if (isIOS) {
+            const modalEl = document.getElementById('iosInstallModal');
+            if (modalEl && window.bootstrap) new window.bootstrap.Modal(modalEl).show();
+          } else if (deferredInstallPrompt) {
+            deferredInstallPrompt.prompt();
+            deferredInstallPrompt.userChoice.then(() => {
+              deferredInstallPrompt = null;
+              installNavItem.classList.add('d-none');
+            });
+          }
+        });
+      }
     }
 
     const alerts = document.querySelectorAll('.alert.alert-success, .alert.alert-danger');

@@ -35,6 +35,11 @@
               <% if (memberRole === 'admin' || memberRole === 'owner') { %>
                 <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/admin/players') %>"><i class="fa-solid fa-users fa-fw me-1" aria-hidden="true"></i>Players</a></li>
               <% } %>
+              <li class="nav-item d-none" id="pwaInstallNavItem">
+                <button type="button" class="nav-link w-100 text-start" id="pwaInstallBtn" style="background:none;border:none">
+                  <i class="fa-solid fa-mobile-screen-button fa-fw me-1" aria-hidden="true"></i>Install App
+                </button>
+              </li>
             </ul>
           <% } else { %>
             <ul class="navbar-nav me-auto mb-2 mb-lg-0"></ul>
@@ -60,6 +65,27 @@
     <% } %>
   </div>
 </nav>
+<%# iOS install instructions modal — shown by JS when running in mobile Safari (not standalone) %>
+<div class="modal fade" id="iosInstallModal" tabindex="-1" aria-labelledby="iosInstallModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-1">
+        <h5 class="modal-title" id="iosInstallModalLabel">
+          <i class="fa-solid fa-mobile-screen-button me-2" aria-hidden="true"></i>Install ForeScore
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body pt-2">
+        <ol class="mb-0 lh-lg">
+          <li>Tap the <strong>Share</strong> button <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> at the bottom of Safari</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong></li>
+          <li>Tap <strong>Add</strong> to confirm</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
 <%# Version tag — fixed bottom-right on desktop, hidden on mobile (menu handles it) %>
 <div class="app-version-tag d-none d-lg-block">v<%= typeof appVersion !== 'undefined' ? appVersion : '' %></div>
 <script src="/js/app.js?v=<%= assetVersion %>" defer></script>
