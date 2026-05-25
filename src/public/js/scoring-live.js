@@ -486,18 +486,7 @@
             <div class="small fw-semibold ${relativeClass(entry.grossToPar)}">${formatRelative(entry.grossToPar)}</div>
           </div>
         `
-        : `
-          <div class="d-flex gap-3 individual-metrics-inline">
-            <div class="text-end">
-              <div class="small text-muted">Total</div>
-              <div class="small fw-semibold text-dark">${Number(entry.stablefordTotal || 0)}</div>
-            </div>
-            <div class="text-end">
-              <div class="small text-muted">Relative</div>
-              <div class="small fw-semibold ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</div>
-            </div>
-          </div>
-        `;
+        : '';
 
     const memberDrives =
       entry.type === 'team'
@@ -550,24 +539,30 @@
       return `
         <article class="card border-0 shadow-sm individual-entry-card">
           <div class="card-body py-2">
-            <div class="d-flex justify-content-between align-items-center gap-2">
-              <h2 class="h6 mb-0 individual-entry-title">${label}</h2>
-              <div class="individual-stableford-chip">
-                <span class="small text-muted me-1">Stb</span>
-                <strong>${stableford}</strong>
+            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+              <h2 class="h6 mb-0 individual-entry-title min-w-0">${label}</h2>
+              <div class="d-flex gap-2 flex-shrink-0 entry-metrics text-center">
+                <div>
+                  <div class="entry-metrics-label">Stb</div>
+                  <div class="entry-metrics-value entry-stb text-dark">${stableford}</div>
+                </div>
+                <div>
+                  <div class="entry-metrics-label">Total</div>
+                  <div class="entry-metrics-value entry-total text-dark">${Number(entry.stablefordTotal || 0)}</div>
+                </div>
+                <div>
+                  <div class="entry-metrics-label">Rel</div>
+                  <div class="entry-metrics-value entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</div>
+                </div>
               </div>
             </div>
-            <div class="mt-2">
-              <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
-                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
-                <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
-                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
-                <button type="button" class="btn btn-outline-dark btn-lg pickup-btn" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
-              </div>
+            <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
+              <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
+              <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
+              <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
+              <button type="button" class="btn btn-outline-dark btn-lg pickup-btn" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
             </div>
-            <div class="mt-1">
-              ${conflictPanel || rightMetrics}
-            </div>
+            ${conflictPanel ? `<div class="mt-1">${conflictPanel}</div>` : ''}
           </div>
         </article>
       `;
@@ -767,18 +762,17 @@
       grossEl.className = ['gross-pill', perfClass, perfClass ? 'gross-pill-disc' : ''].filter(Boolean).join(' ');
     }
 
-    const stbEl = card.querySelector('.individual-stableford-chip strong');
+    const stbEl = card.querySelector('.entry-stb');
     if (stbEl) stbEl.textContent = stableford !== null && stableford !== undefined ? String(stableford) : '-';
 
-    const metricsEl = card.querySelector('.individual-metrics-inline');
-    if (metricsEl) {
-      const metricVals = metricsEl.querySelectorAll('.fw-semibold');
-      if (metricVals[0]) metricVals[0].textContent = String(Number(stablefordTotal || 0));
-      if (metricVals[1]) {
-        const rel = Number(stablefordRelative || 0);
-        metricVals[1].textContent = rel === 0 ? 'E' : (rel > 0 ? `${rel}up` : `${Math.abs(rel)}dn`);
-        metricVals[1].className = `small fw-semibold ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
-      }
+    const totalEl = card.querySelector('.entry-total');
+    if (totalEl) totalEl.textContent = String(Number(stablefordTotal || 0));
+
+    const relEl = card.querySelector('.entry-rel');
+    if (relEl) {
+      const rel = Number(stablefordRelative || 0);
+      relEl.textContent = rel === 0 ? 'E' : (rel > 0 ? `${rel}up` : `${Math.abs(rel)}dn`);
+      relEl.className = `entry-metrics-value entry-rel ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
     }
     return true;
   }
