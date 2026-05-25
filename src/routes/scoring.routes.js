@@ -1479,6 +1479,7 @@ function scoringRouter(db) {
       return res.json({
         mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
         scorecardId: Number(scorecard.id),
+        currentUserId: Number(req.session.user.id),
         startingHole,
         currentHole,
         holeOrder,
@@ -1542,7 +1543,7 @@ function scoringRouter(db) {
           db('scorecard_holes')
             .whereIn('scorecard_id', sids)
             .where({ hole_number: holeNumber })
-            .select('scorecard_id', 'gross_score', 'stableford_points', 'version'),
+            .select('scorecard_id', 'gross_score', 'stableford_points', 'version', 'owner_user_id'),
           getCumulativeByScorecard(db, sids, windowHoles, parByHole),
         ]);
 
@@ -1557,7 +1558,8 @@ function scoringRouter(db) {
             stablefordPoints: saved && saved.stableford_points !== null ? Number(saved.stableford_points) : null,
             stablefordTotal: Number(cumulative.stablefordTotal || 0),
             stablefordRelative: Number(cumulative.stablefordTotal || 0) - (Number(cumulative.holesPlayed || 0) * 2),
-            holesPlayed: Number(cumulative.holesPlayed || 0)
+            holesPlayed: Number(cumulative.holesPlayed || 0),
+            ownerUserId: saved?.owner_user_id ? Number(saved.owner_user_id) : null
           };
         });
 
@@ -1636,20 +1638,27 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const isIndividual = scorecard.type === 'individual';
+      const [permitted, roundStatus, hole, roundHcp, tourHcp] = await Promise.all([
+        canUserEditScorecard(db, req.session.user, scorecard),
+        getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number),
+        getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber),
+        isIndividual
+          ? db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first()
+          : Promise.resolve(null),
+        isIndividual
+          ? db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first()
+          : Promise.resolve(null),
+      ]);
+
       if (!permitted) return res.status(403).json({ error: 'Not allowed' });
-      const roundStatus = await getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number);
       if (roundStatus.status !== 'open') {
         return res.status(409).json({ error: 'Scoring is not open for this round' });
       }
-
-      const hole = await getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber);
       if (!hole) return res.status(400).json({ error: 'Hole configuration missing' });
 
       let playingHandicap = 0;
-      if (scorecard.type === 'individual') {
-        const roundHcp = await db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first();
-        const tourHcp = await db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first();
+      if (isIndividual) {
         const idx = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
         playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx);
       } else if (scorecard.type === 'team') {

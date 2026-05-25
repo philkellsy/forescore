@@ -326,7 +326,8 @@
         holeVersion: score.version || 0,
         stableford: score.stablefordPoints ?? null,
         stablefordTotal: score.stablefordTotal || 0,
-        stablefordRelative: score.stablefordRelative || 0
+        stablefordRelative: score.stablefordRelative || 0,
+        ownerUserId: score.ownerUserId ?? null
       };
     });
     return {
@@ -627,6 +628,12 @@
       const expectedGross = getExpectedGross(entry.scorecardId, holeData.holeNumber);
       const canonicalGross = normalizeGross(entry.grossScore);
       if (expectedGross !== null && expectedGross !== canonicalGross) {
+        // Same user from another session — silently accept; no conflict needed.
+        if (ctx?.currentUserId && entry.ownerUserId === ctx.currentUserId) {
+          setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
+          clearConflict(entry.scorecardId, holeData.holeNumber);
+          return;
+        }
         upsertConflict(entry.scorecardId, holeData.holeNumber, expectedGross, {
           canonicalGross,
           ownerName: conflict?.ownerName || null
@@ -689,6 +696,12 @@
       const canonicalGross = normalizeGross(entry.grossScore);
 
       if (expectedGross !== null && expectedGross !== canonicalGross) {
+        // Same user from another session — silently accept; no conflict needed.
+        if (ctx?.currentUserId && entry.ownerUserId === ctx.currentUserId) {
+          setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
+          clearConflict(entry.scorecardId, holeData.holeNumber);
+          return;
+        }
         upsertConflict(entry.scorecardId, holeData.holeNumber, expectedGross, {
           canonicalGross: canonicalGross,
           ownerName: conflict?.ownerName || null
@@ -764,6 +777,31 @@
       return;
     }
 
+    // Optimistic update — show the new score immediately without waiting for server.
+    let prevGross = null;
+    let prevStableford = null;
+    if (currentHoleData?.entries) {
+      const prev = currentHoleData.entries.find((e) => Number(e.scorecardId) === Number(scorecardId));
+      if (prev) { prevGross = prev.grossScore; prevStableford = prev.stableford; }
+    }
+    const playingHandicap = (() => {
+      if (!currentHoleData?.entries) return 0;
+      const e = currentHoleData.entries.find((en) => Number(en.scorecardId) === Number(scorecardId));
+      return Number(e?.playingHandicap || 0);
+    })();
+    const nextStableford = normalizedGross === 0 ? null : stablefordForGross(normalizedGross, currentPar, currentSiPrimary, currentSiSecondary, playingHandicap);
+    const prevPoints = prevStableford ?? 0;
+    const nextPoints = nextStableford ?? 0;
+    const delta = nextPoints - prevPoints;
+    updateCurrentHoleEntry(scorecardId, (entry) => {
+      entry.grossScore = normalizedGross;
+      entry.stableford = nextStableford;
+      entry.stablefordTotal = Number(entry.stablefordTotal || 0) + delta;
+      entry.stablefordRelative = Number(entry.stablefordRelative || 0) + delta;
+      return entry;
+    });
+    if (currentHoleData) await render(currentHoleData);
+
     const opId = newOpId();
     const res = await fetch(tp('/scoring/api/live/gross'), {
       method: 'POST',
@@ -784,22 +822,45 @@
         upsertConflict(scorecardId, currentHole, normalizedGross, data);
         const holeData = await fetchHoleData(currentHole);
         await render(holeData);
+      } else {
+        // Non-conflict 409 (e.g. round closed) — roll back the optimistic update.
+        updateCurrentHoleEntry(scorecardId, (entry) => {
+          entry.grossScore = prevGross;
+          entry.stableford = prevStableford;
+          entry.stablefordTotal = Number(entry.stablefordTotal || 0) - delta;
+          entry.stablefordRelative = Number(entry.stablefordRelative || 0) - delta;
+          return entry;
+        });
+        if (currentHoleData) await render(currentHoleData);
       }
       return;
     }
 
-    if (!res.ok) return;
+    if (!res.ok) {
+      // Network error — roll back.
+      updateCurrentHoleEntry(scorecardId, (entry) => {
+        entry.grossScore = prevGross;
+        entry.stableford = prevStableford;
+        entry.stablefordTotal = Number(entry.stablefordTotal || 0) - delta;
+        entry.stablefordRelative = Number(entry.stablefordRelative || 0) - delta;
+        return entry;
+      });
+      if (currentHoleData) await render(currentHoleData);
+      return;
+    }
+
     const successPayload = await res.json().catch(() => ({}));
     setExpectedGross(scorecardId, currentHole, normalizedGross);
     clearConflict(scorecardId, currentHole);
-    if (successPayload && Number.isFinite(Number(successPayload.holeVersion))) {
-      updateCurrentHoleEntry(scorecardId, (entry) => {
-        entry.holeVersion = Number(successPayload.holeVersion);
-        return entry;
-      });
+    // Confirm server-authoritative values without a re-fetch.
+    updateCurrentHoleEntry(scorecardId, (entry) => {
+      if (successPayload.holeVersion !== undefined) entry.holeVersion = Number(successPayload.holeVersion || 0);
+      if (successPayload.stableford !== undefined && successPayload.stableford !== null) entry.stableford = successPayload.stableford;
+      return entry;
+    });
+    if (offlineStore && currentHoleData) {
+      offlineStore.saveSnapshot(state.scorecardId, currentHole, currentHoleData).catch(() => {});
     }
-    const holeData = await fetchHoleData(currentHole);
-    await render(holeData);
   }
 
   async function setDrive(scorecardId, driveTakenUserId) {

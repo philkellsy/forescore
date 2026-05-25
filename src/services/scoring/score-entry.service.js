@@ -117,15 +117,22 @@ async function upsertHoleScore(
   const stableford = stablefordPoints({ grossScore, par, strokeIndexPrimary, strokeIndexSecondary, playingHandicap });
 
   if (existing) {
-    if (
-      normalizedBaseVersion !== null
-      && (schemaSupport.hasVersion ? Number(existing.version || 1) : 1) !== normalizedBaseVersion
-    ) {
-      const canonical = await getCanonicalPayload(db, { scorecardId, holeNumber, existing });
-      throw new ScoreConflictError(canonical);
-    }
+    const isSameUser = canMutateExisting(existing, requesterUserId, force);
 
-    if (Number(existing.gross_score) === Number(grossScore)) {
+    if (!isSameUser) {
+      // Different user: enforce version lock and conflict detection.
+      if (
+        normalizedBaseVersion !== null
+        && (schemaSupport.hasVersion ? Number(existing.version || 1) : 1) !== normalizedBaseVersion
+      ) {
+        const canonical = await getCanonicalPayload(db, { scorecardId, holeNumber, existing });
+        throw new ScoreConflictError(canonical);
+      }
+      if (Number(existing.gross_score) !== Number(grossScore)) {
+        const canonical = await getCanonicalPayload(db, { scorecardId, holeNumber, existing });
+        throw new ScoreConflictError(canonical);
+      }
+      // Same score from a different user — nothing to change.
       return {
         points: Number(existing.stableford_points),
         grossScore: Number(grossScore),
@@ -135,9 +142,15 @@ async function upsertHoleScore(
       };
     }
 
-    if (!canMutateExisting(existing, requesterUserId, force)) {
-      const canonical = await getCanonicalPayload(db, { scorecardId, holeNumber, existing });
-      throw new ScoreConflictError(canonical);
+    // Same user (or force): overwrite freely — no version conflict across sessions.
+    if (Number(existing.gross_score) === Number(grossScore)) {
+      return {
+        points: Number(existing.stableford_points),
+        grossScore: Number(grossScore),
+        unchanged: true,
+        version: schemaSupport.hasVersion ? Number(existing.version || 1) : 1,
+        opId: schemaSupport.hasOpId ? (normalizedOpId || existing.op_id || null) : null
+      };
     }
 
     const nextVersion = (schemaSupport.hasVersion ? Number(existing.version || 1) : 1) + 1;
