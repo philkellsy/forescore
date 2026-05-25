@@ -458,7 +458,7 @@
     const label =
       entry.type === 'team'
         ? `${entry.displayName} (Hcp ${entry.teamHandicapDisplay || entry.teamHandicap || 0})`
-        : `${entry.displayName} (${entry.handicapDisplay || '-'})${shotDots(entry.playingHandicap)}`;
+        : `${entry.fullName || entry.displayName} (${entry.handicapDisplay || '-'})${shotDots(entry.playingHandicap)}`;
     const formatRelative = (value) => {
       const num = Number(value || 0);
       if (!Number.isFinite(num) || num === 0) return 'E';
