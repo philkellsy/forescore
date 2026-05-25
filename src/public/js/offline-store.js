@@ -65,6 +65,26 @@
 
   function create() {
     return {
+      async saveInit(scorecardId, data) {
+        const record = {
+          key: `init:${Number(scorecardId)}`,
+          scorecardId: Number(scorecardId),
+          holeNumber: 0,
+          data,
+          updatedAt: Date.now()
+        };
+        await withStore(SNAPSHOT_STORE, 'readwrite', (store) => requestToPromise(store.put(record)));
+      },
+
+      async getInit(scorecardId) {
+        const record = await withStore(
+          SNAPSHOT_STORE,
+          'readonly',
+          (store) => requestToPromise(store.get(`init:${Number(scorecardId)}`))
+        );
+        return record ? record.data : null;
+      },
+
       async saveSnapshot(scorecardId, holeNumber, data) {
         const record = {
           key: key(scorecardId, holeNumber),

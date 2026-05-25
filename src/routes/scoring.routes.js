@@ -1141,79 +1141,21 @@ function scoringRouter(db) {
   router.get('/live/:scorecardId', requireAuth, async (req, res, next) => {
     try {
       const scorecardId = Number(req.params.scorecardId);
-      const requestedHole = Number(req.query.hole || 0);
-      let holeNumber = requestedHole >= 1 && requestedHole <= 18 ? requestedHole : null;
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const [permitted, roundStatus] = await Promise.all([
+        canUserEditScorecard(db, req.session.user, scorecard),
+        getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number),
+      ]);
       if (!permitted) return res.status(403).send('Not allowed');
-      const roundStatus = await getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number);
 
-      if (!holeNumber) {
-        if (scorecard.type === 'team') {
-          const team = await db('teams as t')
-            .leftJoin('ambrose_groups as ag', 'ag.id', 't.ambrose_group_id')
-            .where({ 't.id': scorecard.team_id })
-            .select('ag.starting_hole')
-            .first();
-          const start = Number(team?.starting_hole || 1);
-          holeNumber = await nextHoleForTeamScorecard(db, scorecard.id, start);
-        } else {
-          const groupCtx = await getIndividualGroupContext(db, scorecard);
-          holeNumber = await nextHoleForIndividualGroup(db, scorecard, groupCtx.startingHole);
-        }
-      }
-
-      const initialHole = holeNumber || 1;
-
-      // Resolve the scorecard owner's course so the hole data (par/SI) matches their tees
-      let ownerCourseId = null;
-      if (scorecard.type === 'individual' && scorecard.user_id) {
-        const [ownerUser, roundForCourse] = await Promise.all([
-          db('users').where({ id: scorecard.user_id }).select('gender').first(),
-          db('golf_rounds').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).first(),
-        ]);
-        if (roundForCourse) ownerCourseId = resolvePlayerCourseId(roundForCourse, ownerUser?.gender || null);
-      }
-
-      let holeConfig = await getHoleConfig(db, scorecard.tour_id, scorecard.round_number, initialHole, ownerCourseId);
-      if (!holeConfig) return res.status(400).send('Hole configuration missing');
-
-      let context =
-        scorecard.type === 'individual'
-          ? await getGroupEntriesForHole(db, scorecard, holeConfig)
-          : await getAmbroseEntriesForHole(db, scorecard, holeConfig);
-
-      if (!holeNumber && Number(context.startingHole || 1) !== initialHole) {
-        const startHole = Number(context.startingHole || 1);
-        holeConfig = await getHoleConfig(db, scorecard.tour_id, scorecard.round_number, startHole, ownerCourseId);
-        if (!holeConfig) return res.status(400).send('Starting hole configuration missing');
-        context =
-          scorecard.type === 'individual'
-            ? await getGroupEntriesForHole(db, scorecard, holeConfig)
-            : await getAmbroseEntriesForHole(db, scorecard, holeConfig);
-      }
-
+      // Minimal payload — client calls /api/live/:id/init for all static context.
       const payload = {
         mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
         scorecardId: scorecard.id,
         tourId: scorecard.tour_id,
         roundNumber: scorecard.round_number,
-        requesterDisplay: toPlayerLabel(
-          req.session.user.firstName || req.session.user.first_name || '',
-          req.session.user.lastName || req.session.user.last_name || ''
-        ),
-        holeNumber: holeConfig.hole_number,
-        startingHole: context.startingHole || 1,
-        hole: {
-          par: holeConfig.par,
-          strokeIndexPrimary: holeConfig.stroke_index_primary,
-          strokeIndexSecondary: holeConfig.stroke_index_secondary
-        },
-        entries: context.entries,
-        ambroseContext: context.ambroseContext || null,
-        individualContext: context.individualContext || null
       };
 
       return res.render('scorer/live', {
@@ -1360,6 +1302,203 @@ function scoringRouter(db) {
     }
   });
 
+  // Init endpoint — returns static context (players, handicaps, all hole configs) once per page load.
+  // Subsequent hole navigations use the lean ?sids= branch below instead of re-fetching this data.
+  router.get('/api/live/:scorecardId/init', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.params.scorecardId);
+
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
+      if (scorecard.status === 'submitted' && !isAdmin(req)) {
+        return res.status(409).json({ error: 'Scorecard has been submitted and is locked' });
+      }
+
+      // Warm the module cache before the handicap computation below.
+      if (!isRoundCacheWarm(scorecard.tour_id, scorecard.round_number)) {
+        await warmRoundCourseCache(db, scorecard.tour_id, scorecard.round_number);
+      }
+
+      // Fetch target group + round in parallel; target group is reused for the
+      // permission check so we avoid calling getTeeGroupForUser twice.
+      const [targetGroup, round] = await Promise.all([
+        scorecard.type === 'individual'
+          ? getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id)
+          : null,
+        db('golf_rounds').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).first(),
+      ]);
+
+      // Permission: admin always passes. Others must share a tee group with the
+      // scorecard owner. When requester IS the owner, reuse targetGroup (saves a query).
+      if (!canEditAllScores(req.session.user)) {
+        let permitted = false;
+        if (scorecard.type === 'individual') {
+          const requesterGroup = Number(req.session.user.id) === Number(scorecard.user_id)
+            ? targetGroup
+            : await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+          permitted = Boolean(requesterGroup && targetGroup && requesterGroup.id === targetGroup.id);
+        } else {
+          const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+          permitted = Boolean(requesterGroup);
+        }
+        if (!permitted) return res.status(403).json({ error: 'Not allowed' });
+      }
+
+      const hasFemale = Boolean(round?.female_course_id);
+      const startingHole = targetGroup ? Number(targetGroup.starting_hole || 1) : 1;
+
+      // ── Players, scorecards, handicaps ───────────────────────────────────
+      let players = [];
+      let scorecardIds = [Number(scorecard.id)];
+      let individualContext = null;
+
+      if (scorecard.type === 'individual') {
+        if (targetGroup) {
+          individualContext = {
+            groupNumber: targetGroup.group_number || null,
+            teeTime: targetGroup.tee_time || null,
+            teeLocation: targetGroup.tee_location || null
+          };
+
+          const groupPlayers = await getTeeGroupPlayers(db, targetGroup.id);
+          const playerIds = groupPlayers.map((p) => Number(p.id));
+
+          // Bulk-fetch existing scorecards; create missing in parallel.
+          const existingCards = await db('scorecards')
+            .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, type: 'individual' })
+            .whereIn('user_id', playerIds)
+            .select('id', 'user_id');
+          const scorecardByUser = new Map(existingCards.map((r) => [Number(r.user_id), Number(r.id)]));
+          const missingIds = playerIds.filter((uid) => !scorecardByUser.has(uid));
+          if (missingIds.length) {
+            await Promise.all(missingIds.map(async (uid) => {
+              const sId = await ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, uid);
+              scorecardByUser.set(uid, sId);
+            }));
+          }
+          scorecardIds = playerIds.map((uid) => scorecardByUser.get(uid)).filter(Boolean);
+
+          // Tour handicaps, round overrides, and genders all in parallel.
+          const [tourHandicaps, roundHandicaps, genderRows] = await Promise.all([
+            db('player_handicaps').where({ tour_id: scorecard.tour_id }).whereIn('user_id', playerIds).select('user_id', 'playing_handicap'),
+            db('player_day_handicaps').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).whereIn('user_id', playerIds).select('user_id', 'handicap_index'),
+            hasFemale ? db('users').whereIn('id', playerIds).select('id', 'gender') : Promise.resolve([]),
+          ]);
+          const tourHcpByUser = new Map(tourHandicaps.map((h) => [Number(h.user_id), Number(h.playing_handicap || 0)]));
+          const roundHcpByUser = new Map(roundHandicaps.map((h) => [Number(h.user_id), Number(h.handicap_index)]));
+          const genderByUser = new Map(genderRows.map((r) => [Number(r.id), r.gender]));
+
+          // getCourseHandicapForRound hits the module cache — 0 DB queries when warm.
+          const handicapByUser = new Map(
+            await Promise.all(playerIds.map(async (uid) => {
+              const hcpIndex = roundHcpByUser.has(uid) ? roundHcpByUser.get(uid) : (tourHcpByUser.get(uid) || 0);
+              const gender = genderByUser.get(uid) || null;
+              return [uid, await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, gender)];
+            }))
+          );
+
+          players = groupPlayers.map((p) => {
+            const uid = Number(p.id);
+            const playingHandicap = handicapByUser.get(uid) || 0;
+            return {
+              scorecardId: scorecardByUser.get(uid),
+              participantId: uid,
+              displayName: toPlayerLabel(p.first_name, p.last_name),
+              fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+              playingHandicap,
+              handicapDisplay: formatHandicapDisplay(playingHandicap),
+              courseId: round ? resolvePlayerCourseId(round, genderByUser.get(uid) || null) : null
+            };
+          });
+        } else {
+          // No tee group — single-player fallback.
+          const [player, roundHcp, tourHcp] = await Promise.all([
+            db('users').where({ id: scorecard.user_id }).select('id', 'first_name', 'last_name', 'gender').first(),
+            db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first(),
+            db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first(),
+          ]);
+          if (player) {
+            const hcpIndex = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+            const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, player.gender || null);
+            players = [{
+              scorecardId: Number(scorecard.id),
+              participantId: Number(player.id),
+              displayName: toPlayerLabel(player.first_name, player.last_name),
+              fullName: `${player.first_name || ''} ${player.last_name || ''}`.trim(),
+              playingHandicap,
+              handicapDisplay: formatHandicapDisplay(playingHandicap),
+              courseId: round ? resolvePlayerCourseId(round, player.gender || null) : null
+            }];
+          }
+        }
+      }
+
+      // ── Hole configs: all holes in one query per course ──────────────────
+      const primaryCourseId = round ? Number(round.course_id) : null;
+      const femaleCourseId = round && round.female_course_id ? Number(round.female_course_id) : null;
+      const courseIdsToFetch = [primaryCourseId, femaleCourseId].filter(Boolean);
+      const allHoleRows = courseIdsToFetch.length
+        ? await db('holes')
+            .whereIn('course_id', courseIdsToFetch)
+            .select('course_id', 'hole_number', 'par', 'stroke_index_primary', 'stroke_index_secondary')
+        : [];
+
+      const holesByCourse = {};
+      for (const row of allHoleRows) {
+        const cId = String(row.course_id);
+        if (!holesByCourse[cId]) holesByCourse[cId] = {};
+        holesByCourse[cId][Number(row.hole_number)] = {
+          par: Number(row.par),
+          strokeIndexPrimary: Number(row.stroke_index_primary),
+          strokeIndexSecondary: Number(row.stroke_index_secondary)
+        };
+      }
+      const holes = primaryCourseId ? (holesByCourse[String(primaryCourseId)] || {}) : {};
+      const femaleHoles = femaleCourseId ? (holesByCourse[String(femaleCourseId)] || null) : null;
+
+      // ── Current hole: first hole in play order not yet fully scored ───────
+      const holeOrder = holeSequenceFrom(startingHole);
+      let currentHole = startingHole;
+      if (scorecardIds.length) {
+        const scoredRows = await db('scorecard_holes')
+          .whereIn('scorecard_id', scorecardIds)
+          .select('hole_number');
+        const perHoleCounts = new Map();
+        for (const row of scoredRows) {
+          const h = Number(row.hole_number);
+          perHoleCounts.set(h, (perHoleCounts.get(h) || 0) + 1);
+        }
+        for (const h of holeOrder) {
+          if ((perHoleCounts.get(h) || 0) < scorecardIds.length) {
+            currentHole = h;
+            break;
+          }
+        }
+      }
+
+      return res.json({
+        mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
+        scorecardId: Number(scorecard.id),
+        startingHole,
+        currentHole,
+        holeOrder,
+        requesterDisplay: toPlayerLabel(
+          req.session.user.firstName || req.session.user.first_name || '',
+          req.session.user.lastName || req.session.user.last_name || ''
+        ),
+        individualContext,
+        players,
+        holes,
+        femaleHoles,
+        primaryCourseId,
+        femaleCourseId,
+        scorecardIds
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.get('/api/live/:scorecardId/hole/:holeNumber', requireAuth, async (req, res, next) => {
     try {
       const scorecardId = Number(req.params.scorecardId);
@@ -1371,6 +1510,60 @@ function scoringRouter(db) {
       if (scorecard.status === 'submitted' && !isAdmin(req)) {
         return res.status(409).json({ error: 'Scorecard has been submitted and is locked' });
       }
+
+      // ── Lean path: client has already loaded ctx via /init ────────────────
+      // ?sids=42,43,44 — scorecard IDs for the group (from init response)
+      // ?start=N       — starting hole for cumulative window (from init response)
+      const rawSids = req.query.sids;
+      if (rawSids) {
+        const sids = rawSids.split(',').map(Number).filter((n) => Number.isFinite(n) && n > 0);
+        if (!sids.length) return res.status(400).json({ error: 'Invalid sids' });
+
+        // Permission: same check as the full path. Admins skip the DB queries.
+        if (!canEditAllScores(req.session.user)) {
+          if (scorecard.type === 'individual') {
+            const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+            const targetGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id);
+            if (!requesterGroup || !targetGroup || requesterGroup.id !== targetGroup.id) {
+              return res.status(403).json({ error: 'Not allowed' });
+            }
+          } else {
+            const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+            if (!requesterGroup) return res.status(403).json({ error: 'Not allowed' });
+          }
+        }
+
+        // Scores for this hole and cumulative totals — the only dynamic data.
+        const startingHole = Number(req.query.start || 1);
+        const windowHoles = holesUpToCurrent(startingHole, holeNumber);
+        const parByHole = await getParByHole(db, scorecard.tour_id, scorecard.round_number);
+
+        const [holeScores, cumulativeByScorecard] = await Promise.all([
+          db('scorecard_holes')
+            .whereIn('scorecard_id', sids)
+            .where({ hole_number: holeNumber })
+            .select('scorecard_id', 'gross_score', 'stableford_points', 'version'),
+          getCumulativeByScorecard(db, sids, windowHoles, parByHole),
+        ]);
+
+        const holeScoreByCard = new Map(holeScores.map((r) => [Number(r.scorecard_id), r]));
+        const scores = sids.map((sid) => {
+          const saved = holeScoreByCard.get(sid);
+          const cumulative = cumulativeByScorecard.get(sid) || { holesPlayed: 0, stablefordTotal: 0 };
+          return {
+            scorecardId: sid,
+            grossScore: saved ? Number(saved.gross_score) : null,
+            version: saved ? Number(saved.version || 1) : 0,
+            stablefordPoints: saved && saved.stableford_points !== null ? Number(saved.stableford_points) : null,
+            stablefordTotal: Number(cumulative.stablefordTotal || 0),
+            stablefordRelative: Number(cumulative.stablefordTotal || 0) - (Number(cumulative.holesPlayed || 0) * 2),
+            holesPlayed: Number(cumulative.holesPlayed || 0)
+          };
+        });
+
+        return res.json({ holeNumber, scores });
+      }
+      // ── End lean path ─────────────────────────────────────────────────────
 
       // Lazy-warm the module cache on first request after a process restart.
       // isRoundCacheWarm is a pure Map scan — no DB cost when already warm.

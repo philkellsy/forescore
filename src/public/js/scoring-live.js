@@ -24,6 +24,7 @@
 
   let touchStartX = null;
   let isNavigating = false;
+  let ctx = null; // static context from /init — players, holes, individualContext
   let currentHole = Number(state.holeNumber || state.startingHole || 1);
   let currentPar = Number(state.hole?.par || 0);
   let currentSiPrimary = Number(state.hole?.strokeIndexPrimary || 0);
@@ -36,7 +37,7 @@
   let offlineSync = null;
   let warmCachePromise = null;
   const warmedHoles = new Set();
-  const holeOrder = holeSequenceFrom(Number(state.startingHole || 1));
+  let holeOrder = holeSequenceFrom(Number(state.startingHole || 1));
   const conflictStorageKey = `scorecardConflictState:${Number(state.scorecardId)}`;
   let forceOfflineTestMode = false;
 
@@ -281,16 +282,102 @@
     return Math.max(0, 2 - toPar);
   }
 
+  // ── Init fetch ────────────────────────────────────────────────────────────
+  async function fetchInitFromServer() {
+    const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/init`));
+    if (!res.ok) {
+      if (offlineStore) {
+        const cached = await offlineStore.getInit(state.scorecardId);
+        if (cached) return cached;
+      }
+      throw new Error('Failed to load scorecard context');
+    }
+    const json = await res.json();
+    if (offlineStore) offlineStore.saveInit(state.scorecardId, json).catch(() => {});
+    return json;
+  }
+
+  async function fetchInit() {
+    if (!isEffectivelyOnline()) {
+      if (offlineStore) {
+        const cached = await offlineStore.getInit(state.scorecardId);
+        if (cached) return cached;
+      }
+      throw new Error('Offline');
+    }
+    return fetchInitFromServer();
+  }
+
+  // ── Hole view builder: merges static ctx with live scores ─────────────────
+  function buildHoleView(holeNumber, scores) {
+    const hole = ctx.holes[Number(holeNumber)] || {};
+    const scoreByCard = new Map((scores || []).map((s) => [Number(s.scorecardId), s]));
+    const entries = ctx.players.map((player) => {
+      const score = scoreByCard.get(Number(player.scorecardId)) || {};
+      return {
+        type: 'player',
+        scorecardId: player.scorecardId,
+        participantId: player.participantId,
+        displayName: player.displayName,
+        fullName: player.fullName,
+        playingHandicap: player.playingHandicap,
+        handicapDisplay: player.handicapDisplay,
+        grossScore: score.grossScore ?? null,
+        holeVersion: score.version || 0,
+        stableford: score.stablefordPoints ?? null,
+        stablefordTotal: score.stablefordTotal || 0,
+        stablefordRelative: score.stablefordRelative || 0
+      };
+    });
+    return {
+      mode: ctx.mode,
+      holeNumber: Number(holeNumber),
+      hole: {
+        par: hole.par || 0,
+        strokeIndexPrimary: hole.strokeIndexPrimary || 0,
+        strokeIndexSecondary: hole.strokeIndexSecondary || 0
+      },
+      entries,
+      individualContext: ctx.individualContext || null,
+      ambroseContext: null
+    };
+  }
+
+  // ── Lean hole fetch (used when ctx is loaded) ─────────────────────────────
+  async function fetchHoleLeanFromServer(holeNumber) {
+    const hole = Number(holeNumber);
+    const sids = (ctx.scorecardIds || []).join(',');
+    const start = ctx.startingHole || 1;
+    const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/hole/${hole}?sids=${sids}&start=${start}`));
+    if (!res.ok) {
+      if (offlineStore) {
+        const cached = await offlineStore.getSnapshot(state.scorecardId, hole);
+        if (cached) return buildHoleView(hole, cached.scores || []);
+      }
+      throw new Error('Failed to load hole data');
+    }
+    const json = await res.json();
+    if (offlineStore) offlineStore.saveSnapshot(state.scorecardId, hole, json).catch(() => {});
+    warmedHoles.add(hole);
+    updateOfflineCacheStatus();
+    return buildHoleView(hole, json.scores);
+  }
+
+  // ── Hole data fetch: lean when ctx available, full legacy otherwise ────────
   async function fetchHoleData(holeNumber) {
     const hole = Number(holeNumber);
     if (!isEffectivelyOnline()) {
       if (offlineStore) {
         const cached = await offlineStore.getSnapshot(state.scorecardId, hole);
-        if (cached) return cached;
+        if (cached) {
+          // Cached data is lean (post-refactor) or full (pre-refactor / legacy)
+          if (ctx && cached.scores) return buildHoleView(hole, cached.scores);
+          return cached;
+        }
       }
       throw new Error('Offline');
     }
-
+    if (ctx) return fetchHoleLeanFromServer(hole);
     return fetchHoleDataFromServer(hole);
   }
 
@@ -305,9 +392,7 @@
       throw new Error('Failed to load hole data');
     }
     const json = await res.json();
-    if (offlineStore) {
-      offlineStore.saveSnapshot(state.scorecardId, hole, json).catch(() => {});
-    }
+    if (offlineStore) offlineStore.saveSnapshot(state.scorecardId, hole, json).catch(() => {});
     warmedHoles.add(hole);
     updateOfflineCacheStatus();
     return json;
@@ -331,7 +416,12 @@
         await Promise.all(pending.map(async (hole) => {
           if (!isEffectivelyOnline()) { failed.push(hole); return; }
           try {
-            await fetchHoleDataFromServer(hole);
+            // Use lean fetch when ctx is loaded (much cheaper per hole)
+            if (ctx) {
+              await fetchHoleLeanFromServer(hole);
+            } else {
+              await fetchHoleDataFromServer(hole);
+            }
             updateOfflineCacheStatus({ warming: true });
           } catch (_error) {
             failed.push(hole);
@@ -528,6 +618,30 @@
     return { id, opId: op.opId };
   }
 
+  // Runs conflict detection against a fetched holeData without touching the display.
+  // Used for silent background checks of holes we've navigated away from.
+  function detectConflictsFromData(holeData) {
+    if (!holeData || !Array.isArray(holeData.entries)) return;
+    holeData.entries.forEach((entry) => {
+      const conflict = getConflict(entry.scorecardId, holeData.holeNumber);
+      const expectedGross = getExpectedGross(entry.scorecardId, holeData.holeNumber);
+      const canonicalGross = normalizeGross(entry.grossScore);
+      if (expectedGross !== null && expectedGross !== canonicalGross) {
+        upsertConflict(entry.scorecardId, holeData.holeNumber, expectedGross, {
+          canonicalGross,
+          ownerName: conflict?.ownerName || null
+        });
+      }
+      if (!conflict) return;
+      if (Number(entry.grossScore || 0) === Number(conflict.attemptedGross || 0)) {
+        clearConflict(entry.scorecardId, holeData.holeNumber);
+      } else {
+        conflict.canonicalGross = entry.grossScore;
+      }
+    });
+    ensureConflictPolling();
+  }
+
   function updateCurrentHoleEntry(scorecardId, updater) {
     if (!currentHoleData || !Array.isArray(currentHoleData.entries)) return;
     currentHoleData.entries = currentHoleData.entries.map((entry) => {
@@ -551,13 +665,14 @@
 
     if (groupMetaEl) {
       const isAmbrose = holeData.mode === 'ambrose';
-      const ctx = isAmbrose
+      const groupCtx = isAmbrose
         ? (holeData.ambroseContext || state.ambroseContext)
         : (holeData.individualContext || state.individualContext);
-      if (ctx) {
-        const who = state.requesterDisplay ? ` | ${state.requesterDisplay}` : '';
-        const teeTimeDisplay = ctx.teeTime ? ctx.teeTime.slice(0, 5) : '-';
-        groupMetaEl.textContent = `Group ${ctx.groupNumber || '-'} | ${teeTimeDisplay} | ${ctx.teeLocation || '-'}${who}`;
+      if (groupCtx) {
+        const requesterDisplay = ctx?.requesterDisplay || state.requesterDisplay || '';
+        const who = requesterDisplay ? ` | ${requesterDisplay}` : '';
+        const teeTimeDisplay = groupCtx.teeTime ? groupCtx.teeTime.slice(0, 5) : '-';
+        groupMetaEl.textContent = `Group ${groupCtx.groupNumber || '-'} | ${teeTimeDisplay} | ${groupCtx.teeLocation || '-'}${who}`;
       } else {
         groupMetaEl.textContent = '';
       }
@@ -819,6 +934,7 @@
     if (isNavigating) return;
     if (hasConflictsForHole(currentHole)) return;
     setHoleLoading(true);
+    const prevHole = currentHole;
     try {
       const nextIndex = currentHoleIndex() + Number(offset || 0);
       if (nextIndex > holeOrder.length - 1) {
@@ -830,6 +946,12 @@
       try {
         const holeData = await fetchHoleData(nextHole);
         await render(holeData);
+        // Silent background re-fetch of the hole we just left — detects any
+        // same-group score changes that occurred during the navigation window
+        // without re-rendering (which would visually jump back to that hole).
+        if (isEffectivelyOnline() && prevHole !== nextHole) {
+          fetchHoleData(prevHole).then(detectConflictsFromData).catch(() => {});
+        }
       } catch (error) {
         if (error && error.message === 'Offline') {
           setTransientStatus(`Hole ${nextHole} is not cached for offline yet.`, 'warning');
@@ -1007,9 +1129,17 @@
   (async () => {
     setHoleLoading(true);
     try {
+      // Load static context (players, handicaps, all hole configs) once.
+      // On success, ctx drives all subsequent rendering — no per-hole DB work for static data.
+      ctx = await fetchInit();
+      holeOrder = ctx.holeOrder || holeSequenceFrom(Number(ctx.startingHole || 1));
+      currentHole = Number(ctx.currentHole || state.holeNumber || state.startingHole || 1);
+
       const holeData = await fetchHoleData(currentHole);
       await render(holeData);
     } catch (_error) {
+      // If init failed (offline on first load), fall back to server-rendered state
+      // so the page still shows something. First navigation will retry init.
       await render({
         mode: state.mode,
         holeNumber: currentHole,
