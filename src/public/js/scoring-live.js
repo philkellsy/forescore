@@ -790,13 +790,54 @@
     setGross(scorecardId, nextGross);
   }
 
-  // Score entry is fully client-side: update local state + DOM immediately, sync to server
-  // in the background via the queue. No await, no network round trip before UI updates.
+  // When online, send directly to the server (fire-and-forget). Only fall back to the
+  // IndexedDB queue when offline or when the direct send fails — this prevents stale ops
+  // from old sessions from blocking current scores.
+  function sendGrossNow(scorecardId, holeNumber, grossScore, opId, baseVersion) {
+    if (!isEffectivelyOnline()) {
+      enqueueOfflineOp('gross', scorecardId, holeNumber, { scorecardId, holeNumber, grossScore, opId, baseVersion }).catch(() => {});
+      return;
+    }
+    const op = { opId, scorecardId: Number(scorecardId), holeNumber: Number(holeNumber), payload: { scorecardId, holeNumber, grossScore, opId, baseVersion } };
+    sendQueuedGrossOp(op).then((result) => {
+      if (result.ok) {
+        setExpectedGross(Number(scorecardId), holeNumber, grossScore);
+        clearConflict(Number(scorecardId), holeNumber);
+        if (Number(holeNumber) === Number(currentHole) && result.payload?.holeVersion !== undefined) {
+          updateCurrentHoleEntry(scorecardId, (entry) => {
+            entry.holeVersion = Number(result.payload.holeVersion || 0);
+            return entry;
+          });
+        }
+        return;
+      }
+      if (result.status === 409) {
+        upsertConflict(Number(scorecardId), holeNumber, grossScore, result.payload || {});
+        if (Number(holeNumber) === Number(currentHole)) {
+          fetchHoleData(currentHole).then((holeData) => render(holeData)).catch(() => {});
+        }
+        return;
+      }
+      if (result.status === 404) {
+        const isCurrentGroup = ctx && Array.isArray(ctx.scorecardIds) && ctx.scorecardIds.some((s) => Number(s) === Number(scorecardId));
+        if (isCurrentGroup) setTransientStatus('Scoring session is out of date — please reload the page.', 'danger');
+        return;
+      }
+      // Transient server error — queue for retry.
+      enqueueOfflineOp('gross', scorecardId, holeNumber, { scorecardId, holeNumber, grossScore, opId, baseVersion }).catch(() => {});
+    }).catch(() => {
+      // Network failure — queue for retry.
+      enqueueOfflineOp('gross', scorecardId, holeNumber, { scorecardId, holeNumber, grossScore, opId, baseVersion }).catch(() => {});
+    });
+  }
+
+  // Score entry is fully client-side: update local state + DOM immediately, then sync.
   function setGross(scorecardId, grossScore) {
     if (dayStatus !== 'open') return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const normalizedGross = normalizeGross(grossScore);
     const baseVersion = getCurrentHoleVersion(scorecardId);
+    const opId = newOpId();
 
     const prevEntry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
     const prevStableford = prevEntry?.stableford ?? null;
@@ -824,13 +865,7 @@
     const updated = updateScoreDisplay(scorecardId, normalizedGross, nextStableford, nextTotal, nextRelative);
     if (!updated && currentHoleData) render(currentHoleData).catch(() => {});
 
-    // Queue for background sync (fire-and-forget — does not block the UI).
-    enqueueOfflineOp('gross', scorecardId, currentHole, {
-      scorecardId: Number(scorecardId),
-      holeNumber: Number(currentHole),
-      grossScore: normalizedGross,
-      baseVersion
-    }).catch(() => {});
+    sendGrossNow(scorecardId, Number(currentHole), normalizedGross, opId, baseVersion);
   }
 
   async function setDrive(scorecardId, driveTakenUserId) {
