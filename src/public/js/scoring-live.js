@@ -731,136 +731,96 @@
     }
   }
 
-  async function adjustGross(scorecardId, delta) {
-    if (!isEditingEnabled()) return;
-    if (!Number.isFinite(Number(scorecardId))) return;
-    const card = entriesContainer.querySelector(`.score-adjuster[data-scorecard-id="${scorecardId}"]`);
-    const grossEl = card ? card.querySelector('.gross-pill') : null;
-    if (!grossEl) return;
+  // Surgically update a player's score display in the current DOM without a full re-render.
+  // Returns true if the card was found and updated; false if a full render is needed.
+  function updateScoreDisplay(scorecardId, grossScore, stableford, stablefordTotal, stablefordRelative) {
+    const adjuster = entriesContainer.querySelector(`.score-adjuster[data-scorecard-id="${Number(scorecardId)}"]`);
+    if (!adjuster) return false;
+    const card = adjuster.closest('.individual-entry-card');
+    if (!card) return false;
 
-    const currentGross = Number(grossEl.dataset.grossValue || grossEl.textContent || 0);
-    const nextGross = Math.min(20, Math.max(0, currentGross + delta));
-    await setGross(scorecardId, nextGross);
+    const gross = Number(grossScore || 0);
+    const playingHandicap = Number(adjuster.querySelector('.pickup-btn')?.dataset.playingHandicap || 0);
+    const showPickup = gross > 0 && stablefordForGross(gross, currentPar, currentSiPrimary, currentSiSecondary, playingHandicap) === 0;
+
+    const perfClass = (() => {
+      if (!gross) return '';
+      if (gross === 1) return 'gross-pill-hole-in-one';
+      if (currentPar > 0) {
+        if (gross <= currentPar - 2) return 'gross-pill-eagle';
+        if (gross === currentPar - 1) return 'gross-pill-birdie';
+      }
+      return '';
+    })();
+
+    const grossEl = adjuster.querySelector('.gross-pill');
+    if (grossEl) {
+      grossEl.dataset.grossValue = String(gross);
+      grossEl.textContent = String(showPickup ? 'P' : (gross || ''));
+      grossEl.className = ['gross-pill', perfClass, perfClass ? 'gross-pill-disc' : ''].filter(Boolean).join(' ');
+    }
+
+    const stbEl = card.querySelector('.individual-stableford-chip strong');
+    if (stbEl) stbEl.textContent = stableford !== null && stableford !== undefined ? String(stableford) : '-';
+
+    const metricsEl = card.querySelector('.individual-metrics-inline');
+    if (metricsEl) {
+      const metricVals = metricsEl.querySelectorAll('.fw-semibold');
+      if (metricVals[0]) metricVals[0].textContent = String(Number(stablefordTotal || 0));
+      if (metricVals[1]) {
+        const rel = Number(stablefordRelative || 0);
+        metricVals[1].textContent = rel === 0 ? 'E' : (rel > 0 ? `${rel}up` : `${Math.abs(rel)}dn`);
+        metricVals[1].className = `small fw-semibold ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
+      }
+    }
+    return true;
   }
 
-  async function setGross(scorecardId, grossScore) {
+  function adjustGross(scorecardId, delta) {
+    if (!isEditingEnabled()) return;
+    if (!Number.isFinite(Number(scorecardId))) return;
+    const entry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
+    const currentGross = Number(entry?.grossScore || 0);
+    const nextGross = Math.min(20, Math.max(0, currentGross + delta));
+    setGross(scorecardId, nextGross);
+  }
+
+  // Score entry is fully client-side: update local state + DOM immediately, sync to server
+  // in the background via the queue. No await, no network round trip before UI updates.
+  function setGross(scorecardId, grossScore) {
     if (dayStatus !== 'open') return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const normalizedGross = normalizeGross(grossScore);
     const baseVersion = getCurrentHoleVersion(scorecardId);
 
-    if (!isEffectivelyOnline()) {
-      const queued = await enqueueOfflineOp('gross', scorecardId, currentHole, {
-        scorecardId: Number(scorecardId),
-        holeNumber: Number(currentHole),
-        grossScore: normalizedGross,
-        baseVersion
-      });
-      if (queued && queued.opId) {
-        updateCurrentHoleEntry(scorecardId, (entry) => {
-          const isPlayer = entry.type !== 'team';
-          const playingHandicap = isPlayer ? Number(entry.playingHandicap || 0) : Number(entry.teamHandicap || 0);
-          const nextStableford = stablefordForGross(
-            normalizedGross,
-            currentPar,
-            currentSiPrimary,
-            currentSiSecondary,
-            playingHandicap
-          );
-          entry.grossScore = normalizedGross;
-          entry.stableford = nextStableford;
-          entry.holeVersion = baseVersion;
-          return entry;
-        });
-        if (currentHoleData) await render(currentHoleData);
-      }
-      return;
-    }
+    const prevEntry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
+    const prevStableford = prevEntry?.stableford ?? null;
+    const playingHandicap = Number(prevEntry?.playingHandicap || 0);
+    const nextStableford = normalizedGross === 0 ? null
+      : stablefordForGross(normalizedGross, currentPar, currentSiPrimary, currentSiSecondary, playingHandicap);
+    const delta = (nextStableford ?? 0) - (prevStableford ?? 0);
+    const nextTotal = Number(prevEntry?.stablefordTotal || 0) + delta;
+    const nextRelative = Number(prevEntry?.stablefordRelative || 0) + delta;
 
-    // Optimistic update — show the new score immediately without waiting for server.
-    let prevGross = null;
-    let prevStableford = null;
-    if (currentHoleData?.entries) {
-      const prev = currentHoleData.entries.find((e) => Number(e.scorecardId) === Number(scorecardId));
-      if (prev) { prevGross = prev.grossScore; prevStableford = prev.stableford; }
-    }
-    const playingHandicap = (() => {
-      if (!currentHoleData?.entries) return 0;
-      const e = currentHoleData.entries.find((en) => Number(en.scorecardId) === Number(scorecardId));
-      return Number(e?.playingHandicap || 0);
-    })();
-    const nextStableford = normalizedGross === 0 ? null : stablefordForGross(normalizedGross, currentPar, currentSiPrimary, currentSiSecondary, playingHandicap);
-    const prevPoints = prevStableford ?? 0;
-    const nextPoints = nextStableford ?? 0;
-    const delta = nextPoints - prevPoints;
     updateCurrentHoleEntry(scorecardId, (entry) => {
       entry.grossScore = normalizedGross;
       entry.stableford = nextStableford;
-      entry.stablefordTotal = Number(entry.stablefordTotal || 0) + delta;
-      entry.stablefordRelative = Number(entry.stablefordRelative || 0) + delta;
+      entry.stablefordTotal = nextTotal;
+      entry.stablefordRelative = nextRelative;
       return entry;
     });
-    if (currentHoleData) await render(currentHoleData);
 
-    const opId = newOpId();
-    const res = await fetch(tp('/scoring/api/live/gross'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scorecardId,
-        holeNumber: currentHole,
-        grossScore: normalizedGross,
-        opId,
-        baseVersion
-      })
-    });
+    // Surgical DOM update — instant, no full re-render.
+    const updated = updateScoreDisplay(scorecardId, normalizedGross, nextStableford, nextTotal, nextRelative);
+    if (!updated && currentHoleData) render(currentHoleData).catch(() => {});
 
-    if (res.status === 409) {
-      const data = await res.json().catch(() => ({}));
-      if (data?.error === 'conflict') {
-        setExpectedGross(scorecardId, currentHole, normalizedGross);
-        upsertConflict(scorecardId, currentHole, normalizedGross, data);
-        const holeData = await fetchHoleData(currentHole);
-        await render(holeData);
-      } else {
-        // Non-conflict 409 (e.g. round closed) — roll back the optimistic update.
-        updateCurrentHoleEntry(scorecardId, (entry) => {
-          entry.grossScore = prevGross;
-          entry.stableford = prevStableford;
-          entry.stablefordTotal = Number(entry.stablefordTotal || 0) - delta;
-          entry.stablefordRelative = Number(entry.stablefordRelative || 0) - delta;
-          return entry;
-        });
-        if (currentHoleData) await render(currentHoleData);
-      }
-      return;
-    }
-
-    if (!res.ok) {
-      // Network error — roll back.
-      updateCurrentHoleEntry(scorecardId, (entry) => {
-        entry.grossScore = prevGross;
-        entry.stableford = prevStableford;
-        entry.stablefordTotal = Number(entry.stablefordTotal || 0) - delta;
-        entry.stablefordRelative = Number(entry.stablefordRelative || 0) - delta;
-        return entry;
-      });
-      if (currentHoleData) await render(currentHoleData);
-      return;
-    }
-
-    const successPayload = await res.json().catch(() => ({}));
-    setExpectedGross(scorecardId, currentHole, normalizedGross);
-    clearConflict(scorecardId, currentHole);
-    // Confirm server-authoritative values without a re-fetch.
-    updateCurrentHoleEntry(scorecardId, (entry) => {
-      if (successPayload.holeVersion !== undefined) entry.holeVersion = Number(successPayload.holeVersion || 0);
-      if (successPayload.stableford !== undefined && successPayload.stableford !== null) entry.stableford = successPayload.stableford;
-      return entry;
-    });
-    if (offlineStore && currentHoleData) {
-      offlineStore.saveSnapshot(state.scorecardId, currentHole, currentHoleData).catch(() => {});
-    }
+    // Queue for background sync (fire-and-forget — does not block the UI).
+    enqueueOfflineOp('gross', scorecardId, currentHole, {
+      scorecardId: Number(scorecardId),
+      holeNumber: Number(currentHole),
+      grossScore: normalizedGross,
+      baseVersion
+    }).catch(() => {});
   }
 
   async function setDrive(scorecardId, driveTakenUserId) {
@@ -900,10 +860,10 @@
   function bindAdjustmentHandlers() {
     entriesContainer.querySelectorAll('.adjust-btn').forEach((btn) => {
       if (!isEditingEnabled()) btn.setAttribute('disabled', 'disabled');
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         const delta = Number(btn.dataset.delta || 0);
         const scorecardId = Number(btn.closest('.score-adjuster').dataset.scorecardId);
-        await adjustGross(scorecardId, delta);
+        adjustGross(scorecardId, delta);
       });
     });
   }
@@ -922,13 +882,13 @@
   function bindPickupHandlers() {
     entriesContainer.querySelectorAll('.pickup-btn').forEach((btn) => {
       if (!isEditingEnabled()) btn.setAttribute('disabled', 'disabled');
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         if (!isEditingEnabled()) return;
         const scorecardId = Number(btn.dataset.scorecardId);
         const playingHandicap = Number(btn.dataset.playingHandicap || 0);
         if (!Number.isFinite(scorecardId)) return;
         const pickupGross = minGrossForPickup(currentPar, currentSiPrimary, currentSiSecondary, playingHandicap);
-        await setGross(scorecardId, pickupGross);
+        setGross(scorecardId, pickupGross);
       });
     });
   }
@@ -949,7 +909,7 @@
     entriesContainer.querySelectorAll('.gross-pill').forEach((pill) => {
       pill.style.cursor = 'pointer';
       pill.title = 'Tap to set par when empty';
-      pill.addEventListener('click', async () => {
+      pill.addEventListener('click', () => {
         if (!isEditingEnabled()) return;
         const adjuster = pill.closest('.score-adjuster');
         if (!adjuster) return;
@@ -959,7 +919,7 @@
         if (currentGross !== 0) return;
         const par = Number(holeParEl.textContent || 0);
         if (!Number.isFinite(par) || par < 1) return;
-        await setGross(scorecardId, par);
+        setGross(scorecardId, par);
       });
     });
   }
@@ -1100,22 +1060,33 @@
       isEffectivelyOnline,
       sendGross: sendQueuedGrossOp,
       sendDrive: sendQueuedDriveOp,
-      onAck: async (op) => {
-        if (Number(op.holeNumber) === Number(currentHole)) {
-          await refreshCurrentHole();
+      onAck: (op, result) => {
+        const opSid = Number(op.payload?.scorecardId || op.scorecardId);
+        const opHole = Number(op.payload?.holeNumber || op.holeNumber);
+        const opGross = Number(op.payload?.grossScore || 0);
+        // Mark this submission as accepted so conflict detection doesn't fire.
+        setExpectedGross(opSid, opHole, opGross);
+        clearConflict(opSid, opHole);
+        // Silently record the server-confirmed version — no re-render needed.
+        if (opHole === Number(currentHole) && result?.payload?.holeVersion !== undefined) {
+          updateCurrentHoleEntry(opSid, (entry) => {
+            entry.holeVersion = Number(result.payload.holeVersion || 0);
+            return entry;
+          });
         }
       },
       onConflict: async (op, payload) => {
         if (op.type === 'gross') {
           upsertConflict(
-            Number(op.scorecardId),
+            Number(op.payload?.scorecardId || op.scorecardId),
             Number(op.holeNumber),
             Number(op.payload?.grossScore || 0),
             payload || {}
           );
         }
         if (Number(op.holeNumber) === Number(currentHole)) {
-          await refreshCurrentHole();
+          const holeData = await fetchHoleData(currentHole);
+          await render(holeData);
         }
       }
     });
