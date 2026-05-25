@@ -11,8 +11,7 @@ if (!window.__FORESCORE_APP_INIT__) {
     bar.id = 'fs-loading-bar';
     document.documentElement.appendChild(bar);
 
-    let t1 = null, t2 = null, overlayTimer = null;
-    const OVERLAY_DELAY_MS = 80;
+    let t1 = null, t2 = null;
 
     function getOverlay() {
       let el = document.getElementById('fsPageOverlay');
@@ -28,7 +27,7 @@ if (!window.__FORESCORE_APP_INIT__) {
     }
 
     function start() {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(overlayTimer);
+      clearTimeout(t1); clearTimeout(t2);
       bar.classList.remove('is-complete');
       bar.style.width = '0%';
       bar.classList.add('is-active');
@@ -37,14 +36,13 @@ if (!window.__FORESCORE_APP_INIT__) {
         t1 = setTimeout(() => { bar.style.width = '60%'; }, 400);
         t2 = setTimeout(() => { bar.style.width = '85%'; }, 2500);
       });
-      overlayTimer = setTimeout(() => {
-        const overlay = getOverlay();
-        if (overlay) overlay.classList.add('is-visible');
-      }, OVERLAY_DELAY_MS);
+      // Show overlay synchronously — the 80ms delay caused it to miss fast (cached) navigations.
+      const overlay = getOverlay();
+      if (overlay) overlay.classList.add('is-visible');
     }
 
     function done() {
-      clearTimeout(t1); clearTimeout(t2); clearTimeout(overlayTimer);
+      clearTimeout(t1); clearTimeout(t2);
       bar.classList.add('is-complete');
       const overlay = getOverlay();
       if (overlay) overlay.classList.remove('is-visible');
