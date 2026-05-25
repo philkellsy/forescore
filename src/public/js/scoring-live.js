@@ -71,6 +71,11 @@
     offlineTestToggleBtn.textContent = forceOfflineTestMode ? 'Disable Offline Test' : 'Enable Offline Test';
     offlineTestToggleBtn.classList.toggle('btn-outline-secondary', !forceOfflineTestMode);
     offlineTestToggleBtn.classList.toggle('btn-warning', forceOfflineTestMode);
+    if (forceOfflineTestMode) {
+      setTransientStatus('OFFLINE TEST MODE — scores are not syncing to the server.', 'warning');
+    } else {
+      clearTransientStatus();
+    }
   }
 
   function ensureTransientStatusEl() {
@@ -1092,6 +1097,16 @@
         if (Number(op.holeNumber) === Number(currentHole)) {
           const holeData = await fetchHoleData(currentHole);
           await render(holeData);
+        }
+      },
+      onPermanentFail: (op) => {
+        // 404 = scorecard deleted (e.g. round was reset). Silently discard stale
+        // ops from old sessions; only surface an error if the op is for a scorecard
+        // that belongs to the current group.
+        const opSid = Number(op.payload?.scorecardId || op.scorecardId);
+        const isCurrentGroup = ctx && Array.isArray(ctx.scorecardIds) && ctx.scorecardIds.some((s) => Number(s) === opSid);
+        if (isCurrentGroup) {
+          setTransientStatus('Scoring session is out of date — please reload the page.', 'danger');
         }
       }
     });

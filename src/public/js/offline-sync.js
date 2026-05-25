@@ -62,6 +62,14 @@
               continue;
             }
 
+            // 404 = scorecard no longer exists (e.g. round was reset). Retrying
+            // will never succeed — discard and notify so the UI can react.
+            if (Number(result?.status) === 404) {
+              await store.markAcked(op.id);
+              if (typeof config?.onPermanentFail === 'function') config.onPermanentFail(op, result);
+              continue;
+            }
+
             await store.markFailed(op.id, result?.error || 'sync_failed');
           } catch (error) {
             await store.markFailed(op.id, error?.message || String(error));
