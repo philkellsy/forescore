@@ -96,7 +96,7 @@ function playerRouter(db) {
       const allRoundRows = await db('golf_rounds')
         .where({ tour_id: tourId })
         .orderBy('round_number')
-        .select('round_number', 'status', 'calc_type', 'course_id', 'female_course_id', 'leaderboard_published');
+        .select('round_number', 'tour_date', 'status', 'calc_type', 'course_id', 'female_course_id', 'leaderboard_published');
 
       const openRound = allRoundRows.find((r) => r.status === 'open') || null;
 

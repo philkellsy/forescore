@@ -93,8 +93,22 @@
                 <% if (openRound) { %>
                   <section class="card border-0 shadow-sm mb-3">
                     <div class="card-body">
+                      <%
+                        const _roundDateKey = openRound.tour_date ? String(openRound.tour_date).slice(0, 10) : null;
+                        let _roundDateLabel;
+                        if (!_roundDateKey || _roundDateKey === todayKey) {
+                          _roundDateLabel = 'Today';
+                        } else if (_roundDateKey === tomorrowKey) {
+                          _roundDateLabel = 'Tomorrow';
+                        } else {
+                          const _d = new Date(_roundDateKey + 'T12:00:00');
+                          const _days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+                          const _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                          _roundDateLabel = `${_days[_d.getDay()]} ${_d.getDate()} ${_months[_d.getMonth()]}`;
+                        }
+                      %>
                       <h2 class="h6 text-muted text-uppercase mb-3" style="letter-spacing:.05em;font-size:.7rem">
-                        Today &middot; <%= dayLabel(openRound.round_number) %>
+                        <%= _roundDateLabel %> &middot; <%= dayLabel(openRound.round_number) %>
                       </h2>
                       <% if (todayGroup) { %>
                         <div class="d-flex justify-content-between align-items-start mb-3">
