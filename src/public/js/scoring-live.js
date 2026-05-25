@@ -487,7 +487,7 @@
           </div>
         `
         : `
-          <div class="d-flex align-items-start gap-3 ms-2 individual-metrics-inline">
+          <div class="d-flex gap-3 individual-metrics-inline">
             <div class="text-end">
               <div class="small text-muted">Total</div>
               <div class="small fw-semibold text-dark">${Number(entry.stablefordTotal || 0)}</div>
@@ -557,13 +557,15 @@
                 <strong>${stableford}</strong>
               </div>
             </div>
-            <div class="d-flex justify-content-between align-items-center mt-2 gap-2">
+            <div class="mt-2">
               <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
                 <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
                 <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
                 <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
                 <button type="button" class="btn btn-outline-dark btn-lg pickup-btn" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
               </div>
+            </div>
+            <div class="mt-1">
               ${conflictPanel || rightMetrics}
             </div>
           </div>
@@ -761,7 +763,7 @@
     const grossEl = adjuster.querySelector('.gross-pill');
     if (grossEl) {
       grossEl.dataset.grossValue = String(gross);
-      grossEl.textContent = String(showPickup ? 'P' : (gross || ''));
+      grossEl.textContent = String(showPickup ? 'P' : gross);
       grossEl.className = ['gross-pill', perfClass, perfClass ? 'gross-pill-disc' : ''].filter(Boolean).join(' ');
     }
 
