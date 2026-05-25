@@ -179,6 +179,11 @@ body {
   gap: 0.6rem;
 }
 
+.score-adjuster .btn,
+.score-adjuster .gross-pill {
+  touch-action: manipulation;
+}
+
 .handicap-input {
   width: 4.25rem;
   min-width: 4.25rem;
