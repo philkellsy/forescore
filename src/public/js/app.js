@@ -65,6 +65,12 @@ if (!window.__FORESCORE_APP_INIT__) {
     if (link.hasAttribute('download')) return;
     const href = link.getAttribute('href') || '';
     if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+    // Bootstrap doesn't auto-dismiss the offcanvas on nav link clicks — close it explicitly.
+    const navMenu = document.getElementById('navMenu');
+    if (navMenu && window.bootstrap) {
+      const bsOffcanvas = window.bootstrap.Offcanvas.getInstance(navMenu);
+      if (bsOffcanvas) bsOffcanvas.hide();
+    }
     loadingBar.start();
   }, true);
 
@@ -88,7 +94,17 @@ if (!window.__FORESCORE_APP_INIT__) {
   });
 
   // Complete bar when page is shown (including back/forward cache)
-  window.addEventListener('pageshow', () => loadingBar.done());
+  window.addEventListener('pageshow', (e) => {
+    loadingBar.done();
+    // If the page is restored from bfcache, the offcanvas may still be visually open — close it.
+    if (e.persisted && window.bootstrap) {
+      const navMenu = document.getElementById('navMenu');
+      if (navMenu) {
+        const bsOffcanvas = window.bootstrap.Offcanvas.getInstance(navMenu);
+        if (bsOffcanvas) bsOffcanvas.hide();
+      }
+    }
+  });
   // ── End loading bar ────────────────────────────────────────────────────────
 
   if ('serviceWorker' in navigator) {
