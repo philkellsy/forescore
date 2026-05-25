@@ -425,6 +425,11 @@ body {
   font-size: 1.1rem;
 }
 
+.swipe-hint {
+  font-size: 0.75rem;
+  opacity: 0.45;
+}
+
 .entry-metrics {
   gap: 0.65rem;
 }
