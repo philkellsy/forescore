@@ -32,6 +32,7 @@
   const localConflicts = new Map();
   const localExpectedGross = new Map();
   const scoredHoles = new Set();
+  const pendingGrossSends = new Map();
   let conflictPollTimer = null;
   let currentHoleData = null;
   let offlineStore = null;
@@ -882,6 +883,21 @@
     setGross(scorecardId, nextGross);
   }
 
+  // Debounce gross sends so rapid +/- taps collapse into a single request.
+  // Reads baseVersion on first press of a sequence (before any server response is
+  // expected) and reuses it for the final send, avoiding spurious version conflicts.
+  function scheduleGrossSend(scorecardId, holeNumber, grossScore) {
+    const key = `${scorecardId}:${holeNumber}`;
+    const existing = pendingGrossSends.get(key);
+    if (existing) clearTimeout(existing.timer);
+    const baseVersion = existing ? existing.baseVersion : getCurrentHoleVersion(scorecardId);
+    const timer = setTimeout(() => {
+      pendingGrossSends.delete(key);
+      sendGrossNow(scorecardId, holeNumber, grossScore, newOpId(), baseVersion);
+    }, 300);
+    pendingGrossSends.set(key, { timer, baseVersion });
+  }
+
   // When online, send directly to the server (fire-and-forget). Only fall back to the
   // IndexedDB queue when offline or when the direct send fails — this prevents stale ops
   // from old sessions from blocking current scores.
@@ -928,8 +944,6 @@
     if (dayStatus !== 'open') return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const normalizedGross = normalizeGross(grossScore);
-    const baseVersion = getCurrentHoleVersion(scorecardId);
-    const opId = newOpId();
 
     const prevEntry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
     const prevStableford = prevEntry?.stableford ?? null;
@@ -958,7 +972,7 @@
     if (!updated && currentHoleData) render(currentHoleData).catch(() => {});
 
     scoredHoles.add(Number(currentHole));
-    sendGrossNow(scorecardId, Number(currentHole), normalizedGross, opId, baseVersion);
+    scheduleGrossSend(scorecardId, Number(currentHole), normalizedGross);
   }
 
   async function setDrive(scorecardId, driveTakenUserId) {
