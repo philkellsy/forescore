@@ -1617,6 +1617,40 @@ function scoringRouter(db) {
     }
   });
 
+  router.get('/api/live/:scorecardId/round-scores', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.params.scorecardId);
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
+
+      if (!canEditAllScores(req.session.user)) {
+        const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+        const targetGroup = scorecard.type === 'individual'
+          ? await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id)
+          : requesterGroup;
+        if (!requesterGroup || !targetGroup || requesterGroup.id !== targetGroup.id) {
+          return res.status(403).json({ error: 'Not allowed' });
+        }
+      }
+
+      const rows = await db('scorecard_holes')
+        .where({ scorecard_id: scorecardId })
+        .orderBy('hole_number')
+        .select('hole_number', 'gross_score', 'stableford_points');
+
+      return res.json({
+        scorecardId,
+        holes: rows.map((r) => ({
+          holeNumber: Number(r.hole_number),
+          grossScore: r.gross_score !== null ? Number(r.gross_score) : null,
+          stablefordPoints: r.stableford_points !== null ? Number(r.stableford_points) : null,
+        }))
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.post('/api/live/gross', requireAuth, async (req, res, next) => {
     try {
       const scorecardId = Number(req.body.scorecardId);

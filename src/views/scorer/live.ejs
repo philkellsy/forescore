@@ -55,6 +55,14 @@
       <p class="text-center text-muted mt-3 swipe-hint">↔️ swipe to move holes</p>
     </main>
 
+    <div class="offcanvas offcanvas-bottom round-summary-offcanvas" tabindex="-1" id="roundSummaryOffcanvas" aria-labelledby="roundSummaryTitle">
+      <div class="offcanvas-header border-bottom py-2">
+        <h5 class="offcanvas-title h6 mb-0" id="roundSummaryTitle">Round Summary</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body px-3 py-2" id="roundSummaryBody"></div>
+    </div>
+
     <script>
       window.__SCORECARD_LIVE__ = <%- JSON.stringify(payload) %>;
       window.__DAY_STATUS__ = "<%= dayStatus.status %>";

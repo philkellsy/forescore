@@ -451,7 +451,7 @@
     const hasScorecard = Number.isFinite(Number(entry.scorecardId));
     const shotDots = (hcp) => {
       const n = strokesForHole(hcp, currentSiPrimary, currentSiSecondary);
-      if (n > 0) return `<span class="text-success ms-1" style="font-size:1.4rem;line-height:1">${'•'.repeat(n)}</span>`;
+      if (n > 0) return `<span class="text-success ms-1" style="font-size:2.5rem;line-height:0;vertical-align:-0.05em">${'•'.repeat(n)}</span>`;
       if (n < 0) return `<span class="text-danger ms-1">−</span>`;
       return '';
     };
@@ -539,9 +539,18 @@
       return `
         <article class="card border-0 shadow-sm individual-entry-card">
           <div class="card-body py-2">
-            <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
-              <h2 class="h6 mb-0 individual-entry-title min-w-0">${label}</h2>
-              <div class="d-flex gap-2 flex-shrink-0 entry-metrics text-center">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h2 class="h6 mb-0 individual-entry-title flex-grow-1">${label}</h2>
+              ${hasScorecard ? `<button type="button" class="btn btn-sm btn-link text-muted p-0 ms-2 round-summary-btn" data-scorecard-id="${entry.scorecardId}" aria-label="Round summary"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>` : ''}
+            </div>
+            <div class="d-flex align-items-center justify-content-between gap-2">
+              <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
+                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
+                <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
+                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
+                <button type="button" class="btn btn-outline-dark btn-lg pickup-btn" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
+              </div>
+              <div class="d-flex gap-3 flex-shrink-0 entry-metrics text-center">
                 <div>
                   <div class="entry-metrics-label">Stb</div>
                   <div class="entry-metrics-value entry-stb text-dark">${stableford}</div>
@@ -555,14 +564,6 @@
                   <div class="entry-metrics-value entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</div>
                 </div>
               </div>
-            </div>
-            <div class="d-flex align-items-center">
-              <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
-                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
-                <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
-                <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
-              </div>
-              <button type="button" class="btn btn-outline-dark btn-lg pickup-btn ms-auto" data-scorecard-id="${entry.scorecardId}" data-playing-handicap="${Number(entry.playingHandicap || 0)}" ${hasScorecard ? '' : 'disabled'}>P</button>
             </div>
             ${conflictPanel ? `<div class="mt-1">${conflictPanel}</div>` : ''}
           </div>
@@ -729,6 +730,7 @@
     bindDriveHandlers();
     bindGrossShortcutHandlers();
     bindConflictHandlers();
+    bindSummaryHandlers();
     persistConflictState();
     if (offlineStore) {
       offlineStore.saveSnapshot(state.scorecardId, currentHole, holeData).catch(() => {});
@@ -777,6 +779,97 @@
       relEl.className = `entry-metrics-value entry-rel ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
     }
     return true;
+  }
+
+  async function showRoundSummary(scorecardId, playerName) {
+    const offcanvasEl = document.getElementById('roundSummaryOffcanvas');
+    if (!offcanvasEl) return;
+
+    const titleEl = offcanvasEl.querySelector('#roundSummaryTitle');
+    if (titleEl) titleEl.textContent = playerName;
+    const bodyEl = offcanvasEl.querySelector('#roundSummaryBody');
+    if (bodyEl) bodyEl.innerHTML = '<p class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Loading…</p>';
+
+    const oc = window.bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl);
+    oc.show();
+
+    try {
+      const res = await fetch(tp(`/scoring/api/live/${scorecardId}/round-scores`));
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+
+      const holeMap = new Map(data.holes.map((h) => [h.holeNumber, h]));
+      const holeNumbers = ctx?.holes ? Object.keys(ctx.holes).map(Number).sort((a, b) => a - b) : [];
+
+      let totalGross = 0;
+      let totalStb = 0;
+      let holesPlayed = 0;
+      const rows = holeNumbers.map((num) => {
+        const hole = ctx.holes[num] || {};
+        const score = holeMap.get(num);
+        const gross = score?.grossScore ?? null;
+        const stb = score?.stablefordPoints ?? null;
+        if (gross !== null) { totalGross += gross; holesPlayed++; }
+        if (stb !== null) totalStb += stb;
+        const isCurrent = num === currentHole;
+        return `<tr class="hole-nav-row ${isCurrent ? 'table-warning fw-semibold' : ''}" data-hole="${num}" role="button">
+          <td>${num}</td>
+          <td>${hole.par || '–'}</td>
+          <td>${gross !== null ? gross : '–'}</td>
+          <td>${stb !== null ? stb : '–'}</td>
+          <td class="text-muted" style="font-size:0.75rem"><i class="fa-solid fa-chevron-right"></i></td>
+        </tr>`;
+      });
+
+      if (bodyEl) {
+        bodyEl.innerHTML = `
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered table-hover mb-0 round-summary-table">
+              <thead class="table-light">
+                <tr><th>Hole</th><th>Par</th><th>Gross</th><th>Stb</th><th></th></tr>
+              </thead>
+              <tbody>${rows.join('')}</tbody>
+              <tfoot class="table-light fw-semibold">
+                <tr>
+                  <td colspan="2">Total</td>
+                  <td>${holesPlayed > 0 ? totalGross : '–'}</td>
+                  <td>${holesPlayed > 0 ? totalStb : '–'}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>`;
+
+        bodyEl.querySelectorAll('.hole-nav-row').forEach((row) => {
+          row.addEventListener('click', () => {
+            const holeNum = Number(row.dataset.hole);
+            const oc = window.bootstrap.Offcanvas.getInstance(offcanvasEl);
+            if (oc) {
+              offcanvasEl.addEventListener('hidden.bs.offcanvas', () => navigateToHole(holeNum), { once: true });
+              oc.hide();
+            } else {
+              navigateToHole(holeNum);
+            }
+          });
+        });
+
+        const currentRow = bodyEl.querySelector('.hole-nav-row.table-warning');
+        if (currentRow) currentRow.scrollIntoView({ block: 'center' });
+      }
+    } catch (_err) {
+      if (bodyEl) bodyEl.innerHTML = '<p class="text-danger small py-3 mb-0 text-center">Could not load round scores.</p>';
+    }
+  }
+
+  function bindSummaryHandlers() {
+    entriesContainer.querySelectorAll('.round-summary-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const scorecardId = Number(btn.dataset.scorecardId);
+        const player = ctx?.players?.find((p) => Number(p.scorecardId) === scorecardId);
+        const playerName = player ? (player.fullName || player.displayName) : 'Player';
+        showRoundSummary(scorecardId, playerName);
+      });
+    });
   }
 
   function adjustGross(scorecardId, delta) {
@@ -1022,6 +1115,30 @@
         } else {
           setTransientStatus(`Could not load hole ${nextHole}. Please try again.`, 'danger');
         }
+      }
+    } finally {
+      setHoleLoading(false);
+    }
+  }
+
+  async function navigateToHole(holeNumber) {
+    if (isNavigating) return;
+    if (hasConflictsForHole(currentHole)) return;
+    const target = Number(holeNumber);
+    if (!holeOrder.includes(target)) return;
+    setHoleLoading(true);
+    const prevHole = currentHole;
+    try {
+      const holeData = await fetchHoleData(target);
+      await render(holeData);
+      if (isEffectivelyOnline() && prevHole !== target) {
+        fetchHoleData(prevHole).then(detectConflictsFromData).catch(() => {});
+      }
+    } catch (error) {
+      if (error && error.message === 'Offline') {
+        setTransientStatus(`Hole ${target} is not cached for offline yet.`, 'warning');
+      } else {
+        setTransientStatus(`Could not load hole ${target}. Please try again.`, 'danger');
       }
     } finally {
       setHoleLoading(false);
