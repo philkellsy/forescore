@@ -31,6 +31,7 @@
   let currentSiSecondary = Number(state.hole?.strokeIndexSecondary || 0);
   const localConflicts = new Map();
   const localExpectedGross = new Map();
+  const scoredHoles = new Set();
   let conflictPollTimer = null;
   let currentHoleData = null;
   let offlineStore = null;
@@ -956,6 +957,7 @@
     const updated = updateScoreDisplay(scorecardId, normalizedGross, nextStableford, nextTotal, nextRelative);
     if (!updated && currentHoleData) render(currentHoleData).catch(() => {});
 
+    scoredHoles.add(Number(currentHole));
     sendGrossNow(scorecardId, Number(currentHole), normalizedGross, opId, baseVersion);
   }
 
@@ -1106,7 +1108,7 @@
         // Silent background re-fetch of the hole we just left — detects any
         // same-group score changes that occurred during the navigation window
         // without re-rendering (which would visually jump back to that hole).
-        if (isEffectivelyOnline() && prevHole !== nextHole) {
+        if (isEffectivelyOnline() && prevHole !== nextHole && scoredHoles.has(prevHole)) {
           fetchHoleData(prevHole).then(detectConflictsFromData).catch(() => {});
         }
       } catch (error) {
@@ -1131,7 +1133,7 @@
     try {
       const holeData = await fetchHoleData(target);
       await render(holeData);
-      if (isEffectivelyOnline() && prevHole !== target) {
+      if (isEffectivelyOnline() && prevHole !== target && scoredHoles.has(prevHole)) {
         fetchHoleData(prevHole).then(detectConflictsFromData).catch(() => {});
       }
     } catch (error) {
@@ -1160,7 +1162,7 @@
       } catch (_error) {
         // keep current conflict state and try again on next interval
       }
-    }, 3000);
+    }, 8000);
   }
 
   async function refreshCurrentHole() {

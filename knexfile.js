@@ -56,6 +56,11 @@ module.exports = {
   production: {
     ...base,
     connection: pgConnection(prodUrl),
-    pool: { min: 2, max: 10 },
+    pool: {
+      min: 2,
+      max: 15,
+      idleTimeoutMillis: 60000,
+      reapIntervalMillis: 5000,
+    },
   },
 };
