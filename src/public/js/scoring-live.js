@@ -725,7 +725,14 @@
 
     entriesContainer.classList.toggle('entries-mode-ambrose', holeData.mode === 'ambrose');
     entriesContainer.classList.toggle('entries-mode-individual', holeData.mode !== 'ambrose');
-    entriesContainer.innerHTML = holeData.entries.map(entryCard).join('');
+    const showTeamDivider = ctx?.twoBallEnabled && holeData.mode !== 'ambrose' && holeData.entries.length === 4;
+    const teamDivider = `<div class="two-ball-team-divider" aria-hidden="true">
+      <span></span><i class="fa-solid fa-chevron-down"></i><span></span>
+    </div>`;
+    entriesContainer.innerHTML = holeData.entries.map((entry, i) => {
+      const card = entryCard(entry);
+      return (showTeamDivider && i === 2) ? teamDivider + card : card;
+    }).join('');
     bindAdjustmentHandlers();
     bindPickupHandlers();
     bindDriveHandlers();

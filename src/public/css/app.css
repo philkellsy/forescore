@@ -460,6 +460,26 @@ body {
   cursor: pointer;
 }
 
+.two-ball-team-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fs-green);
+  margin: 0.1rem 0;
+}
+
+.two-ball-team-divider span {
+  flex: 1;
+  height: 2px;
+  background: var(--fs-green);
+  border-radius: 1px;
+}
+
+.two-ball-team-divider i {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
 .two-ball-nav-btn {
   min-width: 7rem;
 }
