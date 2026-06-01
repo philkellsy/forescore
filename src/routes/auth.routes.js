@@ -98,7 +98,7 @@ function authRouter(db) {
 
   async function sendCodeForLookup(req, rawLookup) {
     const lookup = normalizeLookup(rawLookup);
-    if (!lookup) return { ok: false, error: 'Email or mobile is required.', lookup: '' };
+    if (!lookup) return { ok: false, error: 'Email address is required.', lookup: '' };
 
     const user = await findUserByLookup(db, lookup);
     if (user) {
@@ -200,7 +200,7 @@ function authRouter(db) {
           codeStage: true,
           sent: true,
           lookupValue: normalizeLookup(lookupInput),
-          error: result.error || 'Email or mobile is required.',
+          error: result.error || 'Email address is required.',
         });
       }
 
@@ -224,7 +224,7 @@ function authRouter(db) {
       const rememberMe = req.session?.pendingRememberMe !== false;
 
       if (!lookup) {
-        return renderLogin(res.status(400), { error: 'Email or mobile is required.' });
+        return renderLogin(res.status(400), { error: 'Email address is required.' });
       }
       if (code.length !== LOGIN_CODE_LENGTH) {
         return renderLogin(res.status(400), {

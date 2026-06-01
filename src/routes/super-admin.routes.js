@@ -78,7 +78,7 @@ function superAdminRouter(db) {
   router.post('/auth/send-code', authLimiter, async (req, res, next) => {
     try {
       const lookup = normalizeLookup(req.body.lookup);
-      if (!lookup) return renderLogin(res.status(400), { error: 'Email or mobile is required.' });
+      if (!lookup) return renderLogin(res.status(400), { error: 'Email address is required.' });
 
       const user = await findUserByLookup(db, lookup);
 
