@@ -1029,6 +1029,37 @@ function adminRouter(db) {
     } catch (err) { return next(err); }
   });
 
+  router.post('/tours/:tourId/rounds/:roundNumber/delete', tourGuard, async (req, res, next) => {
+    try {
+      const tourId = parseInt(req.params.tourId, 10);
+      const roundNumber = parseInt(req.params.roundNumber, 10);
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.status(404).send('Tour not found');
+
+      const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
+      if (!round) return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?error=Round+not+found`);
+      if (round.status !== 'draft') {
+        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Only+draft+rounds+can+be+deleted`);
+      }
+
+      const teeGroupIds = await db('tee_groups').where({ tour_id: tourId, round_number: roundNumber }).pluck('id');
+      if (teeGroupIds.length) {
+        await db('tee_group_players').whereIn('tee_group_id', teeGroupIds).delete();
+        await db('tee_groups').whereIn('id', teeGroupIds).delete();
+      }
+      const teamIds = await db('teams').where({ tour_id: tourId, round_number: roundNumber }).pluck('id');
+      if (teamIds.length) {
+        await db('team_members').whereIn('team_id', teamIds).delete();
+        await db('teams').whereIn('id', teamIds).delete();
+      }
+      await db('player_day_handicaps').where({ tour_id: tourId, round_number: roundNumber }).delete();
+      await db('novelty_events').where({ tour_id: tourId, round_number: roundNumber }).delete();
+      await db('golf_rounds').where({ id: round.id }).delete();
+
+      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}`)}?message=Round+${roundNumber}+deleted`);
+    } catch (err) { return next(err); }
+  });
+
   // -------------------------------------------------------------------------
   // Add player to tour
   // -------------------------------------------------------------------------
