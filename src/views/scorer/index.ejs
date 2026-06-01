@@ -108,6 +108,40 @@
                   <% } %>
                 <% } %>
 
+                <% if (scorecard.twoBallInfo) { %>
+                  <div class="mt-3 pt-3 border-top">
+                    <p class="text-muted small fw-semibold mb-2">
+                      2-ball (<%= scorecard.twoBallInfo.twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball' %>)
+                    </p>
+                    <% if (scorecard.twoBallInfo.groupSize === 4) { %>
+                      <% if (scorecard.twoBallInfo.myPartner) { %>
+                        <p class="small mb-2">Partner: <strong><%= scorecard.twoBallInfo.myPartner.fullName %></strong></p>
+                      <% } %>
+                      <% if (scorecard.twoBallInfo.selectablePartners && scorecard.twoBallInfo.selectablePartners.length) { %>
+                        <div class="d-flex gap-2 flex-wrap">
+                          <% scorecard.twoBallInfo.selectablePartners.forEach((p) => { %>
+                            <form action="<%= tenantPath('/scoring/select-partner') %>" method="post" class="m-0" data-no-loading>
+                              <input type="hidden" name="scorecardId" value="<%= scorecard.id %>" />
+                              <input type="hidden" name="partnerId" value="<%= p.userId %>" />
+                              <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                Pair with <%= p.fullName %>
+                              </button>
+                            </form>
+                          <% }) %>
+                        </div>
+                      <% } %>
+                    <% } else if (scorecard.twoBallInfo.groupSize === 3) { %>
+                      <% scorecard.twoBallInfo.teams.forEach((team) => { %>
+                        <p class="small mb-1">
+                          <span class="text-muted"><%= team.label %>:</span>
+                          <%= team.players.map((p) => p.isShared ? `${p.fullName} *` : p.fullName).join(' + ') %>
+                        </p>
+                      <% }) %>
+                      <p class="text-muted mb-0" style="font-size:0.7rem">* Shared player (lowest handicap)</p>
+                    <% } %>
+                  </div>
+                <% } %>
+
                 <% if (scorecard.status === 'submitted') { %>
                   <span class="badge text-bg-secondary">Submitted</span>
                 <% } else if (scorecard.round_status === 'open') { %>

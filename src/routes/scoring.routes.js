@@ -934,6 +934,22 @@ function scoringRouter(db) {
         `),
         db.raw(`
           (
+            SELECT gr.two_ball_enabled
+            FROM golf_rounds gr
+            WHERE gr.tour_id = s.tour_id AND gr.round_number = s.round_number
+            LIMIT 1
+          ) as two_ball_enabled
+        `),
+        db.raw(`
+          (
+            SELECT gr.two_ball_type
+            FROM golf_rounds gr
+            WHERE gr.tour_id = s.tour_id AND gr.round_number = s.round_number
+            LIMIT 1
+          ) as two_ball_type
+        `),
+        db.raw(`
+          (
             SELECT tg.group_number
             FROM tee_groups tg
             JOIN tee_group_players tgp ON tgp.tee_group_id = tg.id
@@ -1081,6 +1097,76 @@ function scoringRouter(db) {
             }));
         }
 
+        let twoBallInfo = null;
+        if (
+          scorecard.type === 'individual' &&
+          scorecard.user_id &&
+          scorecard.two_ball_enabled &&
+          scorecard.round_status === 'open' &&
+          scorecard.status !== 'submitted'
+        ) {
+          const groupMembers = await db('tee_groups as tg')
+            .join('tee_group_players as me', function joinMe() {
+              this.on('me.tee_group_id', '=', 'tg.id').andOnVal('me.user_id', '=', scorecard.user_id);
+            })
+            .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+            .join('users as u', 'u.id', 'tgp.user_id')
+            .leftJoin('player_handicaps as ph2', function joinPh2() {
+              this.on('ph2.user_id', '=', 'u.id').andOnVal('ph2.tour_id', '=', scorecard.tour_id);
+            })
+            .leftJoin('player_day_handicaps as pdh2', function joinPdh2() {
+              this.on('pdh2.user_id', '=', 'u.id')
+                .andOnVal('pdh2.tour_id', '=', scorecard.tour_id)
+                .andOnVal('pdh2.round_number', '=', scorecard.round_number);
+            })
+            .where({ 'tg.tour_id': scorecard.tour_id, 'tg.round_number': scorecard.round_number })
+            .select(
+              'u.id as userId', 'u.first_name', 'u.last_name', 'u.gender',
+              'tgp.position',
+              'me.position as my_position',
+              'ph2.playing_handicap',
+              'pdh2.handicap_index as round_hcp_index'
+            )
+            .orderBy('tgp.position');
+
+          if (groupMembers.length >= 2) {
+            const myPosition = Number(groupMembers[0].my_position);
+            const groupSize = groupMembers.length;
+            const twoBallType = scorecard.two_ball_type || 'best_ball';
+
+            const membersWithHcp = await Promise.all(groupMembers.map(async (m) => {
+              const idx = m.round_hcp_index != null ? Number(m.round_hcp_index) : Number(m.playing_handicap || 0);
+              const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, m.gender || null, hcpCache);
+              return {
+                userId: Number(m.userId),
+                fullName: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
+                position: Number(m.position),
+                isMe: Number(m.userId) === scorecard.user_id,
+                courseHcp,
+              };
+            }));
+
+            if (groupSize === 4) {
+              const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
+              const myPartner = membersWithHcp.find((m) => !m.isMe && myBallPositions.includes(m.position));
+              const selectablePartners = membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
+              twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners };
+            } else if (groupSize === 3) {
+              const sorted = [...membersWithHcp].sort((a, b) => a.courseHcp - b.courseHcp);
+              const shared = { ...sorted[0], isShared: true };
+              const others = sorted.slice(1);
+              twoBallInfo = {
+                groupSize: 3,
+                twoBallType,
+                teams: [
+                  { label: 'Ball A', players: [others[0], shared] },
+                  { label: 'Ball B', players: [others[1], shared] },
+                ],
+              };
+            }
+          }
+        }
+
         const confirmation = await buildConfirmationData(db, scorecard);
         const submittedSummary =
           scorecard.status === 'submitted'
@@ -1104,6 +1190,7 @@ function scoringRouter(db) {
           ambroseTeamHandicapDisplay,
           ambroseOtherTeams,
           ownHandicapDisplay,
+          twoBallInfo,
           submittedSummary,
           otherPlayers: otherPlayers.map((p) => ({
             fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
@@ -1136,6 +1223,69 @@ function scoringRouter(db) {
       message,
       dayLabel
     });
+  });
+
+  router.post('/select-partner', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.body.scorecardId);
+      const partnerId = Number(req.body.partnerId);
+      const userId = req.session.user.id;
+
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard || Number(scorecard.user_id) !== userId) {
+        return res.redirect(res.locals.tenantPath('/scoring?error=Not+found'));
+      }
+
+      const round = await db('golf_rounds')
+        .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number })
+        .first();
+      if (!round?.two_ball_enabled || round.status !== 'open') {
+        return res.redirect(res.locals.tenantPath('/scoring?error=Partner+selection+not+available'));
+      }
+
+      // Load all slots in this player's tee group
+      const slots = await db('tee_groups as tg')
+        .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
+        .where({ 'tg.tour_id': scorecard.tour_id, 'tg.round_number': scorecard.round_number })
+        .whereExists(
+          db('tee_group_players as me')
+            .whereRaw('me.tee_group_id = tg.id')
+            .where('me.user_id', userId)
+        )
+        .select('tgp.id', 'tgp.user_id', 'tgp.position')
+        .orderBy('tgp.position');
+
+      const mySlot = slots.find((s) => Number(s.user_id) === userId);
+      const partnerSlot = slots.find((s) => Number(s.user_id) === partnerId);
+
+      if (!mySlot || !partnerSlot) {
+        return res.redirect(res.locals.tenantPath('/scoring?error=Players+not+in+same+group'));
+      }
+
+      const myPos = Number(mySlot.position);
+      const myBallPositions = myPos <= 2 ? [1, 2] : [3, 4];
+
+      // Already partners — nothing to do
+      if (myBallPositions.includes(Number(partnerSlot.position))) {
+        return res.redirect(res.locals.tenantPath('/scoring'));
+      }
+
+      // Swap: selected partner takes my current partner's slot, and vice versa
+      const myCurrentPartnerPos = myBallPositions.find((p) => p !== myPos);
+      const currentPartnerSlot = slots.find((s) => Number(s.position) === myCurrentPartnerPos);
+
+      if (!currentPartnerSlot) {
+        return res.redirect(res.locals.tenantPath('/scoring?error=Unexpected+group+layout'));
+      }
+
+      const swapToPos = Number(partnerSlot.position);
+      await db.transaction(async (trx) => {
+        await trx('tee_group_players').where({ id: partnerSlot.id }).update({ position: myCurrentPartnerPos });
+        await trx('tee_group_players').where({ id: currentPartnerSlot.id }).update({ position: swapToPos });
+      });
+
+      return res.redirect(res.locals.tenantPath('/scoring?message=Partner+updated'));
+    } catch (err) { return next(err); }
   });
 
   router.get('/live/:scorecardId', requireAuth, async (req, res, next) => {
