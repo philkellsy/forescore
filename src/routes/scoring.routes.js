@@ -1664,7 +1664,9 @@ function scoringRouter(db) {
         femaleHoles,
         primaryCourseId,
         femaleCourseId,
-        scorecardIds
+        scorecardIds,
+        twoBallEnabled: Boolean(round?.two_ball_enabled),
+        twoBallType: round?.two_ball_type || null,
       });
     } catch (error) {
       return next(error);
@@ -1816,6 +1818,145 @@ function scoringRouter(db) {
           grossScore: r.gross_score !== null ? Number(r.gross_score) : null,
           stablefordPoints: r.stableford_points !== null ? Number(r.stableford_points) : null,
         }))
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/api/live/:scorecardId/two-ball-status', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.params.scorecardId);
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
+
+      const [round, teeGroup] = await Promise.all([
+        db('golf_rounds').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).first(),
+        getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id),
+      ]);
+
+      if (!round?.two_ball_enabled) return res.status(400).json({ error: 'Two-ball not enabled' });
+      if (!teeGroup) return res.status(404).json({ error: 'Tee group not found' });
+
+      if (!canEditAllScores(req.session.user)) {
+        const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
+        if (!requesterGroup || requesterGroup.id !== teeGroup.id) {
+          return res.status(403).json({ error: 'Not allowed' });
+        }
+      }
+
+      const startingHole = Number(teeGroup.starting_hole || 1);
+      const holeOrder = holeSequenceFrom(startingHole);
+
+      // Group members with positions
+      const groupMembers = await db('tee_group_players as tgp')
+        .join('users as u', 'u.id', 'tgp.user_id')
+        .where({ 'tgp.tee_group_id': teeGroup.id })
+        .orderBy('tgp.position')
+        .select('u.id as user_id', 'u.first_name', 'u.last_name', 'tgp.position');
+
+      const groupSize = groupMembers.length;
+      const twoBallType = round.two_ball_type || 'best_ball';
+      const userIds = groupMembers.map((m) => Number(m.user_id));
+
+      // Scorecards for each member
+      const cards = await db('scorecards')
+        .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, type: 'individual' })
+        .whereIn('user_id', userIds)
+        .select('id', 'user_id');
+      const cardByUser = new Map(cards.map((c) => [Number(c.user_id), Number(c.id)]));
+
+      const membersWithCard = groupMembers.map((m) => ({
+        ...m,
+        user_id: Number(m.user_id),
+        scorecard_id: cardByUser.get(Number(m.user_id)) || null,
+      }));
+
+      // Hole scores for all group scorecards
+      const groupCardIds = membersWithCard.map((m) => m.scorecard_id).filter(Boolean);
+      const holeRows = groupCardIds.length
+        ? await db('scorecard_holes')
+            .whereIn('scorecard_id', groupCardIds)
+            .select('scorecard_id', 'hole_number', 'stableford_points')
+        : [];
+      const scoreByCard = {};
+      for (const row of holeRows) {
+        const cId = String(row.scorecard_id);
+        if (!scoreByCard[cId]) scoreByCard[cId] = {};
+        scoreByCard[cId][Number(row.hole_number)] = row.stableford_points !== null ? Number(row.stableford_points) : null;
+      }
+
+      // Team assignment
+      let teamAMembers, teamBMembers;
+      if (groupSize === 3) {
+        const [tourHcps, roundHcps] = await Promise.all([
+          db('player_handicaps').where({ tour_id: scorecard.tour_id }).whereIn('user_id', userIds).select('user_id', 'playing_handicap'),
+          db('player_day_handicaps').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).whereIn('user_id', userIds).select('user_id', 'handicap_index'),
+        ]);
+        const tourMap = new Map(tourHcps.map((h) => [Number(h.user_id), Number(h.playing_handicap || 0)]));
+        const roundMap = new Map(roundHcps.map((h) => [Number(h.user_id), Number(h.handicap_index)]));
+        const withHcp = membersWithCard.map((m) => ({
+          ...m,
+          hcp: roundMap.has(m.user_id) ? roundMap.get(m.user_id) : (tourMap.get(m.user_id) || 0),
+        }));
+        const sorted = [...withHcp].sort((a, b) => a.hcp - b.hcp);
+        const shared = sorted[0];
+        const others = sorted.slice(1);
+        teamAMembers = [others[0], shared];
+        teamBMembers = [others[1], shared];
+      } else {
+        const byPos = new Map(membersWithCard.map((m) => [Number(m.position), m]));
+        teamAMembers = [byPos.get(1), byPos.get(2)].filter(Boolean);
+        teamBMembers = [byPos.get(3), byPos.get(4)].filter(Boolean);
+      }
+
+      function teamHoleScore(members, holeNumber) {
+        const pts = members
+          .map((m) => (m.scorecard_id ? (scoreByCard[String(m.scorecard_id)]?.[holeNumber] ?? null) : null))
+          .filter((s) => s !== null);
+        if (!pts.length) return null;
+        return twoBallType === 'best_ball' ? Math.max(...pts) : pts.reduce((a, b) => a + b, 0);
+      }
+
+      // Out/In split — first 9 and second 9 in play order
+      const firstHalfHoles = holeOrder.slice(0, 9);
+      const secondHalfHoles = holeOrder.slice(9);
+      function halfTotal(members, holes) {
+        return holes.reduce((sum, h) => sum + (teamHoleScore(members, h) ?? 0), 0);
+      }
+
+      // Match play hole by hole in play order
+      let matchStatus = 0;
+      const matchByHole = [];
+      for (const h of holeOrder) {
+        const a = teamHoleScore(teamAMembers, h);
+        const b = teamHoleScore(teamBMembers, h);
+        if (a === null || b === null) continue;
+        const delta = a > b ? 1 : (b > a ? -1 : 0);
+        matchStatus += delta;
+        matchByHole.push({ holeNumber: h, teamA: a, teamB: b, holeDelta: delta, runningStatus: matchStatus });
+      }
+
+      const formatPlayers = (members) => members.map((m) => ({
+        displayName: toPlayerLabel(m.first_name, m.last_name),
+        scorecardId: m.scorecard_id,
+      }));
+
+      return res.json({
+        twoBallType,
+        startingHole,
+        holeOrder,
+        teamA: {
+          players: formatPlayers(teamAMembers),
+          total: holeOrder.reduce((s, h) => s + (teamHoleScore(teamAMembers, h) ?? 0), 0),
+        },
+        teamB: {
+          players: formatPlayers(teamBMembers),
+          total: holeOrder.reduce((s, h) => s + (teamHoleScore(teamBMembers, h) ?? 0), 0),
+        },
+        firstHalf: { holes: firstHalfHoles, teamA: halfTotal(teamAMembers, firstHalfHoles), teamB: halfTotal(teamBMembers, firstHalfHoles) },
+        secondHalf: { holes: secondHalfHoles, teamA: halfTotal(teamAMembers, secondHalfHoles), teamB: halfTotal(teamBMembers, secondHalfHoles) },
+        match: { status: matchStatus, holesPlayed: matchByHole.length, byHole: matchByHole },
       });
     } catch (error) {
       return next(error);

@@ -460,6 +460,25 @@ body {
   cursor: pointer;
 }
 
+.two-ball-nav-btn {
+  min-width: 7rem;
+}
+
+.two-ball-table {
+  font-size: 0.8rem;
+}
+
+.two-ball-table th,
+.two-ball-table td {
+  padding: 0.2rem 0.4rem;
+  text-align: center;
+}
+
+.two-ball-half {
+  border-radius: 0.5rem;
+  background: var(--bs-light);
+}
+
 .entry-metrics {
   gap: 0.75rem;
 }

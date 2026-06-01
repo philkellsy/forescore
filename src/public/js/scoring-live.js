@@ -873,6 +873,117 @@
     });
   }
 
+  function renderTwoBallStatus(data) {
+    const { twoBallType, teamA, teamB, firstHalf, secondHalf, match } = data;
+    const typeLabel = twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball';
+
+    let matchStr;
+    if (match.holesPlayed === 0) {
+      matchStr = 'Not started';
+    } else if (match.status === 0) {
+      matchStr = `All Square (${match.holesPlayed} played)`;
+    } else if (match.status > 0) {
+      matchStr = `Ball A &nbsp;<strong>${match.status} UP</strong>&nbsp; (${match.holesPlayed} played)`;
+    } else {
+      matchStr = `Ball B &nbsp;<strong>${Math.abs(match.status)} UP</strong>&nbsp; (${match.holesPlayed} played)`;
+    }
+
+    function holeRangeLabel(holes) {
+      const sorted = [...holes].sort((a, b) => a - b);
+      return `Holes ${sorted[0]}–${sorted[sorted.length - 1]}`;
+    }
+
+    const matchRows = match.byHole.map((row, i) => {
+      const winner = row.holeDelta > 0 ? 'A' : (row.holeDelta < 0 ? 'B' : '—');
+      const rs = row.runningStatus;
+      const statusStr = rs === 0 ? 'AS' : (rs > 0 ? `A+${rs}` : `B+${Math.abs(rs)}`);
+      return `<tr>
+        <td class="text-muted">${i + 1}</td>
+        <td>${row.holeNumber}</td>
+        <td>${row.teamA}</td>
+        <td>${row.teamB}</td>
+        <td class="fw-semibold">${winner}</td>
+        <td class="text-muted">${statusStr}</td>
+      </tr>`;
+    }).join('');
+
+    const titleEl = document.getElementById('twoBallOffcanvasTitle');
+    if (titleEl) titleEl.textContent = `2-Ball · ${typeLabel}`;
+
+    return `
+      <div class="row g-0 text-center border rounded mb-3 overflow-hidden">
+        <div class="col border-end py-3">
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Ball A</div>
+          ${teamA.players.map((p) => `<div class="small">${p.displayName}</div>`).join('')}
+          <div class="h3 fw-bold mt-2 mb-0">${teamA.total}</div>
+          <div class="text-muted" style="font-size:0.7rem">pts</div>
+        </div>
+        <div class="col py-3">
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Ball B</div>
+          ${teamB.players.map((p) => `<div class="small">${p.displayName}</div>`).join('')}
+          <div class="h3 fw-bold mt-2 mb-0">${teamB.total}</div>
+          <div class="text-muted" style="font-size:0.7rem">pts</div>
+        </div>
+      </div>
+
+      <div class="border rounded p-2 mb-3">
+        <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Match Play</div>
+        <div class="mb-2">${matchStr}</div>
+        ${match.byHole.length > 0 ? `
+          <div class="table-responsive" style="max-height:14rem">
+            <table class="two-ball-table table table-sm table-borderless mb-0">
+              <thead class="text-muted">
+                <tr><th>#</th><th>Hole</th><th>A</th><th>B</th><th>Won</th><th>Status</th></tr>
+              </thead>
+              <tbody>${matchRows}</tbody>
+            </table>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="row g-2">
+        <div class="col-6">
+          <div class="border rounded p-2 text-center">
+            <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">First 9 · ${holeRangeLabel(firstHalf.holes)}</div>
+            <div class="d-flex justify-content-around">
+              <div><div class="text-muted" style="font-size:0.7rem">Ball A</div><div class="h5 fw-bold mb-0">${firstHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Ball B</div><div class="h5 fw-bold mb-0">${firstHalf.teamB}</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-6">
+          <div class="border rounded p-2 text-center">
+            <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Second 9 · ${holeRangeLabel(secondHalf.holes)}</div>
+            <div class="d-flex justify-content-around">
+              <div><div class="text-muted" style="font-size:0.7rem">Ball A</div><div class="h5 fw-bold mb-0">${secondHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Ball B</div><div class="h5 fw-bold mb-0">${secondHalf.teamB}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function showTwoBallStatus() {
+    const offcanvasEl = document.getElementById('twoBallOffcanvas');
+    if (!offcanvasEl) return;
+
+    const bodyEl = document.getElementById('twoBallOffcanvasBody');
+    if (bodyEl) bodyEl.innerHTML = '<p class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Loading…</p>';
+
+    const oc = window.bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl);
+    oc.show();
+
+    try {
+      const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/two-ball-status`));
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+      if (bodyEl) bodyEl.innerHTML = renderTwoBallStatus(data);
+    } catch (_err) {
+      if (bodyEl) bodyEl.innerHTML = '<p class="text-danger small py-3 mb-0 text-center">Could not load team scores.</p>';
+    }
+  }
+
   function adjustGross(scorecardId, delta) {
     if (!isEditingEnabled()) return;
     if (!Number.isFinite(Number(scorecardId))) return;
@@ -1346,6 +1457,11 @@
   initializeOfflineSync();
   hydrateConflictState();
 
+  const twoBallBtn = document.getElementById('twoBallStatusBtn');
+  if (twoBallBtn) {
+    twoBallBtn.addEventListener('click', () => showTwoBallStatus());
+  }
+
   (async () => {
     setHoleLoading(true);
     try {
@@ -1354,6 +1470,11 @@
       ctx = await fetchInit();
       holeOrder = ctx.holeOrder || holeSequenceFrom(Number(ctx.startingHole || 1));
       currentHole = Number(ctx.currentHole || state.holeNumber || state.startingHole || 1);
+
+      if (ctx.twoBallEnabled) {
+        const navBar = document.getElementById('twoBallNavBar');
+        if (navBar) navBar.classList.remove('d-none');
+      }
 
       const holeData = await fetchHoleData(currentHole);
       await render(holeData);
