@@ -35,7 +35,7 @@ function superAdminRouter(db) {
 
   function renderLogin(res, payload = {}) {
     return res.render('super-admin/login', {
-      title: 'Super Admin Sign In',
+      title: 'Sign In',
       user: null,
       tenant: null,
       error: null,
@@ -70,6 +70,7 @@ function superAdminRouter(db) {
   // -------------------------------------------------------------------------
   router.get('/auth/login', (req, res) => {
     if (req.session?.user?.isSuperAdmin) return res.redirect('/');
+    if (req.session?.user) return res.redirect('/select-tenant');
     const rememberedLookup = normalizeLookup(req.cookies?.[LOGIN_LOOKUP_COOKIE] || '');
     return renderLogin(res, { lookupValue: rememberedLookup });
   });
@@ -81,23 +82,7 @@ function superAdminRouter(db) {
 
       const user = await findUserByLookup(db, lookup);
 
-      // Non-super-admin tenant member — redirect them to their tenant login
-      if (user && !user.is_super_admin) {
-        const membership = await db('tenant_memberships as m')
-          .join('tenants as t', 't.id', 'm.tenant_id')
-          .where({ 'm.user_id': user.id })
-          .select('t.slug', 't.name')
-          .orderBy('m.joined_at')
-          .first();
-        if (membership) {
-          return res.redirect(`/${membership.slug}/auth/login?info=${encodeURIComponent(`Sign in to ${membership.name}`)}`);
-        }
-        return renderLogin(res.status(400), {
-          error: 'This page is for super admins only. Contact your tour administrator for the correct sign-in link.',
-        });
-      }
-
-      if (user && user.is_super_admin) {
+      if (user) {
         const remaining = await getResendRemainingSeconds(db, Number(user.id));
         if (remaining > 0) {
           return renderLogin(res.status(200), {
@@ -112,7 +97,7 @@ function superAdminRouter(db) {
         try {
           await sendLoginCode(user.email, code);
         } catch (sendErr) {
-          console.error('[super-admin-auth] send_failed', sendErr?.message);
+          console.error('[auth] send_failed', sendErr?.message);
         }
         setLookupCookie(res, lookup);
       }
@@ -122,7 +107,7 @@ function superAdminRouter(db) {
         codeStage: true,
         sent: true,
         lookupValue: lookup,
-        info: 'If a matching super admin account exists, a sign-in code has been sent.',
+        info: 'If a matching account exists, a sign-in code has been sent.',
         resendAvailableAtMs: resendAtMs(LOGIN_CODE_RESEND_SECONDS),
       });
     } catch (err) { return next(err); }
@@ -144,7 +129,7 @@ function superAdminRouter(db) {
       }
 
       const user = await findUserByLookup(db, lookup);
-      if (!user || !user.is_super_admin) {
+      if (!user) {
         return renderLogin(res.status(400), {
           codeStage: true,
           sent: true,
@@ -156,6 +141,7 @@ function superAdminRouter(db) {
       const codeRow = await consumeLoginCode(db, Number(user.id), code);
       if (!codeRow) {
         const remaining = await getResendRemainingSeconds(db, Number(user.id));
+        await logSessionEvent(db, { event: 'code_invalid', userId: user.id, tenantId: null, req });
         return renderLogin(res.status(400), {
           codeStage: true,
           sent: true,
@@ -169,20 +155,56 @@ function superAdminRouter(db) {
         req.session.regenerate((err) => { if (err) return reject(err); return resolve(); });
       });
 
+      if (user.is_super_admin) {
+        req.session.user = {
+          id: user.id,
+          firstName: user.first_name,
+          lastName: user.last_name,
+          email: user.email,
+          isSuperAdmin: true,
+        };
+        req.session.pendingLoginLookup = null;
+        await new Promise((resolve, reject) => {
+          req.session.save((err) => { if (err) return reject(err); return resolve(); });
+        });
+        await logSessionEvent(db, { event: 'login_success', userId: user.id, tenantId: null, req });
+        return res.redirect('/');
+      }
+
+      // Regular user — find all their tenant memberships
+      const memberships = await db('tenant_memberships as m')
+        .join('tenants as t', 't.id', 'm.tenant_id')
+        .where({ 'm.user_id': user.id })
+        .select('t.id as tenantId', 't.slug', 't.name')
+        .orderBy('m.joined_at');
+
+      if (memberships.length === 0) {
+        await logSessionEvent(db, { event: 'no_membership', userId: user.id, tenantId: null, req });
+        return renderLogin(res.status(403), {
+          codeStage: true,
+          sent: true,
+          lookupValue: lookup,
+          error: 'No tour membership found. Contact your administrator.',
+        });
+      }
+
       req.session.user = {
         id: user.id,
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
-        isSuperAdmin: true,
+        isSuperAdmin: false,
+        tenantCount: memberships.length,
       };
       req.session.pendingLoginLookup = null;
 
       await new Promise((resolve, reject) => {
         req.session.save((err) => { if (err) return reject(err); return resolve(); });
       });
+      await logSessionEvent(db, { event: 'login_success', userId: user.id, tenantId: null, req });
 
-      return res.redirect('/');
+      if (memberships.length === 1) return res.redirect(`/${memberships[0].slug}/`);
+      return res.redirect('/select-tenant');
     } catch (err) { return next(err); }
   });
 
@@ -196,6 +218,29 @@ function superAdminRouter(db) {
       res.clearCookie('connect.sid');
       res.redirect('/auth/login');
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Tenant selector — for regular users with multiple memberships
+  // -------------------------------------------------------------------------
+  router.get('/select-tenant', async (req, res, next) => {
+    try {
+      if (!req.session?.user) return res.redirect('/auth/login');
+      if (req.session.user.isSuperAdmin) return res.redirect('/');
+
+      const memberships = await db('tenant_memberships as m')
+        .join('tenants as t', 't.id', 'm.tenant_id')
+        .where({ 'm.user_id': req.session.user.id })
+        .select('t.id', 't.slug', 't.name')
+        .orderBy('t.name');
+
+      return res.render('select-tenant', {
+        title: 'Select Tour',
+        user: req.session.user,
+        tenant: null,
+        memberships,
+      });
+    } catch (err) { return next(err); }
   });
 
   // -------------------------------------------------------------------------

@@ -27,6 +27,8 @@
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
               <% if (isSuperAdmin) { %>
                 <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-building fa-fw me-1" aria-hidden="true"></i>Tenants</a></li>
+              <% } else if (user && (user.tenantCount || 0) > 1) { %>
+                <li class="nav-item"><a class="nav-link" href="/select-tenant"><i class="fa-solid fa-right-left fa-fw me-1" aria-hidden="true"></i>Switch Tour</a></li>
               <% } %>
               <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/') %>"><i class="fa-solid fa-house fa-fw me-1" aria-hidden="true"></i>Dashboard</a></li>
               <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/scoring') %>"><i class="fa-solid fa-pen-to-square fa-fw me-1" aria-hidden="true"></i>Scoring</a></li>

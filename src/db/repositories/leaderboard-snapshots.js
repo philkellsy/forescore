@@ -8,6 +8,9 @@ async function findLatest(db, tourId, roundNumber, competitionType) {
 }
 
 async function save(db, tourId, roundNumber, competitionType, payload) {
+  await db('leaderboard_snapshots')
+    .where({ tour_id: tourId, round_number: roundNumber, competition_type: competitionType })
+    .delete();
   const [row] = await db('leaderboard_snapshots')
     .insert({
       tour_id: tourId,

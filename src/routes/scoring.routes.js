@@ -1715,6 +1715,8 @@ function scoringRouter(db) {
         baseVersion
       });
 
+      markLeaderboardDirty(db, scorecard.tour_id).catch(() => {});
+
       return res.json({
         ok: true,
         stableford: result.points,

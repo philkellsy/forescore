@@ -955,7 +955,8 @@ function leaderboardRouter(db) {
         finalizedRoundsForSkins: finalizedRoundNumbers,
         roundNumbers: stablefordRoundNumbers,
         bestOf: tour.leaderboard_best_of_rounds || null,
-        initialCarryInSkins: tour.skins_carry_in_skins || 0
+        initialCarryInSkins: tour.skins_carry_in_skins || 0,
+        leaderboardDirtyAt: tour.leaderboard_dirty_at || null,
       });
 
       const championship = showAggregate

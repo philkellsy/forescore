@@ -36,6 +36,7 @@ function authRouter(db) {
           lastName: user.last_name,
           email: user.email,
           isSuperAdmin: Boolean(user.is_super_admin),
+          tenantCount: Number(options.tenantCount || 1),
         };
 
         const rememberMe = Boolean(options.rememberMe);
@@ -281,7 +282,10 @@ function authRouter(db) {
         });
       }
 
-      await establishSession(req, res, next, user, { rememberMe });
+      const [{ count: membershipCount }] = await db('tenant_memberships')
+        .where({ user_id: user.id })
+        .count('* as count');
+      await establishSession(req, res, next, user, { rememberMe, tenantCount: Number(membershipCount) });
       await logSessionEvent(db, { event: 'login_success', userId: user.id, tenantId: req.tenant.id, req });
       req.session.pendingLoginLookup = null;
       req.session.pendingRememberMe = null;

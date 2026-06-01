@@ -5,8 +5,15 @@ const { calculateEclecticLeaderboard } = require('../scoring/eclectic.service');
 const { calculateStablefordLeaderboards } = require('../scoring/stableford-leaderboard.service');
 const { calculateEventSkinsForDays } = require('../scoring/skins.service');
 const { clearLeaderboardDirty } = require('./dirty.service');
+const { findLatest, save } = require('../../db/repositories/leaderboard-snapshots');
 
 async function buildLeaderboards(db, tourId, options = {}) {
+  // When not dirty, serve cached snapshot if available
+  if (!options.leaderboardDirtyAt) {
+    const snapshot = await findLatest(db, tourId, 0, 'full');
+    if (snapshot) return snapshot.payload;
+  }
+
   const finalizedRoundsForSkins = Array.isArray(options.finalizedRoundsForSkins)
     ? options.finalizedRoundsForSkins
     : [];
@@ -21,14 +28,13 @@ async function buildLeaderboards(db, tourId, options = {}) {
     })
   ]);
 
-  const result = {
-    ambrose,
-    stableford,
-    eclectic,
-    skins
-  };
+  const result = { ambrose, stableford, eclectic, skins };
 
-  await clearLeaderboardDirty(db, tourId);
+  await Promise.all([
+    save(db, tourId, 0, 'full', result),
+    clearLeaderboardDirty(db, tourId),
+  ]);
+
   return result;
 }
 
