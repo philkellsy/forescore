@@ -1459,6 +1459,21 @@
     });
   }
 
+  // Keep screen awake while scoring
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+    } catch (_err) {
+      // denied or not supported — silently ignore
+    }
+  }
+  acquireWakeLock();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') acquireWakeLock();
+  });
+
   document.addEventListener('touchstart', (event) => {
     touchStartX = event.changedTouches[0].clientX;
   });
