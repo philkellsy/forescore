@@ -1146,11 +1146,19 @@ function scoringRouter(db) {
               };
             }));
 
+            const groupUserIds = membersWithHcp.map((m) => m.userId);
+            const [{ cnt: scoredCount }] = await db('scorecards as sc')
+              .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
+              .whereIn('sc.user_id', groupUserIds)
+              .where({ 'sc.tour_id': scorecard.tour_id, 'sc.round_number': scorecard.round_number })
+              .count('sh.id as cnt');
+            const scoringStarted = Number(scoredCount) > 0;
+
             if (groupSize === 4) {
               const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
               const myPartner = membersWithHcp.find((m) => !m.isMe && myBallPositions.includes(m.position));
-              const selectablePartners = membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
-              twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners };
+              const selectablePartners = scoringStarted ? [] : membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
+              twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners, scoringStarted };
             } else if (groupSize === 3) {
               const sorted = [...membersWithHcp].sort((a, b) => a.courseHcp - b.courseHcp);
               const shared = { ...sorted[0], isShared: true };
@@ -1158,6 +1166,7 @@ function scoringRouter(db) {
               twoBallInfo = {
                 groupSize: 3,
                 twoBallType,
+                scoringStarted,
                 teams: [
                   { label: 'Ball A', players: [others[0], shared] },
                   { label: 'Ball B', players: [others[1], shared] },
@@ -1260,6 +1269,18 @@ function scoringRouter(db) {
 
       if (!mySlot || !partnerSlot) {
         return res.redirect(res.locals.tenantPath('/scoring?error=Players+not+in+same+group'));
+      }
+
+      // Lock once any hole score exists for any player in this group
+      const groupUserIds = slots.map((s) => s.user_id);
+      const scoredCount = await db('scorecards as sc')
+        .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
+        .whereIn('sc.user_id', groupUserIds)
+        .where({ 'sc.tour_id': scorecard.tour_id, 'sc.round_number': scorecard.round_number })
+        .count('sh.id as cnt')
+        .first();
+      if (Number(scoredCount?.cnt || 0) > 0) {
+        return res.redirect(res.locals.tenantPath('/scoring?error=Partner+cannot+be+changed+once+scoring+has+started'));
       }
 
       const myPos = Number(mySlot.position);

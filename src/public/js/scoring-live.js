@@ -541,9 +541,12 @@
       return `
         <article class="card border-0 shadow-sm individual-entry-card">
           <div class="card-body py-2">
-            <div class="d-flex justify-content-between align-items-start mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-2">
               <h2 class="h6 mb-0 individual-entry-title flex-grow-1">${label}</h2>
-              ${hasScorecard ? `<button type="button" class="btn btn-sm btn-link text-muted p-0 ms-2 round-summary-btn" data-scorecard-id="${entry.scorecardId}" aria-label="Round summary"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>` : ''}
+              <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                <span class="fw-bold entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</span>
+                ${hasScorecard ? `<button type="button" class="btn btn-sm btn-link text-muted p-0 round-summary-btn" data-scorecard-id="${entry.scorecardId}" aria-label="Round summary"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>` : ''}
+              </div>
             </div>
             <div class="d-flex align-items-center justify-content-between gap-2">
               <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
@@ -560,10 +563,6 @@
                 <div>
                   <div class="entry-metrics-label">Total</div>
                   <div class="entry-metrics-value entry-total text-dark">${Number(entry.stablefordTotal || 0)}</div>
-                </div>
-                <div>
-                  <div class="entry-metrics-label">Rel</div>
-                  <div class="entry-metrics-value entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</div>
                 </div>
               </div>
             </div>
@@ -778,7 +777,7 @@
     if (relEl) {
       const rel = Number(stablefordRelative || 0);
       relEl.textContent = rel === 0 ? 'E' : (rel > 0 ? `+${rel}` : `${rel}`);
-      relEl.className = `entry-metrics-value entry-rel ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
+      relEl.className = `fw-bold entry-rel ${rel > 0 ? 'text-success' : (rel < 0 ? 'text-danger' : 'text-dark')}`;
     }
     return true;
   }
@@ -879,7 +878,10 @@
     if (!Number.isFinite(Number(scorecardId))) return;
     const entry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
     const currentGross = Number(entry?.grossScore || 0);
-    const nextGross = Math.min(20, Math.max(0, currentGross + delta));
+    const maxGross = delta > 0
+      ? minGrossForPickup(currentPar, currentSiPrimary, currentSiSecondary, Number(entry?.playingHandicap || 0))
+      : 20;
+    const nextGross = Math.min(maxGross, Math.max(0, currentGross + delta));
     setGross(scorecardId, nextGross);
   }
 

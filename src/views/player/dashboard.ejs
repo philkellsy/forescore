@@ -131,6 +131,39 @@
                             <span class="badge <%= p.isMe ? 'text-bg-dark' : 'text-bg-light border' %>"><%= p.name %></span>
                           <% }) %>
                         </div>
+                        <% if (todayGroup.twoBallInfo) { %>
+                          <div class="mb-3 pt-2 border-top">
+                            <p class="text-muted small fw-semibold mb-2">
+                              2-ball (<%= todayGroup.twoBallInfo.twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball' %>)
+                            </p>
+                            <% if (todayGroup.twoBallInfo.groupSize === 4) { %>
+                              <% if (todayGroup.twoBallInfo.myPartner) { %>
+                                <p class="small mb-2">Partner: <strong><%= todayGroup.twoBallInfo.myPartner.fullName %></strong></p>
+                              <% } %>
+                              <% if (todayGroup.twoBallInfo.selectablePartners && todayGroup.twoBallInfo.selectablePartners.length) { %>
+                                <div class="d-flex gap-2 flex-wrap">
+                                  <% todayGroup.twoBallInfo.selectablePartners.forEach((p) => { %>
+                                    <form action="<%= tenantPath('/scoring/select-partner') %>" method="post" class="m-0" data-no-loading>
+                                      <input type="hidden" name="scorecardId" value="<%= todayGroup.scorecard.id %>" />
+                                      <input type="hidden" name="partnerId" value="<%= p.userId %>" />
+                                      <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                        Pair with <%= p.fullName %>
+                                      </button>
+                                    </form>
+                                  <% }) %>
+                                </div>
+                              <% } %>
+                            <% } else if (todayGroup.twoBallInfo.groupSize === 3) { %>
+                              <% todayGroup.twoBallInfo.teams.forEach((team) => { %>
+                                <p class="small mb-1">
+                                  <span class="text-muted"><%= team.label %>:</span>
+                                  <%= team.players.map((p) => p.isShared ? `${p.fullName} *` : p.fullName).join(' + ') %>
+                                </p>
+                              <% }) %>
+                              <p class="text-muted mb-2" style="font-size:0.7rem">* Shared player (lowest handicap)</p>
+                            <% } %>
+                          </div>
+                        <% } %>
                         <% if (todayGroup.scorecard) { %>
                           <% if (todayGroup.scorecard.status === 'submitted') { %>
                             <span class="badge text-bg-secondary">Submitted</span>

@@ -104,6 +104,7 @@ function ctaButton({ label, url }) {
       <tr>
         <td style="background-color:${BRAND_GREEN};border-radius:8px;text-align:center;">
           <a href="${url}"
+            target="_blank" rel="noopener noreferrer"
             style="display:inline-block;padding:14px 32px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#1a3d1a;text-decoration:none;border-radius:8px;">
             ${label}
           </a>

@@ -96,7 +96,7 @@ function playerRouter(db) {
       const allRoundRows = await db('golf_rounds')
         .where({ tour_id: tourId })
         .orderBy('round_number')
-        .select('round_number', 'tour_date', 'status', 'calc_type', 'course_id', 'female_course_id', 'leaderboard_published');
+        .select('round_number', 'tour_date', 'status', 'calc_type', 'course_id', 'female_course_id', 'leaderboard_published', 'two_ball_enabled', 'two_ball_type');
 
       const openRound = allRoundRows.find((r) => r.status === 'open') || null;
 
@@ -143,11 +143,63 @@ function playerRouter(db) {
               .join('users as u', 'u.id', 'tgp.user_id')
               .where({ 'tgp.tee_group_id': myGroupRow.groupId })
               .orderBy('tgp.position')
-              .select('u.id', 'u.first_name', 'u.last_name'),
+              .select('u.id', 'u.first_name', 'u.last_name', 'tgp.position'),
             db('scorecards')
               .where({ tour_id: tourId, round_number: openRound.round_number, user_id: user.id, type: 'individual' })
               .first(),
           ]);
+
+          let twoBallInfo = null;
+          if (openRound.two_ball_enabled && scorecard && scorecard.status !== 'submitted') {
+            const groupSize = groupPlayers.length;
+            const myRow = groupPlayers.find((p) => Number(p.id) === Number(user.id));
+            const myPosition = myRow ? Number(myRow.position) : null;
+            const twoBallType = openRound.two_ball_type || 'best_ball';
+
+            const groupUserIds = groupPlayers.map((p) => p.id);
+            const [{ cnt: scoredCount }] = await db('scorecards as sc')
+              .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
+              .whereIn('sc.user_id', groupUserIds)
+              .where({ 'sc.tour_id': tourId, 'sc.round_number': openRound.round_number })
+              .count('sh.id as cnt');
+            const scoringStarted = Number(scoredCount) > 0;
+
+            if (myPosition && groupSize === 4) {
+              const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
+              const myPartnerRow = groupPlayers.find((p) => Number(p.id) !== Number(user.id) && myBallPositions.includes(Number(p.position)));
+              const selectableRows = scoringStarted ? [] : groupPlayers.filter((p) => Number(p.id) !== Number(user.id) && !myBallPositions.includes(Number(p.position)));
+              twoBallInfo = {
+                groupSize: 4,
+                twoBallType,
+                scoringStarted,
+                myPartner: myPartnerRow ? { userId: Number(myPartnerRow.id), fullName: `${myPartnerRow.first_name} ${myPartnerRow.last_name}`.trim() } : null,
+                selectablePartners: selectableRows.map((p) => ({ userId: Number(p.id), fullName: `${p.first_name} ${p.last_name}`.trim() })),
+              };
+            } else if (groupSize === 3) {
+              const hcpRows = await db('player_handicaps')
+                .whereIn('user_id', groupPlayers.map((p) => p.id))
+                .where({ tour_id: tourId })
+                .select('user_id', 'playing_handicap');
+              const hcpByUser = new Map(hcpRows.map((r) => [Number(r.user_id), Number(r.playing_handicap || 0)]));
+              const withHcp = groupPlayers.map((p) => ({
+                userId: Number(p.id),
+                fullName: `${p.first_name} ${p.last_name}`.trim(),
+                isMe: Number(p.id) === Number(user.id),
+                courseHcp: hcpByUser.get(Number(p.id)) || 0,
+              }));
+              const sorted = [...withHcp].sort((a, b) => a.courseHcp - b.courseHcp);
+              const shared = { ...sorted[0], isShared: true };
+              const others = sorted.slice(1);
+              twoBallInfo = {
+                groupSize: 3,
+                twoBallType,
+                teams: [
+                  { label: 'Ball A', players: [others[0], shared] },
+                  { label: 'Ball B', players: [others[1], shared] },
+                ],
+              };
+            }
+          }
 
           todayGroup = {
             groupNumber: myGroupRow.group_number,
@@ -160,6 +212,7 @@ function playerRouter(db) {
               isMe: Number(p.id) === Number(user.id),
             })),
             scorecard: scorecard || null,
+            twoBallInfo,
           };
         }
       }
