@@ -1459,20 +1459,55 @@
     });
   }
 
-  // Keep screen awake while scoring
+  // Screen wake lock with user toggle (default on)
+  const wakeLockStorageKey = 'forescore_wake_lock';
+  let wakeLockEnabled = localStorage.getItem(wakeLockStorageKey) !== '0';
   let wakeLock = null;
+  const wakeLockToggleBtn = document.getElementById('wakeLockToggleBtn');
+
+  function updateWakeLockToggleUi() {
+    if (!wakeLockToggleBtn) return;
+    wakeLockToggleBtn.style.color = wakeLockEnabled ? 'var(--fs-green)' : '#adb5bd';
+    wakeLockToggleBtn.title = wakeLockEnabled ? 'Screen wake lock on' : 'Screen wake lock off';
+  }
+
   async function acquireWakeLock() {
-    if (!('wakeLock' in navigator)) return;
+    if (!wakeLockEnabled || !('wakeLock' in navigator)) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
     } catch (_err) {
       // denied or not supported — silently ignore
     }
   }
+
+  async function releaseWakeLock() {
+    if (wakeLock) {
+      try { await wakeLock.release(); } catch (_err) { /* ignore */ }
+      wakeLock = null;
+    }
+  }
+
+  updateWakeLockToggleUi();
   acquireWakeLock();
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') acquireWakeLock();
   });
+
+  if (wakeLockToggleBtn) {
+    wakeLockToggleBtn.addEventListener('click', async () => {
+      wakeLockEnabled = !wakeLockEnabled;
+      try {
+        localStorage.setItem(wakeLockStorageKey, wakeLockEnabled ? '1' : '0');
+      } catch (_err) { /* ignore */ }
+      updateWakeLockToggleUi();
+      if (wakeLockEnabled) {
+        await acquireWakeLock();
+      } else {
+        await releaseWakeLock();
+      }
+    });
+  }
 
   document.addEventListener('touchstart', (event) => {
     touchStartX = event.changedTouches[0].clientX;

@@ -56,8 +56,11 @@
       <div class="d-flex align-items-center mt-3">
         <div id="offlineCacheStatus" class="offline-cache-status d-none" aria-live="polite"></div>
         <span class="flex-grow-1 text-center text-muted swipe-hint">↔️ swipe to move holes</span>
+        <button id="wakeLockToggleBtn" type="button" class="btn btn-sm btn-link p-0 ms-2" aria-label="Toggle screen wake lock" title="Keep screen on">
+          <i class="fa-solid fa-sun"></i>
+        </button>
         <% if (user && Number(user.id) === 1) { %>
-          <button id="offlineTestToggleBtn" type="button" class="btn btn-sm btn-link text-muted p-0" style="font-size:0.7rem;opacity:0.5">Go Offline</button>
+          <button id="offlineTestToggleBtn" type="button" class="btn btn-sm btn-link text-muted p-0 ms-1" style="font-size:0.7rem;opacity:0.5">Go Offline</button>
         <% } %>
       </div>
     </main>
