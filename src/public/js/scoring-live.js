@@ -19,6 +19,9 @@
   const offlineCacheStatusEl = document.getElementById('offlineCacheStatus');
   const prevHoleBtn = document.getElementById('prevHoleBtn');
   const nextHoleBtn = document.getElementById('nextHoleBtn');
+  const prevHoleLabelEl = document.getElementById('prevHoleLabel');
+  const nextHoleLabelEl = document.getElementById('nextHoleLabel');
+  const prevArrowIconEl = document.getElementById('prevArrowIcon');
   const offlineTestToggleBtn = document.getElementById('offlineTestToggleBtn');
   let transientStatusEl = null;
 
@@ -70,7 +73,7 @@
 
   function updateOfflineTestModeUi() {
     if (!offlineTestToggleBtn) return;
-    offlineTestToggleBtn.textContent = forceOfflineTestMode ? 'Disable Offline Test' : 'Enable Offline Test';
+    offlineTestToggleBtn.textContent = forceOfflineTestMode ? 'Go Online' : 'Go Offline';
     offlineTestToggleBtn.classList.toggle('btn-outline-secondary', !forceOfflineTestMode);
     offlineTestToggleBtn.classList.toggle('btn-warning', forceOfflineTestMode);
     if (forceOfflineTestMode) {
@@ -149,6 +152,19 @@
     } else {
       if (holeLoadingOverlay) holeLoadingOverlay.classList.remove('is-visible');
     }
+  }
+
+  function holeOrdinal(n) {
+    const num = Number(n);
+    const mod10 = num % 10;
+    const mod100 = num % 100;
+    let suffix = 'th';
+    if (mod100 < 11 || mod100 > 13) {
+      if (mod10 === 1) suffix = 'st';
+      else if (mod10 === 2) suffix = 'nd';
+      else if (mod10 === 3) suffix = 'rd';
+    }
+    return `${num}${suffix}`;
   }
 
   function newOpId() {
@@ -674,6 +690,12 @@
     holeNumberEl.textContent = String(holeData.holeNumber);
     holeParEl.textContent = String(holeData.hole.par);
     holeSiEl.textContent = `${holeData.hole.strokeIndexPrimary}/${holeData.hole.strokeIndexSecondary}`;
+    const _hIdx = holeOrder.indexOf(Number(holeData.holeNumber));
+    const _isFirst = _hIdx <= 0;
+    const _isLast = _hIdx >= holeOrder.length - 1;
+    if (prevHoleLabelEl) prevHoleLabelEl.textContent = _isFirst ? 'Start' : holeOrdinal(holeOrder[_hIdx - 1]);
+    if (prevArrowIconEl) prevArrowIconEl.classList.toggle('d-none', _isFirst);
+    if (nextHoleLabelEl) nextHoleLabelEl.textContent = _isLast ? 'Finish' : holeOrdinal(holeOrder[_hIdx + 1]);
     clearTransientStatus();
 
     if (groupMetaEl) {
@@ -883,36 +905,29 @@
   function renderTwoBallStatus(data) {
     const { twoBallType, teamA, teamB, firstHalf, secondHalf, match } = data;
     const typeLabel = twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball';
-
-    let matchStr;
-    if (match.holesPlayed === 0) {
-      matchStr = 'Not started';
-    } else if (match.status === 0) {
-      matchStr = `All Square (${match.holesPlayed} played)`;
-    } else if (match.status > 0) {
-      matchStr = `Ball A &nbsp;<strong>${match.status} UP</strong>&nbsp; (${match.holesPlayed} played)`;
-    } else {
-      matchStr = `Ball B &nbsp;<strong>${Math.abs(match.status)} UP</strong>&nbsp; (${match.holesPlayed} played)`;
-    }
+    const t1Name = teamA.players.map((p) => p.displayName).join(' & ');
+    const t2Name = teamB.players.map((p) => p.displayName).join(' & ');
 
     function holeRangeLabel(holes) {
       const sorted = [...holes].sort((a, b) => a - b);
       return `Holes ${sorted[0]}–${sorted[sorted.length - 1]}`;
     }
 
-    const matchRows = match.byHole.map((row, i) => {
-      const winner = row.holeDelta > 0 ? 'A' : (row.holeDelta < 0 ? 'B' : '—');
-      const rs = row.runningStatus;
-      const statusStr = rs === 0 ? 'AS' : (rs > 0 ? `A+${rs}` : `B+${Math.abs(rs)}`);
-      return `<tr>
-        <td class="text-muted">${i + 1}</td>
-        <td>${row.holeNumber}</td>
-        <td>${row.teamA}</td>
-        <td>${row.teamB}</td>
-        <td class="fw-semibold">${winner}</td>
-        <td class="text-muted">${statusStr}</td>
-      </tr>`;
-    }).join('');
+    // Compute match play status for each half from byHole data
+    const firstSet = new Set(firstHalf.holes);
+    const secondSet = new Set(secondHalf.holes);
+    let front9Status = 0, front9Played = 0;
+    let back9Status = 0, back9Played = 0;
+    for (const row of match.byHole) {
+      if (firstSet.has(row.holeNumber)) { front9Status += row.holeDelta; front9Played++; }
+      else if (secondSet.has(row.holeNumber)) { back9Status += row.holeDelta; back9Played++; }
+    }
+
+    function matchSummaryLabel(status, played) {
+      if (played === 0) return '—';
+      if (status === 0) return 'All Square';
+      return status > 0 ? `T1 &nbsp;<strong>${status} UP</strong>` : `T2 &nbsp;<strong>${Math.abs(status)} UP</strong>`;
+    }
 
     const titleEl = document.getElementById('twoBallOffcanvasTitle');
     if (titleEl) titleEl.textContent = `2-Ball · ${typeLabel}`;
@@ -920,41 +935,26 @@
     return `
       <div class="row g-0 text-center border rounded mb-3 overflow-hidden">
         <div class="col border-end py-3">
-          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Ball A</div>
-          ${teamA.players.map((p) => `<div class="small">${p.displayName}</div>`).join('')}
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Team 1</div>
+          <div class="small fw-semibold">${t1Name}</div>
           <div class="h3 fw-bold mt-2 mb-0">${teamA.total}</div>
           <div class="text-muted" style="font-size:0.7rem">pts</div>
         </div>
         <div class="col py-3">
-          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Ball B</div>
-          ${teamB.players.map((p) => `<div class="small">${p.displayName}</div>`).join('')}
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Team 2</div>
+          <div class="small fw-semibold">${t2Name}</div>
           <div class="h3 fw-bold mt-2 mb-0">${teamB.total}</div>
           <div class="text-muted" style="font-size:0.7rem">pts</div>
         </div>
       </div>
 
-      <div class="border rounded p-2 mb-3">
-        <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Match Play</div>
-        <div class="mb-2">${matchStr}</div>
-        ${match.byHole.length > 0 ? `
-          <div class="table-responsive" style="max-height:14rem">
-            <table class="two-ball-table table table-sm table-borderless mb-0">
-              <thead class="text-muted">
-                <tr><th>#</th><th>Hole</th><th>A</th><th>B</th><th>Won</th><th>Status</th></tr>
-              </thead>
-              <tbody>${matchRows}</tbody>
-            </table>
-          </div>
-        ` : ''}
-      </div>
-
-      <div class="row g-2">
+      <div class="row g-2 mb-3">
         <div class="col-6">
           <div class="border rounded p-2 text-center">
             <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">First 9 · ${holeRangeLabel(firstHalf.holes)}</div>
             <div class="d-flex justify-content-around">
-              <div><div class="text-muted" style="font-size:0.7rem">Ball A</div><div class="h5 fw-bold mb-0">${firstHalf.teamA}</div></div>
-              <div><div class="text-muted" style="font-size:0.7rem">Ball B</div><div class="h5 fw-bold mb-0">${firstHalf.teamB}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Team 1</div><div class="h5 fw-bold mb-0">${firstHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Team 2</div><div class="h5 fw-bold mb-0">${firstHalf.teamB}</div></div>
             </div>
           </div>
         </div>
@@ -962,9 +962,27 @@
           <div class="border rounded p-2 text-center">
             <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Second 9 · ${holeRangeLabel(secondHalf.holes)}</div>
             <div class="d-flex justify-content-around">
-              <div><div class="text-muted" style="font-size:0.7rem">Ball A</div><div class="h5 fw-bold mb-0">${secondHalf.teamA}</div></div>
-              <div><div class="text-muted" style="font-size:0.7rem">Ball B</div><div class="h5 fw-bold mb-0">${secondHalf.teamB}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Team 1</div><div class="h5 fw-bold mb-0">${secondHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">Team 2</div><div class="h5 fw-bold mb-0">${secondHalf.teamB}</div></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="border rounded p-2">
+        <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Match Play</div>
+        <div class="row g-0 text-center">
+          <div class="col border-end">
+            <div class="text-muted mb-1" style="font-size:0.7rem">Front 9</div>
+            <div class="small">${matchSummaryLabel(front9Status, front9Played)}</div>
+          </div>
+          <div class="col border-end">
+            <div class="text-muted mb-1" style="font-size:0.7rem">Back 9</div>
+            <div class="small">${matchSummaryLabel(back9Status, back9Played)}</div>
+          </div>
+          <div class="col">
+            <div class="text-muted mb-1" style="font-size:0.7rem">Overall</div>
+            <div class="small">${matchSummaryLabel(match.status, match.holesPlayed)}</div>
           </div>
         </div>
       </div>

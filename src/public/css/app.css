@@ -308,7 +308,7 @@ body {
 
 .live-hole-nav {
   display: grid;
-  grid-template-columns: 2.6rem 1fr 2.6rem;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 0.5rem;
 }
@@ -324,10 +324,16 @@ body {
 }
 
 .live-hole-nav-btn {
-  width: 2.6rem;
+  min-width: 2.6rem;
   height: 2.6rem;
-  padding: 0;
+  padding: 0 0.5rem;
   font-size: 1.05rem;
+}
+
+.live-hole-nav-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 .live-hole-nav-btn:disabled {
@@ -463,9 +469,9 @@ body {
 .two-ball-team-divider {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   color: var(--fs-green);
-  margin: 0.1rem 0;
+  margin: -0.4rem 0;
 }
 
 .two-ball-team-divider span {
@@ -476,7 +482,7 @@ body {
 }
 
 .two-ball-team-divider i {
-  font-size: 0.8rem;
+  font-size: 0.65rem;
   flex-shrink: 0;
 }
 
@@ -764,13 +770,14 @@ body {
   }
 
   .live-hole-nav {
-    grid-template-columns: 2.25rem 1fr 2.25rem;
+    grid-template-columns: auto 1fr auto;
     gap: 0.35rem;
   }
 
-.live-hole-nav-btn {
-    width: 2.25rem;
+  .live-hole-nav-btn {
+    min-width: 2.25rem;
     height: 2.25rem;
+    padding: 0 0.4rem;
     font-size: 0.95rem;
   }
 
