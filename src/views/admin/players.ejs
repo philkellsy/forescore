@@ -78,80 +78,60 @@
       <div class="card-body border-bottom">
         <h2 class="h6 mb-0">Current Players <span class="badge text-bg-light border ms-1"><%= members.length %></span></h2>
       </div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Gender</th>
-                <th>Role</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <% members.forEach((m) => { %>
-                <% const isSelf = m.user_id === user.id; %>
-                <tr>
-                  <td><%= m.first_name %> <%= m.last_name %></td>
-                  <td class="text-muted small"><%= m.email %></td>
-                  <td class="text-muted small"><%= m.phone_number || '—' %></td>
-                  <td>
-                    <span class="badge <%= m.gender === 'female' ? 'text-bg-warning text-dark' : 'text-bg-info text-dark' %>">
-                      <%= m.gender === 'female' ? 'F' : 'M' %>
-                    </span>
-                  </td>
-                  <td>
-                    <span class="badge <%=
-                      m.role === 'owner' ? 'text-bg-dark'
-                      : m.role === 'admin' ? 'text-bg-primary'
-                      : m.role === 'scorer' ? 'text-bg-info text-dark'
-                      : 'text-bg-light border'
-                    %>"><%= m.role %></span>
-                  </td>
-                  <td class="text-end">
-                    <% if (!isSelf) { %>
-                      <div class="d-flex gap-1 justify-content-end">
-                        <button type="button" class="btn btn-sm btn-outline-dark"
-                          data-gender-btn
-                          data-member-id="<%= m.user_id %>"
-                          data-member-name="<%= m.first_name %> <%= m.last_name %>"
-                          data-current-gender="<%= m.gender || 'male' %>"
-                          title="Edit gender"
-                        >
-                          <i class="fa-solid fa-venus-mars"></i>
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-dark"
-                          data-role-btn
-                          data-member-id="<%= m.user_id %>"
-                          data-member-name="<%= m.first_name %> <%= m.last_name %>"
-                          data-current-role="<%= m.role %>"
-                          title="Change role"
-                        >
-                          <i class="fa-solid fa-user-tag"></i>
-                        </button>
-                        <form action="<%= tenantPath(`/admin/players/${m.user_id}/remove`) %>" method="post"
-                          onsubmit="return confirm('Remove <%= m.first_name %> from this tour?')">
-                          <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
-                            <i class="fa-solid fa-trash"></i>
-                          </button>
-                        </form>
-                      </div>
-                    <% } else { %>
-                      <span class="text-muted small">You</span>
-                    <% } %>
-                  </td>
-                </tr>
-              <% }) %>
-              <% if (!members.length) { %>
-                <tr><td colspan="6" class="text-muted text-center py-3">No players yet.</td></tr>
-              <% } %>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <ul class="list-group list-group-flush">
+        <% members.forEach((m) => { %>
+          <% const isSelf = m.user_id === user.id; %>
+          <li class="list-group-item px-3 py-2">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+              <span class="fw-semibold"><%= m.first_name %> <%= m.last_name %></span>
+              <div class="d-flex gap-1 flex-shrink-0">
+                <span class="badge <%= m.gender === 'female' ? 'text-bg-warning text-dark' : 'text-bg-info text-dark' %>">
+                  <%= m.gender === 'female' ? 'F' : 'M' %>
+                </span>
+                <% if (m.role === 'owner' || m.role === 'admin') { %>
+                  <span class="badge text-bg-primary">Tour Admin</span>
+                <% } else if (m.role === 'scorer') { %>
+                  <span class="badge text-bg-info text-dark">Scorer</span>
+                <% } %>
+              </div>
+            </div>
+            <div class="text-muted small mb-2"><%= m.email %><% if (m.phone_number) { %> &middot; <%= m.phone_number %><% } %></div>
+            <% if (!isSelf) { %>
+              <div class="d-flex gap-1">
+                <button type="button" class="btn btn-sm btn-outline-dark"
+                  data-gender-btn
+                  data-member-id="<%= m.user_id %>"
+                  data-member-name="<%= m.first_name %> <%= m.last_name %>"
+                  data-current-gender="<%= m.gender || 'male' %>"
+                  title="Edit gender"
+                >
+                  <i class="fa-solid fa-venus-mars"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-dark"
+                  data-role-btn
+                  data-member-id="<%= m.user_id %>"
+                  data-member-name="<%= m.first_name %> <%= m.last_name %>"
+                  data-current-role="<%= m.role %>"
+                  title="Change role"
+                >
+                  <i class="fa-solid fa-user-tag"></i>
+                </button>
+                <form action="<%= tenantPath(`/admin/players/${m.user_id}/remove`) %>" method="post"
+                  onsubmit="return confirm('Remove <%= m.first_name %> from this tour?')">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </form>
+              </div>
+            <% } else { %>
+              <span class="text-muted small">You</span>
+            <% } %>
+          </li>
+        <% }) %>
+        <% if (!members.length) { %>
+          <li class="list-group-item text-muted text-center py-3">No players yet.</li>
+        <% } %>
+      </ul>
     </section>
   </main>
 
