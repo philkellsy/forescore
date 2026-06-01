@@ -65,12 +65,30 @@ if (!window.__FORESCORE_APP_INIT__) {
     if (link.hasAttribute('download')) return;
     const href = link.getAttribute('href') || '';
     if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-    // Bootstrap doesn't auto-dismiss the offcanvas on nav link clicks — close it explicitly.
+
+    // When the offcanvas nav is open, prevent the default navigation so we can sequence:
+    // close nav → spinner visible → navigate. Without this the overlay and slide-out animation
+    // compete visually and the spinner is never seen on mobile.
     const navMenu = document.getElementById('navMenu');
-    if (navMenu && window.bootstrap) {
+    if (navMenu && navMenu.classList.contains('show') && window.bootstrap) {
       const bsOffcanvas = window.bootstrap.Offcanvas.getInstance(navMenu);
-      if (bsOffcanvas) bsOffcanvas.hide();
+      if (bsOffcanvas) {
+        e.preventDefault();
+        const target = link.href;
+        let gone = false;
+        const go = () => {
+          if (gone) return;
+          gone = true;
+          loadingBar.start();
+          window.location.assign(target);
+        };
+        navMenu.addEventListener('hidden.bs.offcanvas', go, { once: true });
+        bsOffcanvas.hide();
+        setTimeout(go, 400); // safety net if hidden event doesn't fire
+        return;
+      }
     }
+
     loadingBar.start();
   }, true);
 

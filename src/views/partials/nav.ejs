@@ -25,6 +25,9 @@
           <% if (typeof tenant !== 'undefined' && tenant) { %>
             <% const memberRole = (typeof tenantMembership !== 'undefined' && tenantMembership) ? tenantMembership.role : null; %>
             <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+              <% if (isSuperAdmin) { %>
+                <li class="nav-item"><a class="nav-link" href="/"><i class="fa-solid fa-building fa-fw me-1" aria-hidden="true"></i>Tenants</a></li>
+              <% } %>
               <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/') %>"><i class="fa-solid fa-house fa-fw me-1" aria-hidden="true"></i>Dashboard</a></li>
               <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/scoring') %>"><i class="fa-solid fa-pen-to-square fa-fw me-1" aria-hidden="true"></i>Scoring</a></li>
               <li class="nav-item"><a class="nav-link" href="<%= tenantPath('/leaderboards') %>"><i class="fa-solid fa-trophy fa-fw me-1" aria-hidden="true"></i>Leaderboards</a></li>
