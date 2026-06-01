@@ -34,10 +34,10 @@
               <% } %>
 
               <% if (!codeStage) { %>
-                <p class="text-muted">Enter your email or mobile. We will send a one-time sign-in code to your email address.</p>
+                <p class="text-muted">Enter your email address. We will send you a one-time sign-in code.</p>
                 <form action="<%= tenantPath('/auth/send-code') %>" method="post" class="d-grid gap-3">
                   <div>
-                    <label for="lookup" class="form-label">Email or mobile</label>
+                    <label for="lookup" class="form-label">Email address</label>
                     <input
                       id="lookup"
                       name="lookup"
@@ -97,7 +97,7 @@
                 </form>
 
                 <div class="d-grid">
-                  <a class="btn btn-link p-0 text-decoration-none" href="<%= tenantPath('/auth/login') %>">Use a different email or mobile</a>
+                  <a class="btn btn-link p-0 text-decoration-none" href="<%= tenantPath('/auth/login') %>">Use a different email address</a>
                 </div>
               <% } %>
             </div>
