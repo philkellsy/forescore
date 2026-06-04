@@ -36,7 +36,7 @@
     <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
     <% if (holesLocked) { %>
       <div class="alert alert-warning">
-        <i class="fa-solid fa-lock me-1"></i>Hole data is locked — scores have been entered using this course. Course name and ratings can still be updated.
+        <i class="fa-solid fa-lock me-1"></i>A round using this course is currently open. Par, SI and distances cannot be edited until the round is closed.
       </div>
     <% } %>
 
@@ -129,7 +129,7 @@
                           name="si_secondary_<%= hole.id %>" type="number" min="1" max="36"
                           value="<%= hole.stroke_index_secondary %>"
                           data-hole-id="<%= hole.id %>"
-                          <%= (!course.supports_split_ratings || courseEditLocked) ? 'disabled' : '' %> />
+                          <%= (!course.supports_split_ratings || holesLocked) ? 'disabled' : '' %> />
                         <%# Calculated display — shown when split ratings off %>
                         <span class="si-secondary-calc text-muted small <%= course.supports_split_ratings ? 'd-none' : '' %>"
                           data-hole-id="<%= hole.id %>">

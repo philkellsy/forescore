@@ -1748,6 +1748,15 @@ function adminRouter(db) {
 
       const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
 
+      const hasOpenRound = await db('golf_rounds as gr')
+        .join('tours as t', 't.id', 'gr.tour_id')
+        .where('t.tenant_id', req.tenant.id)
+        .where('gr.status', 'open')
+        .where(function () {
+          this.where('gr.course_id', courseId).orWhere('gr.female_course_id', courseId);
+        })
+        .first();
+
       const hasScores = await db('scorecard_holes as sh')
         .join('scorecards as s', 's.id', 'sh.scorecard_id')
         .join('golf_rounds as gr', function joinGr() {
@@ -1764,7 +1773,7 @@ function adminRouter(db) {
         course,
         holes,
         courseEditLocked: Boolean(hasScores),
-        holesLocked: Boolean(hasScores),
+        holesLocked: Boolean(hasOpenRound),
         message: req.query.message || null,
         error: req.query.error || null,
       });
@@ -1808,17 +1817,16 @@ function adminRouter(db) {
         supports_split_ratings: supportsSplitRatings,
       });
 
-      const hasScores = await db('scorecard_holes as sh')
-        .join('scorecards as s', 's.id', 'sh.scorecard_id')
-        .join('golf_rounds as gr', function joinGr() {
-          this.on('gr.tour_id', '=', 's.tour_id').andOn('gr.round_number', '=', 's.round_number');
-        })
-        .join('tours as t', 't.id', 's.tour_id')
+      const hasOpenRound = await db('golf_rounds as gr')
+        .join('tours as t', 't.id', 'gr.tour_id')
         .where('t.tenant_id', req.tenant.id)
-        .where('gr.course_id', courseId)
+        .where('gr.status', 'open')
+        .where(function () {
+          this.where('gr.course_id', courseId).orWhere('gr.female_course_id', courseId);
+        })
         .first();
 
-      if (!hasScores) {
+      if (!hasOpenRound) {
         const holes = await db('holes').where({ course_id: courseId }).orderBy('hole_number');
         await db.transaction(async (trx) => {
           for (const hole of holes) {
