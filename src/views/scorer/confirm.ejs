@@ -29,7 +29,7 @@
           <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
             <div>
               <h2 class="h6 mb-1">Hole Summary</h2>
-              <p class="text-muted small mb-0">Tap a hole to return to scoring and edit that hole.</p>
+              <p class="text-muted small mb-0">Tap a hole number to go back and edit it.</p>
             </div>
             <% if (!confirmation.hasMissing) { %>
               <span class="confirm-review-status">All holes scored</span>
@@ -50,13 +50,14 @@
                         </div>
                       </th>
                     <% }) %>
-                    <th scope="col">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
                   <% (confirmation.holes || []).forEach((hole) => { %>
                     <tr>
-                      <th scope="row"><span class="confirm-hole-pill">H<%= hole.holeNumber %></span></th>
+                      <th scope="row">
+                        <a class="confirm-hole-pill" href="<%= tenantPath(`/scoring/live/${scorecard.id}?hole=${hole.holeNumber}&from=confirm`) %>" aria-label="Edit hole <%= hole.holeNumber %>"><%= hole.holeNumber %></a>
+                      </th>
                       <% hole.cells.forEach((cell) => { %>
                         <td class="<%= cell.missing ? 'is-missing' : '' %>">
                           <div class="confirm-score-cell">
@@ -70,9 +71,7 @@
                           </div>
                         </td>
                       <% }) %>
-                      <td class="text-end">
-                        <a class="btn btn-sm btn-outline-dark" href="<%= tenantPath(`/scoring/live/${scorecard.id}?hole=${hole.holeNumber}`) %>">Edit</a>
-                      </td>
+
                     </tr>
                   <% }) %>
                 </tbody>
@@ -88,11 +87,14 @@
         <div class="alert alert-info">This scorecard has been submitted and locked.</div>
         <a class="btn btn-outline-secondary" href="<%= tenantPath('/scoring') %>">Back to Scoring</a>
       <% } else { %>
+        <%
+          const _liveUrl = tenantPath(`/scoring/live/${scorecard.id}${returnHole ? `?hole=${returnHole}` : ''}`);
+        %>
         <div class="d-flex gap-2 flex-wrap">
           <% if (canSubmit) { %>
             <a id="reviewSubmitBtn" class="btn btn-success" href="<%= tenantPath(`/scoring/confirm/${scorecard.id}/final`) %>">Review Final Submission</a>
           <% } %>
-          <a class="btn btn-outline-secondary" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">Back to Live Scorecard</a>
+          <a class="btn btn-outline-secondary" href="<%= _liveUrl %>">Back to Live Scorecard</a>
         </div>
         <p class="small text-muted mt-2 mb-0">The final submission step appears after every score is complete.</p>
       <% } %>

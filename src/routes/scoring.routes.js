@@ -11,6 +11,7 @@ const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service'
 const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
 const { computeCourseHandicap, getCachedCourseData, getCachedParByHole, warmRoundCourseCache, isRoundCacheWarm } = require('../services/scoring/handicap.service');
+const { buildIndividualScorecardModel } = require('../services/scoring/scorecard-model.service');
 
 function toPlayerLabel(firstName, lastName) {
   const initial = lastName ? `${String(lastName).charAt(0)}.` : '';
@@ -1014,10 +1015,16 @@ function scoringRouter(db) {
             .leftJoin('player_day_handicaps as pdh', function joinPdh() {
               this.on('pdh.user_id', '=', 'u.id').andOnVal('pdh.tour_id', '=', scorecard.tour_id).andOnVal('pdh.round_number', '=', scorecard.round_number);
             })
+            .leftJoin('scorecards as psc', function joinPsc() {
+              this.on('psc.user_id', '=', 'u.id')
+                .andOnVal('psc.tour_id', '=', scorecard.tour_id)
+                .andOnVal('psc.round_number', '=', scorecard.round_number)
+                .andOnVal('psc.type', '=', 'individual');
+            })
             .where({ 'tg.tour_id': scorecard.tour_id, 'tg.round_number': scorecard.round_number })
             .whereNot('peers.user_id', scorecard.user_id)
-            .select('u.first_name', 'u.last_name', 'u.gender', 'ph.playing_handicap', 'pdh.handicap_index as round_handicap_index')
-            .orderBy('u.first_name', 'asc');
+            .select('u.first_name', 'u.last_name', 'u.gender', 'ph.playing_handicap', 'pdh.handicap_index as round_handicap_index', 'psc.id as peer_scorecard_id', 'psc.status as peer_status')
+            .orderBy('peers.position', 'asc');
           otherPlayers = await Promise.all(rawOtherPlayers.map(async (p) => {
             const idx = p.round_handicap_index != null ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
             const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, p.gender || null, hcpCache);
@@ -1177,22 +1184,42 @@ function scoringRouter(db) {
         }
 
         const confirmation = await buildConfirmationData(db, scorecard);
-        const submittedSummary =
-          scorecard.status === 'submitted'
-            ? confirmation.entries.map((entry) =>
-                entry.type === 'team'
-                  ? {
-                      label: entry.displayName,
-                      value: `Net ${entry.netTotalDisplay || Number(entry.netTotalRaw || 0)}`,
-                      detail: `Gross ${Number(entry.grossTotal || 0)} - Hcp ${entry.teamHandicapDisplay || Number(entry.teamHandicapRaw || 0)}`
-                    }
-                  : {
-                      label: entry.displayName,
-                      value: `${Number(entry.stablefordTotal || 0)} pts`,
-                      detail: null
-                    }
-              )
-            : [];
+
+        const peerById = new Map(
+          otherPlayers
+            .filter((p) => p.peer_scorecard_id)
+            .map((p) => [Number(p.peer_scorecard_id), p])
+        );
+        const groupSummary = scorecard.status === 'submitted'
+          ? confirmation.entries.map((entry) => {
+              const entryScId = Number(entry.scorecardId);
+              const isCurrentUser = entryScId === Number(scorecard.id);
+              const peer = peerById.get(entryScId);
+              const submitted = isCurrentUser || peer?.peer_status === 'submitted';
+              if (entry.type === 'team') {
+                return {
+                  isTeam: true,
+                  fullName: entry.displayName,
+                  scorecardId: null,
+                  scoreLabel: `Net ${entry.netTotalDisplay || Number(entry.netTotalRaw || 0)}`,
+                  detail: `Gross ${Number(entry.grossTotal || 0)} - Hcp ${entry.teamHandicapDisplay || Number(entry.teamHandicapRaw || 0)}`,
+                  handicapDisplay: null,
+                  isCurrentUser,
+                  submitted
+                };
+              }
+              return {
+                isTeam: false,
+                fullName: entry.fullName,
+                scorecardId: entry.scorecardId,
+                scoreLabel: `${Number(entry.stablefordTotal || 0)} pts`,
+                detail: null,
+                handicapDisplay: entry.handicapDisplay,
+                isCurrentUser,
+                submitted
+              };
+            })
+          : null;
 
         return {
           ...scorecard,
@@ -1200,10 +1227,10 @@ function scoringRouter(db) {
           ambroseOtherTeams,
           ownHandicapDisplay,
           twoBallInfo,
-          submittedSummary,
+          groupSummary,
           otherPlayers: otherPlayers.map((p) => ({
             fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
-            handicapDisplay: formatHandicapDisplay(p.playing_handicap)
+            handicapDisplay: formatHandicapDisplay(p.playing_handicap),
           }))
         };
       })
@@ -1232,6 +1259,71 @@ function scoringRouter(db) {
       message,
       dayLabel
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Group scorecard view — shows all scorecards for the player's tee group
+  // Access: leaderboard-gated per round; admins/scorers bypass
+  // -------------------------------------------------------------------------
+  router.get('/:scorecardId/group', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = parseInt(req.params.scorecardId, 10);
+      const userId = Number(req.session.user.id);
+      const isPrivileged = canEditAllScores(req.tenantMembership?.role);
+
+      const scorecard = await db('scorecards as s')
+        .join('tours as t', 't.id', 's.tour_id')
+        .where('s.id', scorecardId)
+        .where('t.tenant_id', req.tenant.id)
+        .where('s.type', 'individual')
+        .where(function () {
+          if (!isPrivileged) this.where('s.user_id', userId);
+        })
+        .select('s.id', 's.tour_id', 's.round_number', 's.user_id', 't.label as tour_label')
+        .first();
+
+      if (!scorecard) return res.status(404).send('Scorecard not found');
+
+      const tourId = Number(scorecard.tour_id);
+      const roundNumber = Number(scorecard.round_number);
+      const scorecardUserId = Number(scorecard.user_id);
+
+      const tour = await db('tours').where({ id: tourId }).first();
+
+      const teeGroup = await db('tee_group_players as tgp')
+        .join('tee_groups as tg', 'tg.id', 'tgp.tee_group_id')
+        .where({ 'tg.tour_id': tourId, 'tg.round_number': roundNumber, 'tgp.user_id': scorecardUserId })
+        .select('tg.id as group_id', 'tg.group_number')
+        .first();
+
+      if (!teeGroup) return res.status(404).send('No tee group found for this round');
+
+      const groupPlayers = await db('tee_group_players as tgp')
+        .where('tgp.tee_group_id', teeGroup.group_id)
+        .orderBy('tgp.position')
+        .select('tgp.user_id');
+
+      const roundRow = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
+      const isPublished = Boolean(roundRow?.leaderboard_published);
+
+      const models = (await Promise.all(
+        groupPlayers.map((p) => buildIndividualScorecardModel(db, tour, roundNumber, Number(p.user_id)))
+      )).filter(Boolean);
+
+      const leaderboardUrl = res.locals.tenantPath(`/leaderboards/tour/${tourId}`);
+
+      res.render('scorer/group-scorecard', {
+        title: `Group ${teeGroup.group_number} — ${dayLabel(roundNumber)}`,
+        pageSubtitle: scorecard.tour_label,
+        roundNumber,
+        groupNumber: teeGroup.group_number,
+        isPublished,
+        leaderboardUrl,
+        models,
+        backUrl: res.locals.tenantPath('/scoring'),
+        user: req.session.user,
+      });
+    } catch (err) { next(err); }
   });
 
   router.post('/select-partner', requireAuth, async (req, res, next) => {
@@ -1341,6 +1433,39 @@ function scoringRouter(db) {
     }
   });
 
+  router.get('/card/:scorecardId', requireAuth, async (req, res, next) => {
+    try {
+      const scorecardId = Number(req.params.scorecardId);
+      const scorecard = await db('scorecards').where({ id: scorecardId }).first();
+      if (!scorecard) return res.status(404).send('Scorecard not found');
+
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      if (!permitted) return res.status(403).send('Not allowed');
+
+      const tour = await db('tours').where({ id: scorecard.tour_id, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.status(404).send('Tour not found');
+
+      const model = await buildIndividualScorecardModel(db, tour, scorecard.round_number, scorecard.user_id);
+      if (!model) return res.status(404).send('Scorecard not found');
+
+      const tp = res.locals.tenantPath;
+      const back = req.query.back;
+      const backUrl = back === 'scoring' ? tp('/scoring') : tp(`/scoring/confirm/${scorecard.id}/final`);
+      const backLabel = back === 'scoring' ? 'Back to Scoring' : 'Back to Submission';
+      return res.render('leaderboard/scorecard-view', {
+        title: model.title,
+        user: req.session.user,
+        activeTour: tour,
+        models: [model],
+        backUrl,
+        backLabel,
+        pageSubtitle: 'Scorecard'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.get('/confirm/:scorecardId', requireAuth, async (req, res, next) => {
     try {
       const scorecardId = Number(req.params.scorecardId);
@@ -1351,12 +1476,14 @@ function scoringRouter(db) {
       if (!permitted) return res.status(403).send('Not allowed');
 
       const confirmation = await buildConfirmationData(db, scorecard);
+      const returnHole = parseInt(req.query.returnHole, 10) || null;
 
       return res.render('scorer/confirm', {
         title: 'Review Scores',
         user: req.session.user,
         scorecard,
         confirmation,
+        returnHole,
         canSubmit: scorecard.status !== 'submitted' && !confirmation.hasMissing,
         submitError: null,
         dayLabel

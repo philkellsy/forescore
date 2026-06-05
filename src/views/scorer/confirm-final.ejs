@@ -30,6 +30,7 @@
           <% if (confirmation.entries && confirmation.entries.length) { %>
             <div class="d-grid gap-2">
               <% confirmation.entries.forEach((entry) => { %>
+                <% const _cardUrl = entry.type !== 'team' && entry.scorecardId ? tenantPath(`/scoring/card/${entry.scorecardId}`) : null; %>
                 <div class="border rounded p-2 bg-light">
                   <div class="d-flex justify-content-between align-items-center gap-2">
                     <div class="d-flex align-items-center gap-1 flex-wrap">
@@ -37,11 +38,19 @@
                         <strong><%= entry.displayName %></strong>
                         <span class="small text-muted">(Hcp <%= entry.teamHandicapDisplay || Number(entry.teamHandicapRaw || 0) %>)</span>
                       <% } else { %>
-                        <%- include('../partials/participant-card', {
-                          name: entry.fullName || entry.displayName,
-                          handicapText: entry.handicapDisplay || '-',
-                          className: 'border rounded px-2 py-1 bg-white small d-inline-flex align-items-center gap-1'
-                        }) %>
+                        <% if (_cardUrl) { %>
+                          <a href="<%= _cardUrl %>" class="border rounded px-2 py-1 bg-white small d-inline-flex align-items-center gap-1 text-decoration-none text-dark">
+                            <%= entry.fullName || entry.displayName %>
+                            <% if (entry.handicapDisplay) { %><span class="text-muted ms-1">Hcp <%= entry.handicapDisplay %></span><% } %>
+                            <i class="fa-solid fa-chevron-right ms-1 text-muted" style="font-size:0.65rem"></i>
+                          </a>
+                        <% } else { %>
+                          <%- include('../partials/participant-card', {
+                            name: entry.fullName || entry.displayName,
+                            handicapText: entry.handicapDisplay || '-',
+                            className: 'border rounded px-2 py-1 bg-white small d-inline-flex align-items-center gap-1'
+                          }) %>
+                        <% } %>
                       <% } %>
                     </div>
                     <% if (entry.type === 'team') { %>

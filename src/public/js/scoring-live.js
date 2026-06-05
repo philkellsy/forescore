@@ -10,6 +10,7 @@
   const offlineTestStorageKey = 'forescore_scoring_offline_test_mode';
   const searchParams = new URLSearchParams(window.location.search || '');
   const requestedOfflineTestMode = searchParams.get('offline_test');
+  const fromConfirm = searchParams.get('from') === 'confirm';
 
   const holeNumberEl = document.getElementById('holeNumber');
   const holeParEl = document.getElementById('holePar');
@@ -28,7 +29,8 @@
   let touchStartX = null;
   let isNavigating = false;
   let ctx = null; // static context from /init — players, holes, individualContext
-  let currentHole = Number(state.holeNumber || state.startingHole || 1);
+  const requestedHole = parseInt(searchParams.get('hole'), 10);
+  let currentHole = (requestedHole >= 1 && requestedHole <= 18) ? requestedHole : Number(state.holeNumber || state.startingHole || 1);
   let currentPar = Number(state.hole?.par || 0);
   let currentSiPrimary = Number(state.hole?.strokeIndexPrimary || 0);
   let currentSiSecondary = Number(state.hole?.strokeIndexSecondary || 0);
@@ -693,23 +695,27 @@
     const _hIdx = holeOrder.indexOf(Number(holeData.holeNumber));
     const _isFirst = _hIdx <= 0;
     const _isLast = _hIdx >= holeOrder.length - 1;
-    if (prevHoleLabelEl) prevHoleLabelEl.textContent = _isFirst ? 'Start' : holeOrdinal(holeOrder[_hIdx - 1]);
+    if (prevHoleLabelEl) prevHoleLabelEl.textContent = _isFirst ? 'Start' : String(holeOrder[_hIdx - 1]);
     if (prevArrowIconEl) prevArrowIconEl.classList.toggle('d-none', _isFirst);
-    if (nextHoleLabelEl) nextHoleLabelEl.textContent = _isLast ? 'Finish' : holeOrdinal(holeOrder[_hIdx + 1]);
+    if (nextHoleLabelEl) nextHoleLabelEl.textContent = _isLast ? 'Finish' : String(holeOrder[_hIdx + 1]);
     clearTransientStatus();
 
     if (groupMetaEl) {
-      const isAmbrose = holeData.mode === 'ambrose';
-      const groupCtx = isAmbrose
-        ? (holeData.ambroseContext || state.ambroseContext)
-        : (holeData.individualContext || state.individualContext);
-      if (groupCtx) {
-        const requesterDisplay = ctx?.requesterDisplay || state.requesterDisplay || '';
-        const who = requesterDisplay ? ` | ${requesterDisplay}` : '';
-        const teeTimeDisplay = groupCtx.teeTime ? groupCtx.teeTime.slice(0, 5) : '-';
-        groupMetaEl.textContent = `Group ${groupCtx.groupNumber || '-'} | ${teeTimeDisplay} | ${groupCtx.teeLocation || '-'}${who}`;
+      if (fromConfirm) {
+        groupMetaEl.innerHTML = `<a href="${tp(`/scoring/confirm/${state.scorecardId}`)}" class="btn btn-sm btn-outline-secondary"><i class="fa-solid fa-list-check me-1"></i>Back to Review</a>`;
       } else {
-        groupMetaEl.textContent = '';
+        const isAmbrose = holeData.mode === 'ambrose';
+        const groupCtx = isAmbrose
+          ? (holeData.ambroseContext || state.ambroseContext)
+          : (holeData.individualContext || state.individualContext);
+        if (groupCtx) {
+          const requesterDisplay = ctx?.requesterDisplay || state.requesterDisplay || '';
+          const who = requesterDisplay ? ` | ${requesterDisplay}` : '';
+          const teeTimeDisplay = groupCtx.teeTime ? groupCtx.teeTime.slice(0, 5) : '-';
+          groupMetaEl.textContent = `Group ${groupCtx.groupNumber || '-'} | ${teeTimeDisplay} | ${groupCtx.teeLocation || '-'}${who}`;
+        } else {
+          groupMetaEl.textContent = '';
+        }
       }
     }
 
@@ -1047,7 +1053,7 @@
     const op = { opId, scorecardId: Number(scorecardId), holeNumber: Number(holeNumber), payload: { scorecardId, holeNumber, grossScore, opId, baseVersion } };
     sendQueuedGrossOp(op).then((result) => {
       if (result.ok) {
-        setExpectedGross(Number(scorecardId), holeNumber, grossScore);
+        if (!fromConfirm) setExpectedGross(Number(scorecardId), holeNumber, grossScore);
         clearConflict(Number(scorecardId), holeNumber);
         if (Number(holeNumber) === Number(currentHole) && result.payload?.holeVersion !== undefined) {
           updateCurrentHoleEntry(scorecardId, (entry) => {
@@ -1238,7 +1244,7 @@
 
   function goToConfirmation() {
     persistConflictState();
-    window.location.assign(tp(`/scoring/confirm/${state.scorecardId}`));
+    window.location.assign(tp(`/scoring/confirm/${state.scorecardId}?returnHole=${currentHole}`));
   }
 
   async function navigateByOffset(offset) {
@@ -1473,17 +1479,26 @@
 
   async function acquireWakeLock() {
     if (!wakeLockEnabled || !('wakeLock' in navigator)) return;
+    if (wakeLock && !wakeLock.released) return;
     try {
       wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+        updateWakeLockToggleUi();
+        // Re-acquire if the page is still visible and user hasn't disabled it
+        if (wakeLockEnabled && document.visibilityState === 'visible') acquireWakeLock();
+      });
+      updateWakeLockToggleUi();
     } catch (_err) {
       // denied or not supported — silently ignore
     }
   }
 
   async function releaseWakeLock() {
-    if (wakeLock) {
-      try { await wakeLock.release(); } catch (_err) { /* ignore */ }
-      wakeLock = null;
+    const sentinel = wakeLock;
+    wakeLock = null;
+    if (sentinel && !sentinel.released) {
+      try { await sentinel.release(); } catch (_err) { /* ignore */ }
     }
   }
 
@@ -1537,6 +1552,10 @@
     twoBallBtn.addEventListener('click', () => showTwoBallStatus());
   }
 
+  if (screen.orientation?.lock) {
+    screen.orientation.lock('portrait').catch(() => {});
+  }
+
   (async () => {
     setHoleLoading(true);
     try {
@@ -1544,7 +1563,7 @@
       // On success, ctx drives all subsequent rendering — no per-hole DB work for static data.
       ctx = await fetchInit();
       holeOrder = ctx.holeOrder || holeSequenceFrom(Number(ctx.startingHole || 1));
-      currentHole = Number(ctx.currentHole || state.holeNumber || state.startingHole || 1);
+      currentHole = (requestedHole >= 1 && requestedHole <= 18) ? requestedHole : Number(ctx.currentHole || state.holeNumber || state.startingHole || 1);
 
       if (ctx.twoBallEnabled) {
         const navBar = document.getElementById('twoBallNavBar');

@@ -126,10 +126,15 @@
             </div>
             <input type="hidden" name="confirmDeleteScores" id="confirmDeleteScores" value="">
 
-            <div class="form-check mb-3">
+            <div class="form-check mb-2">
               <input type="checkbox" name="leaderboardPublished" id="leaderboardPublished" class="form-check-input" value="1"
                 <%= round && round.leaderboard_published ? 'checked' : '' %> />
               <label class="form-check-label" for="leaderboardPublished">Publish leaderboard to players</label>
+            </div>
+            <div id="showInProgressRow" class="form-check mb-3 ms-3<%= round && round.leaderboard_published ? '' : ' d-none' %>">
+              <input type="checkbox" name="showInProgress" id="showInProgress" class="form-check-input" value="1"
+                <%= round && round.leaderboard_show_in_progress ? 'checked' : '' %> />
+              <label class="form-check-label small" for="showInProgress">Show in-progress players on the published leaderboard, final score hidden until submitted</label>
             </div>
 
             <hr class="my-3" />
@@ -214,10 +219,6 @@
         <h2 class="h6 mb-0"><i class="fa-solid fa-flag fa-fw me-1 text-muted"></i>Novelty Events</h2>
       </div>
       <div class="card-body">
-        <p class="small text-muted mb-3">
-          Configure NTP and Long Drive holes for this round.
-          Record winners on the Tee Times page once scores are in.
-        </p>
         <% if (noveltyEvents.length) { %>
           <div class="mb-3">
             <% noveltyEvents.forEach((ne) => { %>
@@ -261,6 +262,52 @@
               <i class="fa-solid fa-plus me-1"></i>Add
             </button>
           </div>
+        </form>
+      </div>
+      <% if (noveltyEvents.length && noveltyPlayers && noveltyPlayers.length) { %>
+        <div class="card-body border-top">
+          <h3 class="h6 mb-3">Results</h3>
+          <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/novelties/results`) %>" method="post" class="row g-3">
+            <% noveltyEvents.forEach((ne) => {
+              const result = noveltyResultsByEventId && noveltyResultsByEventId[ne.id];
+              const currentWinnerId = result && !result.is_no_winner ? Number(result.winner_user_id) : null;
+            %>
+              <div class="col-12 col-sm-6">
+                <label class="form-label small fw-semibold mb-1">
+                  <%= ne.label %>
+                  <span class="text-muted fw-normal ms-1">Hole <%= ne.hole_number %></span>
+                </label>
+                <select name="winner_<%= ne.id %>" class="form-select form-select-sm">
+                  <option value="">— Not yet recorded —</option>
+                  <option value="no_winner" <%= result && result.is_no_winner ? 'selected' : '' %>>No winner</option>
+                  <% noveltyPlayers.forEach((p) => { %>
+                    <option value="<%= p.user_id %>" <%= currentWinnerId === Number(p.user_id) ? 'selected' : '' %>><%= `${p.first_name || ''} ${p.last_name || ''}`.trim() %></option>
+                  <% }) %>
+                </select>
+              </div>
+            <% }) %>
+            <div class="col-12">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">Save results</button>
+            </div>
+          </form>
+        </div>
+      <% } %>
+    </div>
+    <% } %>
+
+    <% if (tour.id === 1 && round && round.status === 'open') { %>
+    <div class="alert alert-warning py-2 d-flex justify-content-between align-items-center mt-4">
+      <span class="small"><i class="fa-solid fa-flask me-1"></i>Test environment</span>
+      <div class="d-flex gap-2">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/unsubmit-scores`) %>" method="post"
+              onsubmit="return confirm('Unsubmit all submitted scorecards for this round?')">
+          <input type="hidden" name="returnTo" value="round-config" />
+          <button class="btn btn-sm btn-outline-warning">Unsubmit all</button>
+        </form>
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/seed-scores`) %>" method="post"
+              onsubmit="return confirm('Seed random scores for all players in this round? Existing scores will be overwritten.')">
+          <input type="hidden" name="returnTo" value="round-config" />
+          <button class="btn btn-sm btn-warning">Seed scores</button>
         </form>
       </div>
     </div>
@@ -322,6 +369,14 @@
     const twoBallTypeRow = document.getElementById('twoBallTypeRow');
     twoBallToggle.addEventListener('change', () => {
       twoBallTypeRow.style.display = twoBallToggle.checked ? '' : 'none';
+    });
+
+    const publishToggle = document.getElementById('leaderboardPublished');
+    const showInProgressRow = document.getElementById('showInProgressRow');
+    const showInProgressCheck = document.getElementById('showInProgress');
+    publishToggle.addEventListener('change', () => {
+      showInProgressRow.classList.toggle('d-none', !publishToggle.checked);
+      if (!publishToggle.checked) showInProgressCheck.checked = false;
     });
 
     function syncAmbroseCard() {

@@ -68,10 +68,16 @@
     <% if (tour.id === 1 && round && round.status === 'open') { %>
       <div class="alert alert-warning py-2 d-flex justify-content-between align-items-center mb-3">
         <span class="small"><i class="fa-solid fa-flask me-1"></i>Test environment</span>
-        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/seed-scores`) %>" method="post"
-              onsubmit="return confirm('Seed random scores for all players in this round?')">
-          <button class="btn btn-sm btn-warning">Seed test scores</button>
-        </form>
+        <div class="d-flex gap-2">
+          <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/unsubmit-scores`) %>" method="post"
+                onsubmit="return confirm('Unsubmit all submitted scorecards for this round?')">
+            <button class="btn btn-sm btn-outline-warning">Unsubmit all</button>
+          </form>
+          <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/seed-scores`) %>" method="post"
+                onsubmit="return confirm('Seed random scores for all players in this round? Existing scores will be overwritten.')">
+            <button class="btn btn-sm btn-warning">Seed scores</button>
+          </form>
+        </div>
       </div>
     <% } %>
 

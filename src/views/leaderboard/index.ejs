@@ -69,15 +69,6 @@
             </div>
             <% if (!activeDayView.dayBoard || !activeDayView.dayBoard.length) { %>
               <div class="card-body"><p class="text-muted mb-0">No scores recorded yet.</p></div>
-              <% if (activeDayView.prizes && activeDayView.prizes.length) { %>
-                <div class="card-footer bg-transparent">
-                  <div class="d-flex flex-wrap gap-3">
-                    <% activeDayView.prizes.forEach((p) => { %>
-                      <span class="small text-muted"><%= p.label %>: <strong>$<%= p.amount %></strong></span>
-                    <% }) %>
-                  </div>
-                </div>
-              <% } %>
             <% } else { %>
               <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0">
@@ -106,6 +97,16 @@
                         <% } %>
                       </tr>
                     <% }) %>
+                    <% if (activeDayView.inProgressPlayers && activeDayView.inProgressPlayers.length) { %>
+                      <% activeDayView.inProgressPlayers.forEach((player) => { %>
+                        <tr class="text-muted">
+                          <td>—</td>
+                          <td><%- include('../partials/participant-card', { name: player.name, handicapText: '' }) %></td>
+                          <td class="text-end small fst-italic">in progress</td>
+                          <% if (activeDayView.prizes && activeDayView.prizes.length) { %><td></td><% } %>
+                        </tr>
+                      <% }) %>
+                    <% } %>
                   </tbody>
                 </table>
               </div>
@@ -243,6 +244,39 @@
                 </tbody>
               </table>
             </div>
+          </section>
+          <% } %>
+
+          <%# Day 2-ball %>
+          <% if (activeDayView.twoBallEnabled) { %>
+          <section class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-transparent">
+              <h2 class="h6 mb-0">2-Ball — <%= activeDayView.label %> <span class="badge text-bg-secondary ms-1 fw-normal"><%= activeDayView.twoBallType === 'best_ball' ? 'Best Ball' : 'Aggregate' %></span></h2>
+            </div>
+            <% if (!activeDayView.twoBallResults || !activeDayView.twoBallResults.length) { %>
+              <div class="card-body"><p class="text-muted mb-0">Results available when all scores are submitted.</p></div>
+            <% } else { %>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:3rem">#</th>
+                      <th>Pair</th>
+                      <th class="text-end">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% activeDayView.twoBallResults.forEach((row) => { %>
+                      <tr>
+                        <td class="fw-semibold text-muted"><%= row.position %></td>
+                        <td><strong><%= row.displayName %></strong></td>
+                        <td class="text-end fw-semibold"><%= row.total %></td>
+                      </tr>
+                    <% }) %>
+                  </tbody>
+                </table>
+              </div>
+            <% } %>
           </section>
           <% } %>
 

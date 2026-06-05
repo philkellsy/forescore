@@ -393,6 +393,22 @@ function adminRouter(db) {
       const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first() || null;
       const noveltyEvents = round ? await findNoveltyEvents(db, tourId, roundNumber) : [];
 
+      const noveltyResultsByEventId = {};
+      for (const ne of noveltyEvents) {
+        const result = await db('novelty_results').where({ novelty_event_id: ne.id }).first() || null;
+        if (result && result.winner_user_id) {
+          const winner = await db('users').where({ id: result.winner_user_id }).select('first_name', 'last_name').first();
+          result.winnerName = winner ? `${winner.first_name || ''} ${winner.last_name || ''}`.trim() : null;
+        }
+        noveltyResultsByEventId[ne.id] = result;
+      }
+
+      const noveltyPlayers = await db('event_players as ep')
+        .join('users as u', 'u.id', 'ep.user_id')
+        .where({ 'ep.tour_id': tourId, 'ep.status': 'active' })
+        .orderBy(['u.last_name', 'u.first_name'])
+        .select('ep.user_id', 'u.first_name', 'u.last_name');
+
       const mensCourses = allCourses.filter((c) => c.gender === 'mens' || c.gender === 'open');
       const womensCourses = allCourses.filter((c) => c.gender === 'womens' || c.gender === 'open');
 
@@ -403,6 +419,8 @@ function adminRouter(db) {
         roundNumber,
         round,
         noveltyEvents,
+        noveltyResultsByEventId,
+        noveltyPlayers,
         mensCourses,
         womensCourses,
         calcTypes: Object.entries(CALC_TYPE_LABELS),
@@ -872,7 +890,7 @@ function adminRouter(db) {
           }
         }
       }
-      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}&message=Novelty+results+saved`);
+      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?message=Novelty+results+saved`);
     } catch (err) { return next(err); }
   });
 
@@ -937,10 +955,32 @@ function adminRouter(db) {
             .merge({ gross_score: grossScore, stableford_points: stablefordPoints, version: db.raw('scorecard_holes.version + 1') });
         }
 
-        await db('scorecards').where({ id: sc.id }).update({ status: 'submitted', updated_at: db.fn.now() });
+        await db('scorecards').where({ id: sc.id }).update({ status: 'draft', updated_at: db.fn.now() });
       }
 
-      return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}&message=Scores+seeded+for+${scorecards.length}+players`);
+      const returnTo = req.body.returnTo === 'round-config'
+        ? res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)
+        : `${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}`;
+      return res.redirect(`${returnTo}?message=Scores+seeded+for+${scorecards.length}+players`);
+    } catch (err) { return next(err); }
+  });
+
+  router.post('/tours/:tourId/rounds/:roundNumber/unsubmit-scores', tourGuard, async (req, res, next) => {
+    try {
+      const tourId = parseInt(req.params.tourId, 10);
+      if (tourId !== 1) return res.status(403).send('Not available');
+      const roundNumber = parseInt(req.params.roundNumber, 10);
+      const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
+      if (!tour) return res.status(404).send('Tour not found');
+
+      const count = await db('scorecards')
+        .where({ tour_id: tourId, round_number: roundNumber, status: 'submitted' })
+        .update({ status: 'draft', updated_at: db.fn.now() });
+
+      const returnTo = req.body.returnTo === 'round-config'
+        ? res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)
+        : `${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}`;
+      return res.redirect(`${returnTo}?message=${count}+scorecard(s)+unsubmitted`);
     } catch (err) { return next(err); }
   });
 
@@ -958,6 +998,7 @@ function adminRouter(db) {
       const calcType = String(req.body.calcType || CALC_TYPES.STABLEFORD);
       const status = String(req.body.status || 'draft');
       const leaderboardPublished = Boolean(req.body.leaderboardPublished);
+      const showInProgress = Boolean(req.body.showInProgress);
       const twoBallEnabled = Boolean(req.body.twoBallEnabled);
       const twoBallType = twoBallEnabled ? String(req.body.twoBallType || 'best_ball') : null;
       const virtualTeamsEnabled = Boolean(req.body.virtualTeamsEnabled);
@@ -1002,6 +1043,7 @@ function adminRouter(db) {
         await db('golf_rounds').where({ id: existing.id }).update({
           course_id: courseId, calc_type: calcType, status,
           leaderboard_published: leaderboardPublished,
+          leaderboard_show_in_progress: showInProgress,
           ambrose_prizes: JSON.stringify(ambrosePrizes),
           two_ball_enabled: twoBallEnabled, two_ball_type: twoBallType,
           virtual_teams_enabled: virtualTeamsEnabled,
@@ -1012,6 +1054,7 @@ function adminRouter(db) {
         await db('golf_rounds').insert({
           tour_id: tourId, round_number: roundNumber, course_id: courseId, calc_type: calcType, status,
           leaderboard_published: leaderboardPublished,
+          leaderboard_show_in_progress: showInProgress,
           ambrose_prizes: JSON.stringify(ambrosePrizes),
           two_ball_enabled: twoBallEnabled, two_ball_type: twoBallType,
           virtual_teams_enabled: virtualTeamsEnabled,

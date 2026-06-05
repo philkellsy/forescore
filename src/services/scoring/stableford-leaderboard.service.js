@@ -35,7 +35,7 @@ async function getStablefordRows(db, tourId, roundNumbers) {
   return db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
     .join('users as u', 'u.id', 's.user_id')
-    .where({ 's.tour_id': tourId, 's.type': 'individual' })
+    .where({ 's.tour_id': tourId, 's.type': 'individual', 's.status': 'submitted' })
     .whereIn('s.round_number', roundNumbers)
     .select(
       's.user_id',

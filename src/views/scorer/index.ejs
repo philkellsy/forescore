@@ -29,14 +29,10 @@
             <article class="card h-100 border-0 shadow-sm">
               <div class="card-body">
                 <h2 class="h6 mb-1">
-                  <%= dayLabel(scorecard.round_number) %> -
-                  <%= scorecard.type === 'team'
-                    ? (scorecard.team_name || 'Team')
-                    : `${scorecard.first_name || ''} ${scorecard.last_name || ''}`.trim() %>
-                  <% if (scorecard.type === 'team' && scorecard.ambroseTeamHandicapDisplay) { %>
-                    <span class="text-muted">(Hcp <%= scorecard.ambroseTeamHandicapDisplay %>)</span>
-                  <% } else if (scorecard.type === 'individual' && scorecard.ownHandicapDisplay) { %>
-                    <span class="text-muted">(Hcp <%= scorecard.ownHandicapDisplay %>)</span>
+                  <%= dayLabel(scorecard.round_number) %>
+                  <% if (scorecard.type === 'team') { %>
+                    - <%= scorecard.team_name || 'Team' %>
+                    <% if (scorecard.ambroseTeamHandicapDisplay) { %><span class="text-muted">(Hcp <%= scorecard.ambroseTeamHandicapDisplay %>)</span><% } %>
                   <% } %>
                 </h2>
                 <p class="text-muted small mb-1">
@@ -58,26 +54,31 @@
                     : (scorecard.individual_starting_hole || '-') %>
                 </p>
                 <% if (scorecard.status === 'submitted') { %>
-                  <p class="text-muted small mb-1">Submitted Scores</p>
-                  <% if (scorecard.submittedSummary && scorecard.submittedSummary.length) { %>
+                  <% if (scorecard.groupSummary && scorecard.groupSummary.length) { %>
+                    <p class="text-muted small mb-1">Group</p>
                     <div class="d-grid gap-2 mb-3">
-                      <% scorecard.submittedSummary.forEach((row) => { %>
-                        <div class="border rounded px-2 py-1 bg-light small">
-                          <div class="d-flex justify-content-between align-items-center gap-2">
-                            <span><%= row.label %></span>
-                            <strong><%= row.value %></strong>
+                      <% scorecard.groupSummary.forEach((entry) => { %>
+                        <% if (!entry.isTeam && entry.submitted && entry.scorecardId) { %>
+                          <a href="<%= tenantPath(`/scoring/card/${entry.scorecardId}?back=scoring`) %>" class="border rounded px-2 py-1 bg-light small text-decoration-none text-dark d-block">
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                              <span><%= entry.fullName %><% if (entry.handicapDisplay) { %> <span class="text-muted">(Hcp <%= entry.handicapDisplay %>)</span><% } %></span>
+                              <strong><%= entry.scoreLabel %></strong>
+                            </div>
+                          </a>
+                        <% } else { %>
+                          <div class="border rounded px-2 py-1 bg-light small">
+                            <div class="d-flex justify-content-between align-items-center gap-2">
+                              <span><%= entry.fullName %><% if (entry.handicapDisplay) { %> <span class="text-muted">(Hcp <%= entry.handicapDisplay %>)</span><% } %></span>
+                              <strong><%= entry.scoreLabel %></strong>
+                            </div>
+                            <% if (entry.detail) { %><div class="text-muted"><%= entry.detail %></div><% } %>
                           </div>
-                          <% if (row.detail) { %>
-                            <div class="text-muted"><%= row.detail %></div>
-                          <% } %>
-                        </div>
+                        <% } %>
                       <% }) %>
                     </div>
-                  <% } else { %>
-                    <p class="text-muted small mb-3">No submitted totals available.</p>
                   <% } %>
                 <% } else { %>
-                  <p class="text-muted small mb-1">Other Players</p>
+                  <p class="text-muted small mb-1">Group</p>
                   <% if (scorecard.otherPlayers && scorecard.otherPlayers.length) { %>
                     <div class="d-flex flex-wrap gap-2 mb-3">
                       <% scorecard.otherPlayers.forEach((player) => { %>
@@ -142,14 +143,21 @@
                   </div>
                 <% } %>
 
-                <% if (scorecard.status === 'submitted') { %>
-                  <span class="badge text-bg-secondary">Submitted</span>
-                <% } else if (scorecard.round_status === 'open') { %>
-                  <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
-                    <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
-                  </a>
-                <% } else { %>
-                  <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
+                <% if (scorecard.status !== 'submitted') { %>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                  <% if (scorecard.round_status === 'open') { %>
+                    <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
+                      <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                    </a>
+                    <% if (scorecard.type === 'individual') { %>
+                      <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
+                        <i class="fa-solid fa-users me-1"></i>Group
+                      </a>
+                    <% } %>
+                  <% } else { %>
+                    <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
+                  <% } %>
+                </div>
                 <% } %>
               </div>
             </article>

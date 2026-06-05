@@ -13,6 +13,10 @@
     <link rel="stylesheet" href="/css/app.css?v=<%= assetVersion %>" />
   </head>
   <body>
+    <div class="landscape-block" role="alert" aria-live="polite">
+      <div class="landscape-block-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+      <p class="fw-semibold mb-0">Please rotate your device to portrait mode to use the scorecard.</p>
+    </div>
     <div id="holeLoadingOverlay" class="hole-loading-overlay" aria-hidden="true">
       <div class="hole-loading-spinner">
         <div class="golf-shot-scene">
@@ -33,8 +37,8 @@
             <i id="prevArrowIcon" class="fa-solid fa-arrow-left"></i> <span id="prevHoleLabel" class="live-hole-nav-label"></span>
           </button>
           <h1 class="h5 mb-0 text-center">
-            Hole <span id="holeNumber">—</span>
-            <span class="text-muted">Par <span id="holePar">—</span> SI <span id="holeSi">—</span></span>
+            <i class="fa-solid fa-flag me-1" style="color:var(--fs-green)"></i><span id="holeNumber" class="fw-bold" style="color:var(--fs-navy)">—</span>
+            <span class="text-muted">Par <span id="holePar">—</span></span> <span class="text-muted" style="font-size:0.75rem">SI <span id="holeSi">—</span></span>
           </h1>
           <button id="nextHoleBtn" class="btn btn-outline-dark btn-sm live-hole-nav-btn" aria-label="Next hole">
             <span id="nextHoleLabel" class="live-hole-nav-label"></span> <i class="fa-solid fa-arrow-right"></i>

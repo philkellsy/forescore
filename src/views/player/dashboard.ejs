@@ -165,13 +165,18 @@
                           </div>
                         <% } %>
                         <% if (todayGroup.scorecard) { %>
-                          <% if (todayGroup.scorecard.status === 'submitted') { %>
-                            <span class="badge text-bg-secondary">Submitted</span>
-                          <% } else { %>
-                            <a href="<%= tenantPath(`/scoring/live/${todayGroup.scorecard.id}`) %>" class="btn btn-success btn-sm">
-                              <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                          <div class="d-flex gap-2 flex-wrap align-items-center">
+                            <% if (todayGroup.scorecard.status === 'submitted') { %>
+                              <span class="badge text-bg-secondary">Submitted</span>
+                            <% } else { %>
+                              <a href="<%= tenantPath(`/scoring/live/${todayGroup.scorecard.id}`) %>" class="btn btn-success btn-sm">
+                                <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                              </a>
+                            <% } %>
+                            <a href="<%= tenantPath(`/scoring/${todayGroup.scorecard.id}/group`) %>" class="btn btn-outline-secondary btn-sm">
+                              <i class="fa-solid fa-users me-1"></i>Group
                             </a>
-                          <% } %>
+                          </div>
                         <% } else { %>
                           <p class="small text-muted mb-0">Scorecard not yet available.</p>
                         <% } %>

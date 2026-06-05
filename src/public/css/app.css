@@ -331,7 +331,7 @@ body {
 }
 
 .live-hole-nav-label {
-  font-size: 0.7rem;
+  font-size: 1rem;
   font-weight: 600;
   vertical-align: middle;
 }
@@ -363,6 +363,36 @@ body {
   width: 3rem;
   height: 3rem;
   color: var(--fs-green, #215463);
+}
+
+.landscape-block {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--fs-navy);
+  color: #fff;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+  padding: 2rem;
+}
+
+.landscape-block-icon {
+  font-size: 3rem;
+  opacity: 0.7;
+  animation: rotatePulse 2s ease-in-out infinite;
+}
+
+@keyframes rotatePulse {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .landscape-block { display: flex; }
 }
 
 .hole-loading-overlay {
@@ -774,10 +804,16 @@ body {
   background: #ddedf2;
 }
 
+.confirm-score-grid {
+  table-layout: fixed;
+  width: 100%;
+}
+
 .confirm-score-grid th,
 .confirm-score-grid td {
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .confirm-score-grid thead th {
@@ -789,19 +825,39 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  min-width: 5.5rem;
+  overflow: hidden;
+}
+
+.confirm-score-grid-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confirm-score-grid th:first-child {
+  width: 2.8rem;
 }
 
 .confirm-hole-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 2.4rem;
-  padding: 0.22rem 0.55rem;
+  width: 2.2rem;
+  padding: 0.22rem 0.3rem;
   border-radius: 999px;
   background: #f2f2f0;
   border: 1px solid #d0d0ce;
   font-size: 0.78rem;
+  color: var(--fs-navy);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.confirm-hole-pill:hover,
+.confirm-hole-pill:active {
+  background: var(--fs-navy);
+  border-color: var(--fs-navy);
+  color: #fff;
 }
 
 .confirm-score-cell {
@@ -809,7 +865,6 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.1rem;
-  min-width: 3.4rem;
 }
 
 .confirm-score-value {
@@ -852,7 +907,7 @@ body {
   }
 
   .live-score-main h1.h5 {
-    font-size: 1rem;
+    font-size: 1.5rem;
   }
 
   .live-hole-nav {
@@ -984,19 +1039,11 @@ body {
   }
 
   .confirm-score-grid {
-    font-size: 0.82rem;
-  }
-
-  .confirm-score-grid-header {
-    min-width: 4.3rem;
-  }
-
-  .confirm-score-cell {
-    min-width: 2.8rem;
+    font-size: 0.78rem;
   }
 
   .confirm-score-meta {
-    font-size: 0.66rem;
+    font-size: 0.64rem;
   }
 
 }

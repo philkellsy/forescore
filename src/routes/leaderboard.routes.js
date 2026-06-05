@@ -5,8 +5,10 @@ const { requireAuth } = require('../middleware/auth');
 const { buildLeaderboards } = require('../services/leaderboard/leaderboard.service');
 const { calculateEventSkinsForDays } = require('../services/scoring/skins.service');
 const { calculateVirtualTeamResults } = require('../services/scoring/virtual-teams.service');
+const { calculateTwoBallLeaderboard } = require('../services/scoring/two-ball.service');
 const { CALC_TYPES } = require('../config/calc-types');
 const { strokesForHole } = require('../services/scoring/handicap.service');
+const { getCourseHolesForRound, toScorecardMatrixModel, summarizeTotals, buildIndividualScorecardModel } = require('../services/scoring/scorecard-model.service');
 const { ROLES } = require('../config/roles');
 const { dayLabel } = require('../services/events/day-label.service');
 
@@ -82,7 +84,7 @@ function normalizeLeaderboardView(raw, validDayNumbers, publishedDayNumbers) {
   return 'championship';
 }
 
-function buildDayViews(effectiveVisible, boards, skinsDetail, prizes, roundStates, noveltyResults, virtualTeamResultsByRound) {
+function buildDayViews(effectiveVisible, boards, skinsDetail, prizes, roundStates, noveltyResults, virtualTeamResultsByRound, inProgressPlayersByRound, twoBallResultsByRound) {
   return effectiveVisible.map((rn) => {
     const dayBoard = boards.stableford?.byDay?.[rn] || [];
     const skinsForDay = skinsDetail.find((sd) => sd.roundNumber === rn) || null;
@@ -102,12 +104,17 @@ function buildDayViews(effectiveVisible, boards, skinsDetail, prizes, roundState
       roundNumber: rn,
       label: dayLabel(rn),
       tourDate: roundState?.tourDate || null,
+      isFinalized: roundState?.isFinalized || false,
+      twoBallEnabled: roundState?.twoBallEnabled || false,
+      twoBallType: roundState?.twoBallType || 'best_ball',
       dayBoard,
       skinsForDay,
       skinsWinners: [...wMap.values()].sort((a, b) => b.skinsWon - a.skinsWon),
-      prizes,
+      prizes: roundState?.isFinalized ? prizes : [],
       noveltyEvents: (noveltyResults || []).filter((ne) => ne.roundNumber === rn),
       virtualTeamResults: (virtualTeamResultsByRound || {})[rn] || [],
+      inProgressPlayers: (inProgressPlayersByRound || {})[rn] || [],
+      twoBallResults: (twoBallResultsByRound || {})[rn] || [],
     };
   });
 }
@@ -393,14 +400,17 @@ function formatHandicapDisplay(raw) {
 async function getRoundPublicationRows(db, tourId) {
   const rows = await db('golf_rounds')
     .where({ tour_id: tourId })
-    .select('round_number', 'status', 'leaderboard_published', 'calc_type', 'virtual_teams_enabled')
+    .select('round_number', 'status', 'leaderboard_published', 'leaderboard_show_in_progress', 'calc_type', 'virtual_teams_enabled', 'two_ball_enabled', 'two_ball_type')
     .orderBy('round_number');
   return rows.map((r) => ({
     roundNumber: Number(r.round_number),
     status: r.status || 'draft',
     calcType: r.calc_type || 'stableford',
     leaderboardPublished: Number(r.leaderboard_published || 0) === 1,
-    virtualTeamsEnabled: Boolean(r.virtual_teams_enabled)
+    showInProgress: Boolean(r.leaderboard_show_in_progress),
+    virtualTeamsEnabled: Boolean(r.virtual_teams_enabled),
+    twoBallEnabled: Boolean(r.two_ball_enabled),
+    twoBallType: r.two_ball_type || 'best_ball',
   }));
 }
 
@@ -426,103 +436,10 @@ async function getPublishedRoundSet(db, tourId) {
   return new Set(rows.filter((r) => r.leaderboardPublished).map((r) => Number(r.roundNumber)));
 }
 
-async function getCourseHolesForRound(db, tourId, roundNumber) {
-  return db('golf_rounds as gr')
-    .join('holes as h', 'h.course_id', 'gr.course_id')
-    .where({ 'gr.tour_id': tourId, 'gr.round_number': roundNumber })
-    .orderBy('h.hole_number', 'asc')
-    .select('h.hole_number', 'h.par', 'h.stroke_index_primary', 'h.stroke_index_secondary');
-}
-
 function ambroseAllowance(memberCount) {
   if (Number(memberCount) === 2) return 1 / 4;
   if (Number(memberCount) === 3) return 1 / 3;
   return 0;
-}
-
-function toScorecardMatrixModel(base) {
-  const holes = (base.holes || []).map((h) => ({
-    holeNumber: Number(h.holeNumber),
-    par: Number(h.par || 0),
-    siPrimary: Number(h.siPrimary || 0),
-    gross: h.gross == null ? null : Number(h.gross),
-    net: h.net == null ? null : Number(h.net),
-    stableford: h.stableford == null ? null : Number(h.stableford)
-  }));
-  const front9 = holes.filter((h) => h.holeNumber >= 1 && h.holeNumber <= 9).sort((a, b) => a.holeNumber - b.holeNumber);
-  const back9 = holes.filter((h) => h.holeNumber >= 10 && h.holeNumber <= 18).sort((a, b) => a.holeNumber - b.holeNumber);
-  return { ...base, holes, front9, back9 };
-}
-
-function summarizeTotals(holes) {
-  const valid = (holes || []).filter((h) => h.gross != null);
-  const sum = (arr, key) => arr.reduce((acc, row) => acc + Number(row[key] || 0), 0);
-  const front = valid.filter((h) => h.holeNumber <= 9);
-  const back = valid.filter((h) => h.holeNumber >= 10);
-  return {
-    grossFront: sum(front, 'gross'),
-    grossBack: sum(back, 'gross'),
-    grossTotal: sum(valid, 'gross'),
-    netFront: sum(front, 'net'),
-    netBack: sum(back, 'net'),
-    netTotal: sum(valid, 'net'),
-    stablefordFront: sum(front, 'stableford'),
-    stablefordBack: sum(back, 'stableford'),
-    stablefordTotal: sum(valid, 'stableford')
-  };
-}
-
-async function buildIndividualScorecardModel(db, tour, roundNumber, userId) {
-  const [scorecard, user, handicap, holeConfig, holeScores, roundRow] = await Promise.all([
-    db('scorecards').where({ tour_id: tour.id, round_number: roundNumber, type: 'individual', user_id: userId }).first(),
-    db('users').where({ id: userId }).first(),
-    db('player_handicaps').where({ tour_id: tour.id, user_id: userId }).first(),
-    getCourseHolesForRound(db, tour.id, roundNumber),
-    db('scorecards as s')
-      .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .where({ 's.tour_id': tour.id, 's.round_number': roundNumber, 's.type': 'individual', 's.user_id': userId })
-      .select('sh.hole_number', 'sh.gross_score', 'sh.stableford_points'),
-    db('golf_rounds').where({ tour_id: tour.id, round_number: roundNumber }).first()
-  ]);
-  if (!scorecard || !user || !holeConfig.length) return null;
-
-  const hcp = Math.trunc(Number(handicap?.playing_handicap || 0));
-  const byHole = new Map(holeScores.map((row) => [Number(row.hole_number), row]));
-  const holes = holeConfig.map((hole) => {
-    const saved = byHole.get(Number(hole.hole_number));
-    const gross = saved ? Number(saved.gross_score) : null;
-    const shots = strokesForHole(hcp, Number(hole.stroke_index_primary), Number(hole.stroke_index_secondary));
-    return {
-      holeNumber: Number(hole.hole_number),
-      par: Number(hole.par || 0),
-      siPrimary: Number(hole.stroke_index_primary || 0),
-      siSecondary: Number(hole.stroke_index_secondary || 0),
-      gross,
-      net: gross == null ? null : gross - shots,
-      stableford: saved && saved.stableford_points != null ? Number(saved.stableford_points) : null
-    };
-  });
-
-  const calcType = String(roundRow?.calc_type || CALC_TYPES.STABLEFORD);
-  const totals = summarizeTotals(holes);
-  const resultLabel = calcType === CALC_TYPES.STABLEFORD
-    ? `${totals.stablefordTotal} pts`
-    : `${totals.grossTotal} gross / ${totals.netTotal} net`;
-
-  return toScorecardMatrixModel({
-    mode: 'individual',
-    roundNumber,
-    roundLabel: dayLabel(roundNumber),
-    dayLabel: dayLabel(roundNumber),
-    calcType,
-    showStablefordTotals: calcType === CALC_TYPES.STABLEFORD,
-    showGrossOnlyTotals: calcType !== CALC_TYPES.STABLEFORD,
-    title: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
-    subtitle: `Hcp ${hcp}`,
-    resultLabel,
-    totals,
-    holes
-  });
 }
 
 async function buildAmbroseScorecardModel(db, tour, teamId) {
@@ -685,7 +602,10 @@ function buildRoundStates(publicationRows, finalizationRows) {
       status: pub.status,
       calcType: pub.calcType,
       leaderboardPublished: pub.leaderboardPublished,
+      showInProgress: pub.showInProgress || false,
       virtualTeamsEnabled: pub.virtualTeamsEnabled || false,
+      twoBallEnabled: pub.twoBallEnabled || false,
+      twoBallType: pub.twoBallType || 'best_ball',
       total: fin.total,
       submitted: fin.submitted,
       isFinalized: fin.isFinalized
@@ -698,7 +618,10 @@ function deriveRoundSets(roundStates) {
   const publishedRoundNumbers = roundStates.filter((r) => r.leaderboardPublished).map((r) => r.roundNumber);
   const stablefordRoundNumbers = roundStates.filter((r) => r.calcType !== 'ambrose_nett').map((r) => r.roundNumber);
   const visibleStablefordRounds = publishedRoundNumbers.filter((rn) => stablefordRoundNumbers.includes(rn));
-  return { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds };
+  const inProgressRoundNumbers = roundStates
+    .filter((r) => r.leaderboardPublished && r.showInProgress && !r.isFinalized)
+    .map((r) => r.roundNumber);
+  return { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds, inProgressRoundNumbers };
 }
 
 function buildVisibleBoards(boards, roundStates, publishedRoundNumbers, stablefordRoundNumbers, skinsNormalized, championship) {
@@ -943,7 +866,7 @@ function leaderboardRouter(db) {
       ]);
 
       const roundStates = buildRoundStates(publicationRows, finalizationRows);
-      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds } = deriveRoundSets(roundStates);
+      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds, inProgressRoundNumbers } = deriveRoundSets(roundStates);
 
       const adminView = isAdminViewer(req);
       const effectivePublished = adminView ? stablefordRoundNumbers : publishedRoundNumbers;
@@ -986,7 +909,26 @@ function leaderboardRouter(db) {
         virtualTeamResultsByRound[r.roundNumber] = await calculateVirtualTeamResults(db, tour.id, r.roundNumber);
       }
 
-      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound);
+      const inProgressPlayersByRound = {};
+      for (const rn of inProgressRoundNumbers) {
+        const rows = await db('scorecards as s')
+          .join('users as u', 'u.id', 's.user_id')
+          .where({ 's.tour_id': tour.id, 's.round_number': rn, 's.type': 'individual' })
+          .whereNot('s.status', 'submitted')
+          .select('s.user_id', 'u.first_name', 'u.last_name');
+        inProgressPlayersByRound[rn] = rows.map((r) => ({
+          userId: Number(r.user_id),
+          name: `${r.first_name || ''} ${r.last_name || ''}`.trim()
+        }));
+      }
+
+      const twoBallResultsByRound = {};
+      const twoBallRounds = roundStates.filter((r) => r.twoBallEnabled && r.isFinalized && effectiveVisible.includes(r.roundNumber));
+      for (const r of twoBallRounds) {
+        twoBallResultsByRound[r.roundNumber] = await calculateTwoBallLeaderboard(db, tour.id, r.roundNumber, r.twoBallType);
+      }
+
+      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound, inProgressPlayersByRound, twoBallResultsByRound);
 
       return res.render('leaderboard/index', {
         title: `Leaderboards ${tour.year}`,
@@ -1055,7 +997,7 @@ function leaderboardRouter(db) {
       ]);
 
       const roundStates = buildRoundStates(publicationRows, finalizationRows);
-      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds } = deriveRoundSets(roundStates);
+      const { finalizedRoundNumbers, publishedRoundNumbers, stablefordRoundNumbers, visibleStablefordRounds, inProgressRoundNumbers } = deriveRoundSets(roundStates);
 
       const adminView = isAdminViewer(req);
       const effectivePublished = adminView ? stablefordRoundNumbers : publishedRoundNumbers;
@@ -1067,7 +1009,8 @@ function leaderboardRouter(db) {
         finalizedRoundsForSkins: finalizedRoundNumbers,
         roundNumbers: stablefordRoundNumbers,
         bestOf: active.leaderboard_best_of_rounds || null,
-        initialCarryInSkins: active.skins_carry_in_skins || 0
+        initialCarryInSkins: active.skins_carry_in_skins || 0,
+        leaderboardDirtyAt: active.leaderboard_dirty_at || null,
       });
 
       const championship = showAggregate
@@ -1097,7 +1040,26 @@ function leaderboardRouter(db) {
         virtualTeamResultsByRound[r.roundNumber] = await calculateVirtualTeamResults(db, active.id, r.roundNumber);
       }
 
-      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound);
+      const inProgressPlayersByRound = {};
+      for (const rn of inProgressRoundNumbers) {
+        const rows = await db('scorecards as s')
+          .join('users as u', 'u.id', 's.user_id')
+          .where({ 's.tour_id': active.id, 's.round_number': rn, 's.type': 'individual' })
+          .whereNot('s.status', 'submitted')
+          .select('s.user_id', 'u.first_name', 'u.last_name');
+        inProgressPlayersByRound[rn] = rows.map((r) => ({
+          userId: Number(r.user_id),
+          name: `${r.first_name || ''} ${r.last_name || ''}`.trim()
+        }));
+      }
+
+      const twoBallResultsByRound = {};
+      const twoBallRounds = roundStates.filter((r) => r.twoBallEnabled && r.isFinalized && effectiveVisible.includes(r.roundNumber));
+      for (const r of twoBallRounds) {
+        twoBallResultsByRound[r.roundNumber] = await calculateTwoBallLeaderboard(db, active.id, r.roundNumber, r.twoBallType);
+      }
+
+      const dayViews = buildDayViews(effectiveVisible, boards, skinsDetail, dailyPrizes, roundStates, noveltyResults, virtualTeamResultsByRound, inProgressPlayersByRound, twoBallResultsByRound);
 
       return res.render('leaderboard/index', {
         title: 'Leaderboards',

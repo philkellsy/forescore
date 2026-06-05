@@ -18,16 +18,27 @@
       <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
         <div>
           <h1 class="h4 mb-1"><%= title %></h1>
-          <% if (pageSubtitle) { %><p class="text-muted mb-0"><%= pageSubtitle %></p><% } %>
+          <% if (pageSubtitle) { %><p class="text-muted mb-0 small"><%= pageSubtitle %></p><% } %>
         </div>
-        <a class="btn btn-outline-secondary btn-sm" href="<%= backUrl %>"><%= backLabel || 'Back To Leaderboards' %></a>
+        <a class="btn btn-outline-secondary btn-sm flex-shrink-0" href="<%= backUrl %>">Back</a>
       </div>
 
-      <div class="d-grid gap-3">
-        <% (models || []).forEach((model) => { %>
-          <%- include('../partials/scorecard-viewer', { model }) %>
-        <% }) %>
-      </div>
+      <% if (isPublished) { %>
+        <div class="alert alert-success py-2 small mb-3">
+          <i class="fa-solid fa-chart-bar me-1"></i>Leaderboard published —
+          <a href="<%= leaderboardUrl %>" class="alert-link">view full leaderboard</a>
+        </div>
+      <% } %>
+
+      <% if (!models.length) { %>
+        <div class="alert alert-info">No scores have been entered for this group yet.</div>
+      <% } else { %>
+        <div class="d-grid gap-3">
+          <% models.forEach((model) => { %>
+            <%- include('../partials/scorecard-viewer', { model }) %>
+          <% }) %>
+        </div>
+      <% } %>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   </body>
