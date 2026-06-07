@@ -897,7 +897,7 @@ function adminRouter(db) {
   router.post('/tours/:tourId/rounds/:roundNumber/seed-scores', tourGuard, async (req, res, next) => {
     try {
       const tourId = parseInt(req.params.tourId, 10);
-      if (tourId !== 1) return res.status(403).send('Not available');
+      if (!req.tenant?.is_test_tenant) return res.status(403).send('Not available');
 
       const roundNumber = parseInt(req.params.roundNumber, 10);
       const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
@@ -965,7 +965,7 @@ function adminRouter(db) {
   router.post('/tours/:tourId/rounds/:roundNumber/unsubmit-scores', tourGuard, async (req, res, next) => {
     try {
       const tourId = parseInt(req.params.tourId, 10);
-      if (tourId !== 1) return res.status(403).send('Not available');
+      if (!req.tenant?.is_test_tenant) return res.status(403).send('Not available');
       const roundNumber = parseInt(req.params.roundNumber, 10);
       const tour = await db('tours').where({ id: tourId, tenant_id: req.tenant.id }).first();
       if (!tour) return res.status(404).send('Tour not found');
