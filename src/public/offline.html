@@ -3,13 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Offline | Legends</title>
+    <title>Offline | ForeScore</title>
     <style>
-      body { font-family: sans-serif; margin: 2rem; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        min-height: 100svh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        background: #f0f2f0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        color: #333;
+        text-align: center;
+        padding: 2rem;
+      }
+      .logo { width: 64px; height: 64px; opacity: 0.6; }
+      .brand { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.04em; color: #215463; }
+      h1 { font-size: 1.1rem; font-weight: 600; color: #444; }
+      p { font-size: 0.9rem; color: #666; max-width: 280px; line-height: 1.5; }
     </style>
   </head>
   <body>
-    <h1>You are offline</h1>
-    <p>Reconnect to continue entering and viewing scores.</p>
+    <img src="/img/forescore-shield.svg" class="logo" alt="ForeScore" />
+    <div class="brand">ForeScore</div>
+    <h1>You're offline</h1>
+    <p>Check your connection and try again. Scores entered on this device are saved and will sync when you're back online.</p>
   </body>
 </html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ForeScore</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        min-height: 100svh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2rem;
+        background: #f0f2f0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        color: #333;
+      }
+
+      .logo {
+        width: 72px;
+        height: 72px;
+        animation: logoBreath 3s ease-in-out infinite;
+        filter: drop-shadow(0 4px 12px rgba(33,84,99,0.25));
+      }
+      @keyframes logoBreath {
+        0%, 100% { transform: scale(1);   opacity: 1; }
+        50%       { transform: scale(0.93); opacity: 0.8; }
+      }
+
+      .brand {
+        font-size: 1.6rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: #215463;
+        margin-top: -1rem;
+      }
+
+      /* ── Fairway track ── */
+      .fairway {
+        position: relative;
+        width: 220px;
+        height: 32px;
+      }
+
+      /* green strip */
+      .fairway::before {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #4a7c59, #3a6b49);
+        border-radius: 2px;
+      }
+
+      .ball {
+        position: absolute;
+        bottom: 4px;
+        left: 0;
+        width: 20px;
+        height: 20px;
+        background: radial-gradient(circle at 35% 35%, #ffffff, #e8e8e8);
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.25), inset -2px -2px 4px rgba(0,0,0,0.08);
+        animation: rollBall 2.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+      /* dimple suggestion */
+      .ball::after {
+        content: '';
+        position: absolute;
+        width: 4px;
+        height: 4px;
+        background: rgba(0,0,0,0.07);
+        border-radius: 50%;
+        top: 5px;
+        left: 7px;
+      }
+
+      .pin {
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        font-size: 1.5rem;
+        line-height: 1;
+        animation: pinWave 2.4s ease-in-out infinite;
+        transform-origin: bottom center;
+      }
+      @keyframes pinWave {
+        0%, 100% { transform: rotate(0deg); }
+        25%       { transform: rotate(4deg); }
+        75%       { transform: rotate(-3deg); }
+      }
+
+      @keyframes rollBall {
+        0%   { left: 0;   transform: rotate(0deg); }
+        85%  { left: calc(100% - 44px); transform: rotate(540deg); }
+        100% { left: calc(100% - 44px); transform: rotate(540deg); opacity: 0; }
+      }
+
+      .message {
+        font-size: 0.95rem;
+        color: #666;
+        text-align: center;
+        min-height: 1.4em;
+        transition: opacity 0.4s ease;
+      }
+      .message.fade { opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <img src="/img/forescore-shield.svg" class="logo" alt="ForeScore" />
+    <div class="brand">ForeScore</div>
+
+    <div class="fairway">
+      <div class="ball"></div>
+      <span class="pin">⛳</span>
+    </div>
+
+    <p class="message" id="msg">Getting the course ready…</p>
+
+    <script>
+      const messages = [
+        'Getting the course ready…',
+        'Warming up the caddies…',
+        'Polishing the clubs…',
+        'Checking the handicaps…',
+        'Almost on the tee…',
+        'Raking the bunkers…',
+        'Reading the greens…',
+      ];
+      let idx = 0;
+      const msgEl = document.getElementById('msg');
+
+      function cycleMessage() {
+        msgEl.classList.add('fade');
+        setTimeout(() => {
+          idx = (idx + 1) % messages.length;
+          msgEl.textContent = messages[idx];
+          msgEl.classList.remove('fade');
+        }, 400);
+      }
+      setInterval(cycleMessage, 2600);
+
+      async function checkReady() {
+        try {
+          const res = await fetch('/health', { cache: 'no-store' });
+          if (res.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch (_) {}
+        setTimeout(checkReady, 2000);
+      }
+      // Give the server a moment before first check
+      setTimeout(checkReady, 2500);
+    </script>
+  </body>
+</html>
