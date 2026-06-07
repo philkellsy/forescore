@@ -397,8 +397,11 @@ async function getScoreTotalsByCard(db, scorecardIds) {
 async function getMissingHolesByCard(db, scorecardIds) {
   const holesByCard = new Map();
   if (!scorecardIds.length) return holesByCard;
+  // A hole only counts as scored when the marker has entered a non-zero gross_score.
+  // Rows with gross_score = null (player-only advisory entry) or 0 (cleared) are still missing.
   const rows = await db('scorecard_holes')
     .whereIn('scorecard_id', scorecardIds)
+    .where('gross_score', '>', 0)
     .select('scorecard_id', 'hole_number');
 
   for (const row of rows) {
@@ -444,18 +447,22 @@ async function getHoleSummariesByCard(db, scorecardIds) {
 
   const rows = await db('scorecard_holes')
     .whereIn('scorecard_id', ids)
-    .select('scorecard_id', 'hole_number', 'gross_score', 'stableford_points')
+    .select('scorecard_id', 'hole_number', 'gross_score', 'stableford_points', 'player_gross_score')
     .orderBy([{ column: 'hole_number', order: 'asc' }, { column: 'scorecard_id', order: 'asc' }]);
 
   for (const row of rows) {
     const scorecardId = Number(row.scorecard_id);
     if (!summaries.has(scorecardId)) summaries.set(scorecardId, new Map());
+    const gs = row.gross_score != null ? Number(row.gross_score) : null;
+    const pgs = row.player_gross_score != null ? Number(row.player_gross_score) : null;
     summaries.get(scorecardId).set(Number(row.hole_number), {
-      grossScore: Number(row.gross_score),
+      grossScore: gs,
       stablefordPoints:
         row.stableford_points === null || row.stableford_points === undefined
           ? null
-          : Number(row.stableford_points)
+          : Number(row.stableford_points),
+      playerGrossScore: pgs,
+      hasConflict: gs != null && gs > 0 && pgs != null && pgs !== gs,
     });
   }
 
@@ -515,7 +522,7 @@ async function buildConfirmationData(db, scorecard) {
       cells: entries.map((entry) => {
         const scorecardId = Number(entry.scorecardId);
         const holeSummary = holeSummariesByCard.get(scorecardId)?.get(holeNumber) || null;
-        const grossScore = holeSummary ? Number(holeSummary.grossScore) : null;
+        const grossScore = holeSummary?.grossScore != null ? Number(holeSummary.grossScore) : null;
         const stablefordPoints =
           holeSummary && holeSummary.stablefordPoints !== null && holeSummary.stablefordPoints !== undefined
             ? Number(holeSummary.stablefordPoints)
@@ -524,18 +531,23 @@ async function buildConfirmationData(db, scorecard) {
           scorecardId,
           grossScore,
           stablefordPoints,
-          missing: !holeSummary,
-          displayScore: holeSummary ? String(grossScore) : '–'
+          missing: !holeSummary || !grossScore,
+          hasConflict: holeSummary?.hasConflict || false,
+          playerGrossScore: holeSummary?.playerGrossScore ?? null,
+          displayScore: holeSummary && grossScore ? String(grossScore) : '–'
         };
       })
     });
   }
 
+  const hasConflict = holes.some((h) => h.cells.some((c) => c.hasConflict));
+
   return {
     mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
     entries,
     holes,
-    hasMissing
+    hasMissing,
+    hasConflict,
   };
 }
 
@@ -891,6 +903,7 @@ function scoringRouter(db) {
   router.get('/', requireAuth, async (req, res) => {
     const user = req.session.user;
     const message = req.query.message ? String(req.query.message) : '';
+    const errorMessage = req.query.error ? String(req.query.error).replace(/\+/g, ' ') : '';
 
     const ownScorecardIds = await db('scorecards as s')
       .join('tours as t', 't.id', 's.tour_id')
@@ -1166,6 +1179,7 @@ function scoringRouter(db) {
               .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
               .whereIn('sc.user_id', groupUserIds)
               .where({ 'sc.tour_id': scorecard.tour_id, 'sc.round_number': scorecard.round_number })
+              .where('sh.gross_score', '>', 0)
               .count('sh.id as cnt');
             const scoringStarted = Number(scoredCount) > 0;
 
@@ -1194,22 +1208,14 @@ function scoringRouter(db) {
         // Marker info for individual scorecards in open rounds
         let markerInfo = null;
         if (scorecard.type === 'individual' && scorecard.round_status === 'open' && scorecard.status !== 'submitted') {
-          if (scorecard.marked_by_user_id) {
-            // This player has been assigned a marker — find who they're marking
-            const playerCardRow = await db('scorecards as s')
+          // "Assigned" = I have selected someone to mark (a card exists with marked_by_user_id = me).
+          const [playerCardRow, slots] = await Promise.all([
+            db('scorecards as s')
               .join('users as u', 'u.id', 's.user_id')
               .where({ 's.tour_id': scorecard.tour_id, 's.round_number': scorecard.round_number, 's.marked_by_user_id': user.id, 's.type': 'individual' })
-              .select('u.first_name', 'u.last_name')
-              .first();
-            const markerRow = await db('users').where({ id: scorecard.marked_by_user_id }).select('first_name', 'last_name').first();
-            markerInfo = {
-              assigned: true,
-              playerBeingMarked: playerCardRow ? `${playerCardRow.first_name || ''} ${playerCardRow.last_name || ''}`.trim() : null,
-              markedBy: markerRow ? `${markerRow.first_name || ''} ${markerRow.last_name || ''}`.trim() : null,
-            };
-          } else {
-            // Not yet assigned — find selectable players from this player's tee group pair
-            const slots = await db('tee_groups as tg')
+              .select('s.user_id as player_user_id', 'u.first_name', 'u.last_name')
+              .first(),
+            db('tee_groups as tg')
               .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
               .join('users as u', 'u.id', 'tgp.user_id')
               .where({ 'tg.tour_id': scorecard.tour_id, 'tg.round_number': scorecard.round_number })
@@ -1219,19 +1225,43 @@ function scoringRouter(db) {
                   .where('me.user_id', user.id)
               )
               .select('tgp.user_id', 'tgp.position', 'u.first_name', 'u.last_name')
-              .orderBy('tgp.position');
+              .orderBy('tgp.position'),
+          ]);
 
-            const mySlot = slots.find((s) => Number(s.user_id) === user.id);
-            if (mySlot) {
+          const mySlot = slots.find((s) => Number(s.user_id) === user.id);
+          if (mySlot) {
+            const groupSize = slots.length;
+            const isFourBall = groupSize >= 4;
+
+            // Build the full selectable list (all valid candidates).
+            // 4-ball: only positional partner — no change possible, so list stays empty unless unassigned.
+            // 3-ball: anyone in the group is selectable (last-write-wins; displaced players re-select).
+            let selectablePlayers = [];
+            if (!isFourBall) {
+              selectablePlayers = slots
+                .filter((s) => Number(s.user_id) !== user.id)
+                .map((s) => ({ userId: Number(s.user_id), fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim() }));
+            } else if (!playerCardRow) {
+              // 4-ball unassigned: show the positional partner as the only option.
               const myPos = Number(mySlot.position);
               const pairPositions = myPos <= 2 ? [1, 2] : [3, 4];
-              const selectablePlayers = slots.filter((s) =>
-                Number(s.user_id) !== user.id &&
-                pairPositions.includes(Number(s.position))
-              ).map((s) => ({
-                userId: Number(s.user_id),
-                fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim(),
-              }));
+              selectablePlayers = slots
+                .filter((s) => Number(s.user_id) !== user.id && pairPositions.includes(Number(s.position)))
+                .map((s) => ({ userId: Number(s.user_id), fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim() }));
+            }
+
+            if (playerCardRow) {
+              const markerRow = scorecard.marked_by_user_id
+                ? await db('users').where({ id: scorecard.marked_by_user_id }).select('first_name', 'last_name').first()
+                : null;
+              markerInfo = {
+                assigned: true,
+                playerBeingMarked: `${playerCardRow.first_name || ''} ${playerCardRow.last_name || ''}`.trim(),
+                markedBy: markerRow ? `${markerRow.first_name || ''} ${markerRow.last_name || ''}`.trim() : null,
+                // 3-ball only: alternate players the marker could switch to.
+                changeOptions: isFourBall ? [] : selectablePlayers.filter((p) => p.userId !== Number(playerCardRow.player_user_id)),
+              };
+            } else {
               markerInfo = { assigned: false, selectablePlayers };
             }
           }
@@ -1312,6 +1342,7 @@ function scoringRouter(db) {
       scorecards: orderedScorecards,
       canEditAll: false,
       message,
+      errorMessage,
       dayLabel
     });
   });
@@ -1418,12 +1449,14 @@ function scoringRouter(db) {
         return res.redirect(res.locals.tenantPath('/scoring?error=Players+not+in+same+group'));
       }
 
-      // Lock once any hole score exists for any player in this group
+      // Lock once any player in this group has a non-zero hole score.
+      // A score of 0 is treated as cleared, so it does not lock the group.
       const groupUserIds = slots.map((s) => s.user_id);
       const scoredCount = await db('scorecards as sc')
         .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
         .whereIn('sc.user_id', groupUserIds)
         .where({ 'sc.tour_id': scorecard.tour_id, 'sc.round_number': scorecard.round_number })
+        .where('sh.gross_score', '>', 0)
         .count('sh.id as cnt')
         .first();
       if (Number(scoredCount?.cnt || 0) > 0) {
@@ -1447,9 +1480,47 @@ function scoringRouter(db) {
       }
 
       const swapToPos = Number(partnerSlot.position);
+
+      // In a 4-ball, partner = marker. Find C's old positional partner (D) so we can
+      // auto-assign the displaced B↔D pair after the swap.
+      const cOriginalPos = Number(partnerSlot.position);
+      const cOldPairPositions = cOriginalPos <= 2 ? [1, 2] : [3, 4];
+      const dPos = cOldPairPositions.find((p) => p !== cOriginalPos);
+      const dSlot = dPos != null ? slots.find((s) => Number(s.position) === dPos) : null;
+
+      // Ensure scorecards exist for A, B, C, and (if present) D.
+      const ensurePromises = [
+        ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, userId),
+        ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(currentPartnerSlot.user_id)),
+        ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, partnerId),
+      ];
+      if (dSlot) ensurePromises.push(ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(dSlot.user_id)));
+      const [myScorecardId, bScorecardId, partnerScorecardId, dScorecardId] = await Promise.all(ensurePromises);
+
+      const allGroupUserIds = slots.map((s) => s.user_id);
+
       await db.transaction(async (trx) => {
+        // Swap positions so A and C become positional partners.
         await trx('tee_group_players').where({ id: partnerSlot.id }).update({ position: myCurrentPartnerPos });
         await trx('tee_group_players').where({ id: currentPartnerSlot.id }).update({ position: swapToPos });
+
+        // Clear all marker assignments in this group — all pairings change.
+        await trx('scorecards')
+          .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, type: 'individual' })
+          .whereIn('user_id', allGroupUserIds)
+          .update({ marked_by_user_id: null, updated_at: trx.fn.now() });
+
+        // Mutual assignment for the new pair: A↔C.
+        await trx('scorecards').where({ id: myScorecardId }).update({ marked_by_user_id: partnerId, updated_at: trx.fn.now() });
+        await trx('scorecards').where({ id: partnerScorecardId }).update({ marked_by_user_id: userId, updated_at: trx.fn.now() });
+
+        // Auto-assign the displaced pair B↔D so they don't need to re-select.
+        if (bScorecardId && dScorecardId && dSlot) {
+          const bUserId = Number(currentPartnerSlot.user_id);
+          const dUserId = Number(dSlot.user_id);
+          await trx('scorecards').where({ id: bScorecardId }).update({ marked_by_user_id: dUserId, updated_at: trx.fn.now() });
+          await trx('scorecards').where({ id: dScorecardId }).update({ marked_by_user_id: bUserId, updated_at: trx.fn.now() });
+        }
       });
 
       return res.redirect(res.locals.tenantPath('/scoring?message=Partner+updated'));
@@ -1460,21 +1531,25 @@ function scoringRouter(db) {
     try {
       const markerUserId = req.session.user.id;
       const playerUserId = Number(req.body.playerUserId);
+      const roundNumber = Number(req.body.roundNumber);
       const tp = res.locals.tenantPath;
 
       if (!Number.isFinite(playerUserId) || playerUserId === markerUserId) {
         return res.redirect(tp('/scoring?error=Invalid+player+selection'));
+      }
+      if (!Number.isFinite(roundNumber) || roundNumber <= 0) {
+        return res.redirect(tp('/scoring?error=Invalid+round'));
       }
 
       // Find the active tour for this tenant
       const tour = await db('tours').where({ tenant_id: req.tenant.id, status: 'active' }).first();
       if (!tour) return res.redirect(tp('/scoring?error=No+active+tour'));
 
-      // Find the open round for this tour
-      const round = await db('golf_rounds').where({ tour_id: tour.id, status: 'open' }).orderBy('round_number').first();
+      // Find the specific open round by round_number
+      const round = await db('golf_rounds').where({ tour_id: tour.id, round_number: roundNumber, status: 'open' }).first();
       if (!round) return res.redirect(tp('/scoring?error=No+open+round'));
 
-      // Both users must be in the same tee group and be a valid positional pair
+      // Both users must be in the same tee group
       const slots = await db('tee_groups as tg')
         .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
         .where({ 'tg.tour_id': tour.id, 'tg.round_number': round.round_number })
@@ -1492,20 +1567,28 @@ function scoringRouter(db) {
         return res.redirect(tp('/scoring?error=Players+not+in+same+group'));
       }
 
-      // Validate positional pairing: 1+2 or 3+4
-      const myPos = Number(mySlot.position);
-      const playerPos = Number(playerSlot.position);
-      const validPair = (myPos <= 2 && playerPos <= 2) || (myPos >= 3 && playerPos >= 3);
-      if (!validPair) {
-        return res.redirect(tp('/scoring?error=Invalid+pairing+for+this+group'));
-      }
+      const groupSize = slots.length;
+      const isFourBall = groupSize >= 4;
 
-      // Lock once any scoring has started
+      if (isFourBall) {
+        // In a 4-ball, partners are determined by position: 1+2 or 3+4.
+        const myPos = Number(mySlot.position);
+        const playerPos = Number(playerSlot.position);
+        const validPair = (myPos <= 2 && playerPos <= 2) || (myPos >= 3 && playerPos >= 3);
+        if (!validPair) {
+          return res.redirect(tp('/scoring?error=Invalid+pairing+for+this+group'));
+        }
+      }
+      // 3-ball: any player may select any other player in the group — no positional restriction.
+
+      // Lock once any player in this group has a non-zero hole score.
+      // A score of 0 is treated as cleared, so it does not lock the group.
       const groupUserIds = slots.map((s) => s.user_id);
       const [{ cnt }] = await db('scorecards as sc')
         .join('scorecard_holes as sh', 'sh.scorecard_id', 'sc.id')
         .whereIn('sc.user_id', groupUserIds)
         .where({ 'sc.tour_id': tour.id, 'sc.round_number': round.round_number })
+        .where('sh.gross_score', '>', 0)
         .count('sh.id as cnt');
       if (Number(cnt) > 0) {
         return res.redirect(tp('/scoring?error=Player+cannot+be+changed+once+scoring+has+started'));
@@ -1517,10 +1600,38 @@ function scoringRouter(db) {
         ensureIndividualScorecard(db, tour.id, round.round_number, playerUserId),
       ]);
 
-      // Set mutual marker assignment in a transaction
+      // Find A's current claim before the transaction (who A is currently marking, if anyone).
+      const oldPlayerCard = await db('scorecards')
+        .where({ tour_id: tour.id, round_number: round.round_number, marked_by_user_id: markerUserId, type: 'individual' })
+        .first();
+
+      // 4-ball: mutual assignment (A marks B AND B marks A — they're partners).
+      // 3-ball: one-way assignment only (A marks B; B independently selects C; C selects A).
+      // Cascade: clear any stale claims caused by this selection before writing new ones.
       await db.transaction(async (trx) => {
+        // Clear A's previous claim if switching to a different player.
+        if (oldPlayerCard && Number(oldPlayerCard.user_id) !== playerUserId) {
+          await trx('scorecards')
+            .where({ id: oldPlayerCard.id })
+            .update({ marked_by_user_id: null, updated_at: trx.fn.now() });
+        }
+
+        if (isFourBall) {
+          // C was in a mutual pair with D (C marked D, D was marked by C).
+          // Since C is moving into a new pair with A, D loses their marker.
+          await trx('scorecards')
+            .where({ tour_id: tour.id, round_number: round.round_number, marked_by_user_id: playerUserId, type: 'individual' })
+            .whereNot({ user_id: markerUserId })
+            .update({ marked_by_user_id: null, updated_at: trx.fn.now() });
+        }
+
+        // Set C.marked_by = A
         await trx('scorecards').where({ id: playerScorecardId }).update({ marked_by_user_id: markerUserId, updated_at: trx.fn.now() });
-        await trx('scorecards').where({ id: markerScorecardId }).update({ marked_by_user_id: playerUserId, updated_at: trx.fn.now() });
+
+        // 4-ball mutual: Set A.marked_by = C
+        if (isFourBall) {
+          await trx('scorecards').where({ id: markerScorecardId }).update({ marked_by_user_id: playerUserId, updated_at: trx.fn.now() });
+        }
       });
 
       return res.redirect(tp('/scoring?message=Player+selected'));
@@ -1538,12 +1649,14 @@ function scoringRouter(db) {
       const tour = await db('tours').where({ tenant_id: req.tenant.id, status: 'active' }).first();
       if (!tour) return res.redirect(tp('/scoring'));
 
-      const ownScorecard = await db('scorecards')
-        .where({ tour_id: tour.id, round_number: roundNumber, user_id: userId, type: 'individual' })
-        .first();
+      const [ownScorecard, playerCard] = await Promise.all([
+        db('scorecards').where({ tour_id: tour.id, round_number: roundNumber, user_id: userId, type: 'individual' }).first(),
+        db('scorecards').where({ tour_id: tour.id, round_number: roundNumber, marked_by_user_id: userId, type: 'individual' }).first(),
+      ]);
       if (!ownScorecard) return res.redirect(tp('/scoring'));
 
-      if (!ownScorecard.marked_by_user_id) {
+      // Ready when the marker has selected their player (they appear as marker on the player's card).
+      if (!playerCard) {
         return res.redirect(tp('/scoring?error=Select+your+player+before+opening+scoring'));
       }
 
@@ -1649,7 +1762,7 @@ function scoringRouter(db) {
         scorecard,
         confirmation,
         returnHole,
-        canSubmit: scorecard.status !== 'submitted' && !confirmation.hasMissing,
+        canSubmit: scorecard.status !== 'submitted' && !confirmation.hasMissing && !confirmation.hasConflict,
         submitError: null,
         dayLabel
       });
@@ -1673,7 +1786,7 @@ function scoringRouter(db) {
         return res.redirect(res.locals.tenantPath(`/scoring/confirm/${scorecardId}`));
       }
 
-      const canSubmit = scorecard.status !== 'submitted' && !confirmation.hasMissing;
+      const canSubmit = scorecard.status !== 'submitted' && !confirmation.hasMissing && !confirmation.hasConflict;
       const groupScorecardIds = [...new Set(
         (confirmation.entries || [])
           .map((entry) => Number(entry.scorecardId))
@@ -1712,11 +1825,24 @@ function scoringRouter(db) {
         });
       }
 
+      // Only the designated marker (or admin) may submit — the player's role is to confirm, not submit.
+      const requesterId = Number(req.session.user.id);
+      const markerUserId = scorecard.marked_by_user_id != null ? Number(scorecard.marked_by_user_id) : null;
+      if (!canEditAllScores(req.session.user) && markerUserId != null && requesterId !== markerUserId) {
+        return res.status(403).send('Only the marker can submit this scorecard');
+      }
+
       const confirmation = await buildConfirmationData(db, scorecard);
       if (confirmation.hasMissing) {
         return res.status(409).json({
           error: 'missing_scores',
           message: 'All holes must be scored before submission.'
+        });
+      }
+      if (confirmation.hasConflict) {
+        return res.status(409).json({
+          error: 'score_conflict',
+          message: 'Resolve all score disagreements before submission.'
         });
       }
 
@@ -1830,8 +1956,9 @@ function scoringRouter(db) {
           const existingCards = await db('scorecards')
             .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, type: 'individual' })
             .whereIn('user_id', playerIds)
-            .select('id', 'user_id');
+            .select('id', 'user_id', 'marked_by_user_id');
           const scorecardByUser = new Map(existingCards.map((r) => [Number(r.user_id), Number(r.id)]));
+          const markerByUser = new Map(existingCards.map((r) => [Number(r.user_id), r.marked_by_user_id != null ? Number(r.marked_by_user_id) : null]));
           const missingIds = playerIds.filter((uid) => !scorecardByUser.has(uid));
           if (missingIds.length) {
             await Promise.all(missingIds.map(async (uid) => {
@@ -1870,7 +1997,8 @@ function scoringRouter(db) {
               fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
               playingHandicap,
               handicapDisplay: formatHandicapDisplay(playingHandicap),
-              courseId: round ? resolvePlayerCourseId(round, genderByUser.get(uid) || null) : null
+              courseId: round ? resolvePlayerCourseId(round, genderByUser.get(uid) || null) : null,
+              markedByUserId: markerByUser.get(uid) ?? null,
             };
           });
         } else {
@@ -1955,8 +2083,28 @@ function scoringRouter(db) {
           const playerEntry = players.find((p) => Number(p.scorecardId) === Number(playerCard.id));
           passivePlayers = players.filter((p) => Number(p.scorecardId) !== Number(scorecard.id) && Number(p.scorecardId) !== Number(playerCard.id));
           allScorecardIds = scorecardIds; // keep full group for passive score fetching
-          players = [ownEntry, playerEntry].filter(Boolean);
+          // Player being marked goes first — they're the primary focus of the session.
+          players = [playerEntry, ownEntry].filter(Boolean);
           scorecardIds = players.map((p) => Number(p.scorecardId)).filter(Boolean); // active only for hole advancement
+
+          // Recalculate currentHole using only the 2 active cards — the pair
+          // may be ahead of the other pair in the group.
+          if (scorecardIds.length) {
+            const activeScoredRows = await db('scorecard_holes')
+              .whereIn('scorecard_id', scorecardIds)
+              .select('hole_number');
+            const activeCounts = new Map();
+            for (const row of activeScoredRows) {
+              const h = Number(row.hole_number);
+              activeCounts.set(h, (activeCounts.get(h) || 0) + 1);
+            }
+            for (const h of holeOrder) {
+              if ((activeCounts.get(h) || 0) < scorecardIds.length) {
+                currentHole = h;
+                break;
+              }
+            }
+          }
         }
       }
 
@@ -2031,7 +2179,7 @@ function scoringRouter(db) {
           db('scorecard_holes')
             .whereIn('scorecard_id', sids)
             .where({ hole_number: holeNumber })
-            .select('scorecard_id', 'gross_score', 'stableford_points', 'version', 'owner_user_id'),
+            .select('scorecard_id', 'gross_score', 'stableford_points', 'version', 'owner_user_id', 'player_gross_score'),
           getCumulativeByScorecard(db, sids, windowHoles, parByHole),
         ]);
 
@@ -2039,9 +2187,13 @@ function scoringRouter(db) {
         const scores = sids.map((sid) => {
           const saved = holeScoreByCard.get(sid);
           const cumulative = cumulativeByScorecard.get(sid) || { holesPlayed: 0, stablefordTotal: 0 };
+          const gs = saved?.gross_score != null ? Number(saved.gross_score) : null;
+          const pgs = saved?.player_gross_score != null ? Number(saved.player_gross_score) : null;
           return {
             scorecardId: sid,
-            grossScore: saved ? Number(saved.gross_score) : null,
+            grossScore: gs,
+            playerGrossScore: pgs,
+            hasConflict: gs != null && gs > 0 && pgs != null && pgs !== gs,
             version: saved ? Number(saved.version || 1) : 0,
             stablefordPoints: saved && saved.stableford_points !== null ? Number(saved.stableford_points) : null,
             stablefordTotal: Number(cumulative.stablefordTotal || 0),
@@ -2124,15 +2276,21 @@ function scoringRouter(db) {
       const rows = await db('scorecard_holes')
         .where({ scorecard_id: scorecardId })
         .orderBy('hole_number')
-        .select('hole_number', 'gross_score', 'stableford_points');
+        .select('hole_number', 'gross_score', 'stableford_points', 'player_gross_score');
 
       return res.json({
         scorecardId,
-        holes: rows.map((r) => ({
-          holeNumber: Number(r.hole_number),
-          grossScore: r.gross_score !== null ? Number(r.gross_score) : null,
-          stablefordPoints: r.stableford_points !== null ? Number(r.stableford_points) : null,
-        }))
+        holes: rows.map((r) => {
+          const gs = r.gross_score !== null ? Number(r.gross_score) : null;
+          const pgs = r.player_gross_score !== null ? Number(r.player_gross_score) : null;
+          return {
+            holeNumber: Number(r.hole_number),
+            grossScore: gs,
+            playerGrossScore: pgs,
+            hasConflict: gs != null && gs > 0 && pgs != null && pgs !== gs,
+            stablefordPoints: r.stableford_points !== null ? Number(r.stableford_points) : null,
+          };
+        })
       });
     } catch (error) {
       return next(error);
@@ -2299,10 +2457,72 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
 
+      // Determine write target based on role relative to this scorecard.
+      // When a marker is assigned: marker writes gross_score (authoritative);
+      // the card owner writes player_gross_score (advisory audit trail).
+      // When no marker is assigned: any group member writes gross_score (existing behaviour).
+      const requesterId = Number(req.session.user.id);
+      const markerUserId = scorecard.marked_by_user_id != null ? Number(scorecard.marked_by_user_id) : null;
+      const cardOwnerId = scorecard.user_id != null ? Number(scorecard.user_id) : null;
+      const isAdmin = canEditAllScores(req.session.user);
+
+      let writeTarget; // 'marker' | 'player'
+      if (isAdmin) {
+        writeTarget = 'marker';
+      } else if (markerUserId != null) {
+        if (requesterId === markerUserId) {
+          writeTarget = 'marker';
+        } else if (requesterId === cardOwnerId) {
+          writeTarget = 'player';
+        } else {
+          return res.status(403).json({ error: 'Not allowed' });
+        }
+      } else {
+        const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+        if (!permitted) return res.status(403).json({ error: 'Not allowed' });
+        writeTarget = 'marker';
+      }
+
+      // Round must be open regardless of write target.
+      const roundStatus = await getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number);
+      if (roundStatus.status !== 'open') {
+        return res.status(409).json({ error: 'Scoring is not open for this round' });
+      }
+
+      // ── Player advisory path ──────────────────────────────────────────────
+      if (writeTarget === 'player') {
+        const existing = await db('scorecard_holes')
+          .where({ scorecard_id: scorecardId, hole_number: holeNumber })
+          .first();
+        if (existing) {
+          await db('scorecard_holes')
+            .where({ id: existing.id })
+            .update({ player_gross_score: grossScore, updated_at: db.fn.now() });
+        } else {
+          await db('scorecard_holes').insert({
+            scorecard_id: scorecardId, hole_number: holeNumber, player_gross_score: grossScore,
+          });
+        }
+        const row = await db('scorecard_holes')
+          .where({ scorecard_id: scorecardId, hole_number: holeNumber })
+          .first();
+        const gs = row?.gross_score != null ? Number(row.gross_score) : null;
+        const pgs = row?.player_gross_score != null ? Number(row.player_gross_score) : null;
+        const hasConflict = gs != null && gs > 0 && pgs != null && pgs !== gs;
+        return res.json({
+          ok: true,
+          writeTarget: 'player',
+          grossScore: gs,
+          playerGrossScore: pgs,
+          hasConflict,
+          stableford: row?.stableford_points != null ? Number(row.stableford_points) : null,
+          holeVersion: row?.version != null ? Number(row.version) : 1,
+        });
+      }
+
+      // ── Marker authoritative path ─────────────────────────────────────────
       const isIndividual = scorecard.type === 'individual';
-      const [permitted, roundStatus, hole, roundHcp, tourHcp] = await Promise.all([
-        canUserEditScorecard(db, req.session.user, scorecard),
-        getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number),
+      const [hole, roundHcp, tourHcp] = await Promise.all([
         getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber),
         isIndividual
           ? db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first()
@@ -2311,11 +2531,6 @@ function scoringRouter(db) {
           ? db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first()
           : Promise.resolve(null),
       ]);
-
-      if (!permitted) return res.status(403).json({ error: 'Not allowed' });
-      if (roundStatus.status !== 'open') {
-        return res.status(409).json({ error: 'Scoring is not open for this round' });
-      }
       if (!hole) return res.status(400).json({ error: 'Hole configuration missing' });
 
       let playingHandicap = 0;
@@ -2344,10 +2559,23 @@ function scoringRouter(db) {
 
       markLeaderboardDirty(db, scorecard.tour_id).catch(() => {});
 
+      // Include player advisory score and conflict state in the response so the
+      // UI can update the conflict indicator without a separate fetch.
+      const row = await db('scorecard_holes')
+        .where({ scorecard_id: scorecardId, hole_number: holeNumber })
+        .select('player_gross_score')
+        .first();
+      const pgs = row?.player_gross_score != null ? Number(row.player_gross_score) : null;
+      const gs = Number(result.grossScore);
+      const hasConflict = gs > 0 && pgs != null && pgs !== gs;
+
       return res.json({
         ok: true,
+        writeTarget: 'marker',
         stableford: result.points,
-        grossScore: result.grossScore,
+        grossScore: gs,
+        playerGrossScore: pgs,
+        hasConflict,
         holeVersion: Number(result.version || 0),
         opId: result.opId || null
       });

@@ -86,8 +86,11 @@
         </div>
       </section>
 
-      <% const missingEntries = (confirmation.entries || []).filter((entry) => (entry.missingHoles || []).length > 0); %>
-      <section id="validationCard" class="card border-0 shadow-sm mb-3 <%= (missingEntries.length || staleScores) ? '' : 'd-none' %>">
+      <%
+        const missingEntries = (confirmation.entries || []).filter((entry) => (entry.missingHoles || []).length > 0);
+        const conflictHoles = (confirmation.holes || []).filter((h) => h.cells && h.cells.some((c) => c.hasConflict));
+      %>
+      <section id="validationCard" class="card border-0 shadow-sm mb-3 <%= (missingEntries.length || conflictHoles.length || staleScores) ? '' : 'd-none' %>">
         <div class="card-body">
           <h2 class="h6 mb-2">Validation</h2>
 
@@ -108,8 +111,24 @@
             </div>
           <% } %>
 
+          <% if (conflictHoles.length) { %>
+            <div class="alert alert-warning mb-2">
+              <strong>Score disagreements on holes:</strong>
+              <ul class="mb-0 mt-2">
+                <% conflictHoles.forEach((h) => { %>
+                  <% h.cells.filter((c) => c.hasConflict).forEach((c) => { %>
+                    <li>
+                      Hole <%= h.holeNumber %> — marker scored <strong><%= c.grossScore %></strong>, player recorded <strong><%= c.playerGrossScore %></strong>
+                    </li>
+                  <% }) %>
+                <% }) %>
+              </ul>
+              <p class="mb-0 mt-2 small">Both players must agree before submission. Return to scoring to resolve.</p>
+            </div>
+          <% } %>
+
           <div id="localConflictBox" class="alert alert-danger mb-0 d-none">
-            <strong>Unresolved conflicts:</strong>
+            <strong>Unresolved sync conflicts:</strong>
             <ul id="localConflictList" class="mb-0 mt-2"></ul>
           </div>
         </div>

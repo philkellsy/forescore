@@ -36,6 +36,19 @@
   let currentSiSecondary = Number(state.hole?.strokeIndexSecondary || 0);
   const localConflicts = new Map();
   const localExpectedGross = new Map();
+  // Tracks count of marker-vs-player score disagreements per scorecard (from round-scores API).
+  const scoreConflictCountByScorecard = new Map();
+  // Per-hole conflict state: scorecardId -> Set<holeNumber>. Source of truth for the badge count.
+  const knownHoleConflicts = new Map();
+
+  function setHoleConflict(scorecardId, holeNumber, hasConflict) {
+    const sid = Number(scorecardId);
+    const hole = Number(holeNumber);
+    if (!knownHoleConflicts.has(sid)) knownHoleConflicts.set(sid, new Set());
+    const set = knownHoleConflicts.get(sid);
+    if (hasConflict) set.add(hole); else set.delete(hole);
+    scoreConflictCountByScorecard.set(sid, set.size);
+  }
   const scoredHoles = new Set();
   const pendingGrossSends = new Map();
   let conflictPollTimer = null;
@@ -268,6 +281,21 @@
     persistConflictState();
   }
 
+  function isMarkerPathForCard(scorecardId) {
+    const player = ctx?.players?.find((p) => Number(p.scorecardId) === Number(scorecardId));
+    if (!player) return true;
+    if (player.markedByUserId == null) return true;
+    return Number(ctx.currentUserId) === Number(player.markedByUserId);
+  }
+
+  function markerFirstNameForCard(scorecardId) {
+    const player = ctx?.players?.find((p) => Number(p.scorecardId) === Number(scorecardId));
+    if (!player?.markedByUserId) return null;
+    const marker = ctx.players.find((p) => Number(p.participantId) === Number(player.markedByUserId));
+    const name = marker?.fullName || marker?.displayName || '';
+    return name.split(' ')[0] || null;
+  }
+
   function getExpectedGross(scorecardId, holeNumber) {
     if (!localExpectedGross.has(conflictKey(scorecardId, holeNumber))) return null;
     return localExpectedGross.get(conflictKey(scorecardId, holeNumber));
@@ -349,6 +377,8 @@
         playingHandicap: player.playingHandicap,
         handicapDisplay: player.handicapDisplay,
         grossScore: score.grossScore ?? null,
+        playerGrossScore: score.playerGrossScore ?? null,
+        hasScoreConflict: score.hasConflict || false,
         holeVersion: score.version || 0,
         stableford: score.stablefordPoints ?? null,
         stablefordTotal: score.stablefordTotal || 0,
@@ -473,7 +503,14 @@
 
   function entryCard(entry) {
     const conflict = getConflict(entry.scorecardId, currentHole);
-    const gross = conflict ? Number(conflict.attemptedGross || 0) : (entry.grossScore || 0);
+    // Player-path: show the player's own advisory score in the pill so +/- is responsive.
+    // If no advisory yet, fall back to the marker's score so the card isn't blank.
+    const isPlayerPath = entry.type !== 'team' && ctx && !isMarkerPathForCard(entry.scorecardId);
+    const gross = (() => {
+      if (conflict) return Number(conflict.attemptedGross || 0);
+      if (isPlayerPath) return entry.playerGrossScore != null ? Number(entry.playerGrossScore) : Number(entry.grossScore || 0);
+      return entry.grossScore || 0;
+    })();
     const holePar = Number(currentPar || 0);
     const stableford = entry.stableford === null || entry.stableford === undefined ? '-' : entry.stableford;
     const hasScorecard = Number.isFinite(Number(entry.scorecardId));
@@ -483,10 +520,17 @@
       if (n < 0) return `<span class="text-danger ms-1">−</span>`;
       return '';
     };
+    const sessionBadge = (() => {
+      if (!ctx?.passivePlayers) return '';
+      const isOwn = Number(entry.participantId) === Number(ctx.currentUserId);
+      return isOwn
+        ? ' <span class="badge bg-secondary ms-1" style="font-size:0.6rem;vertical-align:middle">You</span>'
+        : ' <span class="badge bg-secondary ms-1" style="font-size:0.6rem;vertical-align:middle">Player</span>';
+    })();
     const label =
       entry.type === 'team'
         ? `${entry.displayName} (Hcp ${entry.teamHandicapDisplay || entry.teamHandicap || 0})`
-        : `${entry.fullName || entry.displayName} (${entry.handicapDisplay || '-'})${shotDots(entry.playingHandicap)}`;
+        : `${entry.fullName || entry.displayName} (${entry.handicapDisplay || '-'})${shotDots(entry.playingHandicap)}${sessionBadge}`;
     const formatRelative = (value) => {
       const num = Number(value || 0);
       if (!Number.isFinite(num) || num === 0) return 'E';
@@ -545,37 +589,47 @@
       return '';
     })();
     const grossDiscClass = grossPerformanceClass ? 'gross-pill-disc' : '';
-    const grossPillClass = `${conflict ? 'gross-pill-conflict' : ''} ${grossPerformanceClass} ${grossDiscClass}`.trim();
+    const grossPillClass = `${grossPerformanceClass} ${grossDiscClass}`.trim();
+    const conflictOwnerName = conflict?.ownerName || markerFirstNameForCard(entry.scorecardId) || 'Scorer';
     const conflictPanel = conflict
-      ? `<div class="score-conflict-inline text-danger ms-2">
-          <div class="d-flex align-items-start gap-1">
-            <i class="fa-solid fa-triangle-exclamation mt-1" aria-hidden="true"></i>
-            <div class="lh-sm">
-              <div class="small fw-semibold">${conflict.ownerName || 'Server'} scored this as ${conflict.canonicalGross ?? '-'},</div>
-              <div class="small score-conflict-action">
-                resolve or
-                <button type="button" class="btn btn-link btn-sm p-0 align-baseline conflict-accept-btn" data-scorecard-id="${entry.scorecardId}" data-hole-number="${currentHole}">
-                  accept?
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>`
+      ? `<div class="score-conflict-note">${conflictOwnerName} scored this as ${conflict.canonicalGross ?? '-'}</div>`
       : '';
 
+    // Marker-vs-player conflict note: shown to both parties so each can see what the other entered.
+    const markerVsPlayerNote = (() => {
+      if (!entry.hasScoreConflict) return '';
+      if (!isPlayerPath) {
+        // Marker is viewing this card — tell them what the player entered.
+        const pgs = entry.playerGrossScore != null ? Number(entry.playerGrossScore) : null;
+        if (pgs == null) return '';
+        const playerFirstName = (entry.fullName || entry.displayName || '').split(' ')[0] || 'Player';
+        return `<div class="score-conflict-note">${playerFirstName} recorded this as ${pgs}</div>`;
+      } else {
+        // Player is viewing their own card — tell them what the marker entered.
+        const gs = entry.grossScore != null ? Number(entry.grossScore) : null;
+        if (!gs || gs <= 0) return '';
+        const name = markerFirstNameForCard(entry.scorecardId) || 'Marker';
+        return `<div class="score-conflict-note">${name} scored this as ${gs}</div>`;
+      }
+    })();
+
     if (entry.type !== 'team') {
+      const summaryBtn = hasScorecard ? (() => {
+        const conflictCount = scoreConflictCountByScorecard.get(Number(entry.scorecardId)) || 0;
+        const badge = conflictCount > 0
+          ? `<span class="score-conflict-badge">${conflictCount}</span>`
+          : '';
+        return `<button type="button" class="btn btn-link text-muted p-0 round-summary-btn" data-scorecard-id="${entry.scorecardId}" aria-label="Round summary" style="position:relative;font-size:1.4rem">${badge}<i class="fa-solid fa-table-list" aria-hidden="true"></i></button>`;
+      })() : '';
       return `
         <article class="card border-0 shadow-sm individual-entry-card">
           <div class="card-body py-2">
             <div class="d-flex justify-content-between align-items-center mb-2">
               <h2 class="h6 mb-0 individual-entry-title flex-grow-1">${label}</h2>
-              <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                <span class="fw-bold entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</span>
-                ${hasScorecard ? `<button type="button" class="btn btn-sm btn-link text-muted p-0 round-summary-btn" data-scorecard-id="${entry.scorecardId}" aria-label="Round summary"><i class="fa-solid fa-table-list" aria-hidden="true"></i></button>` : ''}
-              </div>
+              <span class="fw-bold entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</span>
             </div>
             <div class="d-flex align-items-center justify-content-between gap-2">
-              <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
+              <div class="score-adjuster" data-scorecard-id="${entry.scorecardId}">
                 <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
                 <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
                 <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
@@ -593,6 +647,8 @@
               </div>
             </div>
             ${conflictPanel ? `<div class="mt-1">${conflictPanel}</div>` : ''}
+            ${markerVsPlayerNote ? `<div class="mt-1">${markerVsPlayerNote}</div>` : ''}
+            ${summaryBtn ? `<div class="d-flex justify-content-end mt-2">${summaryBtn}</div>` : ''}
           </div>
         </article>
       `;
@@ -611,12 +667,12 @@
             </div>
           </div>
           <div class="d-flex justify-content-between align-items-center mt-3 gap-2">
-            <div class="score-adjuster ${conflict ? 'score-adjuster-conflict' : ''}" data-scorecard-id="${entry.scorecardId}">
+            <div class="score-adjuster" data-scorecard-id="${entry.scorecardId}">
               <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="-1" ${hasScorecard ? '' : 'disabled'}>-</button>
               <span class="gross-pill ${grossPillClass}" data-gross-value="${Number(gross || 0)}">${grossDisplay}</span>
               <button type="button" class="btn btn-outline-dark btn-lg adjust-btn" data-delta="1" ${hasScorecard ? '' : 'disabled'}>+</button>
             </div>
-            ${conflictPanel || rightMetrics}
+            ${conflictPanel ? `<div class="ms-2">${conflictPanel}</div>` : rightMetrics}
           </div>
           ${driveLabel}
           ${memberDrives}
@@ -660,6 +716,12 @@
       const expectedGross = getExpectedGross(entry.scorecardId, holeData.holeNumber);
       const canonicalGross = normalizeGross(entry.grossScore);
       if (expectedGross !== null && expectedGross !== canonicalGross) {
+        // Player-path cards: server-concurrency conflicts don't apply — clear any stale state.
+        if (!isMarkerPathForCard(entry.scorecardId)) {
+          setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
+          clearConflict(entry.scorecardId, holeData.holeNumber);
+          return;
+        }
         // Same user from another session — silently accept; no conflict needed.
         if (ctx?.currentUserId && entry.ownerUserId === ctx.currentUserId) {
           setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
@@ -738,6 +800,12 @@
       const canonicalGross = normalizeGross(entry.grossScore);
 
       if (expectedGross !== null && expectedGross !== canonicalGross) {
+        // Player-path cards: server-concurrency conflicts don't apply — clear any stale state.
+        if (!isMarkerPathForCard(entry.scorecardId)) {
+          setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
+          clearConflict(entry.scorecardId, holeData.holeNumber);
+          return;
+        }
         // Same user from another session — silently accept; no conflict needed.
         if (ctx?.currentUserId && entry.ownerUserId === ctx.currentUserId) {
           setExpectedGross(entry.scorecardId, holeData.holeNumber, canonicalGross);
@@ -759,6 +827,11 @@
       }
     });
 
+    // Update per-hole conflict tracking from current hole data so the summary badge stays in sync.
+    holeData.entries.forEach((entry) => {
+      if (entry.scorecardId != null) setHoleConflict(entry.scorecardId, holeData.holeNumber, Boolean(entry.hasScoreConflict));
+    });
+
     entriesContainer.classList.toggle('entries-mode-ambrose', holeData.mode === 'ambrose');
     entriesContainer.classList.toggle('entries-mode-individual', holeData.mode !== 'ambrose');
     const showTeamDivider = ctx?.twoBallEnabled && holeData.mode !== 'ambrose' && holeData.entries.length === 4;
@@ -771,14 +844,17 @@
     }).join('');
 
     if (ctx.passivePlayers && ctx.passivePlayers.length) {
-      const passiveHtml = ctx.passivePlayers.map((p) => {
+      const passiveRows = ctx.passivePlayers.map((p) => {
         const score = (holeData.passiveScores || []).find((s) => Number(s.scorecardId) === Number(p.scorecardId));
-        const pts = score ? `${score.stablefordPoints != null ? score.stablefordPoints + ' pts' : '—'}` : '—';
-        return `<div class="passive-player-row d-flex justify-content-between align-items-center small text-muted px-1 py-1 border-top">
+        const pts = score?.stablefordPoints != null ? `${score.stablefordPoints} pts` : '—';
+        return `<div class="d-flex justify-content-between align-items-center small text-muted px-1 py-1">
           <span>${p.displayName}</span><span>${pts}</span>
         </div>`;
       }).join('');
-      html += `<div class="passive-players-section mt-2">${passiveHtml}</div>`;
+      html += `<div class="passive-players-section mt-3 border rounded px-2 py-1">
+        <div class="text-muted fw-semibold mb-1" style="font-size:0.65rem;letter-spacing:.05em;text-transform:uppercase">Group</div>
+        ${passiveRows}
+      </div>`;
     }
 
     entriesContainer.innerHTML = html;
@@ -858,48 +934,112 @@
       const holeMap = new Map(data.holes.map((h) => [h.holeNumber, h]));
       const holeNumbers = ctx?.holes ? Object.keys(ctx.holes).map(Number).sort((a, b) => a - b) : [];
 
-      let totalGross = 0;
-      let totalStb = 0;
-      let holesPlayed = 0;
-      const rows = holeNumbers.map((num) => {
+      // Update per-hole conflict tracking — authoritative from round-scores API.
+      data.holes.forEach((h) => setHoleConflict(scorecardId, h.holeNumber, h.hasConflict));
+      const conflictCount = data.holes.filter((h) => h.hasConflict).length;
+
+      const front9Nums = [1,2,3,4,5,6,7,8,9].filter((n) => holeNumbers.includes(n));
+      const back9Nums = [10,11,12,13,14,15,16,17,18].filter((n) => holeNumbers.includes(n));
+
+      const mkEntry = (num) => {
         const hole = ctx.holes[num] || {};
         const score = holeMap.get(num);
-        const gross = score?.grossScore ?? null;
-        const stb = score?.stablefordPoints ?? null;
-        if (gross !== null) { totalGross += gross; holesPlayed++; }
-        if (stb !== null) totalStb += stb;
-        const isCurrent = num === currentHole;
-        return `<tr class="hole-nav-row ${isCurrent ? 'table-warning fw-semibold' : ''}" data-hole="${num}" role="button">
-          <td>${num}</td>
-          <td>${hole.par || '–'}</td>
-          <td>${gross !== null ? gross : '–'}</td>
-          <td>${stb !== null ? stb : '–'}</td>
-          <td class="text-muted" style="font-size:0.75rem"><i class="fa-solid fa-chevron-right"></i></td>
-        </tr>`;
-      });
+        return {
+          num,
+          par: Number(hole.par || 0),
+          gross: score?.grossScore ?? null,
+          stb: score?.stablefordPoints ?? null,
+          hasConflict: score?.hasConflict || false,
+          isCurrent: num === currentHole
+        };
+      };
+      const front9 = front9Nums.map(mkEntry);
+      const back9 = back9Nums.map(mkEntry);
+
+      const sumGross = (arr) => arr.reduce((a, h) => (h.gross != null && h.gross > 0 ? a + h.gross : a), 0);
+      const sumStb = (arr) => arr.reduce((a, h) => (h.stb != null ? a + h.stb : a), 0);
+      const sumPar = (arr) => arr.reduce((a, h) => a + h.par, 0);
+      const anyScored = (arr) => arr.some((h) => h.gross != null && h.gross > 0);
+
+      const grossDiscCls = (gross, par) => {
+        if (!gross || gross <= 0 || !par) return '';
+        if (gross === 1) return 'scorecard-gross-disc scorecard-gross-disc-hio';
+        if (gross <= par - 2) return 'scorecard-gross-disc scorecard-gross-disc-eagle';
+        if (gross === par - 1) return 'scorecard-gross-disc scorecard-gross-disc-birdie';
+        return '';
+      };
+
+      const thHole = (h) =>
+        `<th class="hole-nav-cell text-center${h.isCurrent ? ' table-warning' : ''}" data-hole="${h.num}" role="button" style="cursor:pointer">${h.num}</th>`;
+      const tdGross = (h) => {
+        const cls = h.hasConflict ? ' table-warning' : '';
+        if (!h.gross || h.gross <= 0) return `<td class="text-center hole-nav-cell${cls}" data-hole="${h.num}" role="button" style="cursor:pointer">–</td>`;
+        const disc = grossDiscCls(h.gross, h.par);
+        const dot = h.hasConflict ? `<span class="score-marker-conflict-dot" style="font-size:0.4rem">●</span>` : '';
+        return `<td class="text-center hole-nav-cell${cls}" data-hole="${h.num}" role="button" style="cursor:pointer"><span class="${disc}">${h.gross}</span>${dot}</td>`;
+      };
+      const tdStb = (h) =>
+        `<td class="text-center hole-nav-cell" data-hole="${h.num}" role="button" style="cursor:pointer">${h.stb != null ? h.stb : '–'}</td>`;
+
+      const renderSection = (holes, totHeaders, totPar, totGross, totStb) => `
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle mb-0 scorecard-grid-table">
+            <thead>
+              <tr class="scorecard-hole-row">
+                <th></th>${holes.map(thHole).join('')}${totHeaders}
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="scorecard-hole-row">
+                <th>Par</th>${holes.map((h) => `<td class="text-center">${h.par || '–'}</td>`).join('')}${totPar}
+              </tr>
+              <tr>
+                <th>G</th>${holes.map(tdGross).join('')}${totGross}
+              </tr>
+              <tr>
+                <th>Stb</th>${holes.map(tdStb).join('')}${totStb}
+              </tr>
+            </tbody>
+          </table>
+        </div>`;
+
+      const outGross = sumGross(front9);
+      const inGross = sumGross(back9);
+      const totGrossVal = outGross + inGross;
+      const outStb = sumStb(front9);
+      const inStb = sumStb(back9);
+      const totStbVal = outStb + inStb;
+      const anyF = anyScored(front9);
+      const anyB = anyScored(back9);
+
+      const front9Html = front9.length ? renderSection(
+        front9,
+        `<th class="scorecard-total-col">OUT</th>`,
+        `<td class="scorecard-total-col">${sumPar(front9)}</td>`,
+        `<td class="scorecard-total-col fw-semibold">${anyF ? outGross : '–'}</td>`,
+        `<td class="scorecard-total-col fw-semibold">${anyF ? outStb : '–'}</td>`
+      ) : '';
+
+      const back9Html = back9.length ? renderSection(
+        back9,
+        `<th class="scorecard-total-col">IN</th><th class="scorecard-total-col">TOT</th>`,
+        `<td class="scorecard-total-col">${sumPar(back9)}</td><td class="scorecard-total-col">${sumPar([...front9, ...back9])}</td>`,
+        `<td class="scorecard-total-col fw-semibold">${anyB ? inGross : '–'}</td><td class="scorecard-total-col fw-semibold">${(anyF || anyB) ? totGrossVal : '–'}</td>`,
+        `<td class="scorecard-total-col fw-semibold">${anyB ? inStb : '–'}</td><td class="scorecard-total-col fw-semibold">${(anyF || anyB) ? totStbVal : '–'}</td>`
+      ) : '';
 
       if (bodyEl) {
+        const conflictNote = conflictCount > 0
+          ? `<p class="small text-warning fw-semibold mb-3" style="color:#fd7e14!important"><i class="fa-solid fa-circle-dot me-1"></i>${conflictCount} hole${conflictCount > 1 ? 's' : ''} with score disagreement — tap to navigate and resolve.</p>`
+          : '';
         bodyEl.innerHTML = `
-          <div class="table-responsive">
-            <table class="table table-sm table-bordered table-hover mb-0 round-summary-table">
-              <thead class="table-light">
-                <tr><th>Hole</th><th>Par</th><th>Gross</th><th>Stb</th><th></th></tr>
-              </thead>
-              <tbody>${rows.join('')}</tbody>
-              <tfoot class="table-light fw-semibold">
-                <tr>
-                  <td colspan="2">Total</td>
-                  <td>${holesPlayed > 0 ? totalGross : '–'}</td>
-                  <td>${holesPlayed > 0 ? totalStb : '–'}</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>`;
+          ${conflictNote}
+          ${front9.length ? `<div class="small text-muted mb-1">Front 9</div>${front9Html}` : ''}
+          ${back9.length ? `<div class="small text-muted mb-1">Back 9</div>${back9Html}` : ''}`;
 
-        bodyEl.querySelectorAll('.hole-nav-row').forEach((row) => {
-          row.addEventListener('click', () => {
-            const holeNum = Number(row.dataset.hole);
+        bodyEl.querySelectorAll('.hole-nav-cell[data-hole]').forEach((cell) => {
+          cell.addEventListener('click', () => {
+            const holeNum = Number(cell.dataset.hole);
             const oc = window.bootstrap.Offcanvas.getInstance(offcanvasEl);
             if (oc) {
               offcanvasEl.addEventListener('hidden.bs.offcanvas', () => navigateToHole(holeNum), { once: true });
@@ -909,9 +1049,6 @@
             }
           });
         });
-
-        const currentRow = bodyEl.querySelector('.hole-nav-row.table-warning');
-        if (currentRow) currentRow.scrollIntoView({ block: 'center' });
       }
     } catch (_err) {
       if (bodyEl) bodyEl.innerHTML = '<p class="text-danger small py-3 mb-0 text-center">Could not load round scores.</p>';
@@ -1040,7 +1177,11 @@
     if (!isEditingEnabled()) return;
     if (!Number.isFinite(Number(scorecardId))) return;
     const entry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
-    const currentGross = Number(entry?.grossScore || 0);
+    // Player advisory path: adjust from the player's own recorded score, not the marker's.
+    const isPlayerPath = ctx && !isMarkerPathForCard(scorecardId);
+    const currentGross = isPlayerPath && entry?.playerGrossScore != null
+      ? Number(entry.playerGrossScore)
+      : Number(entry?.grossScore || 0);
     const maxGross = delta > 0
       ? minGrossForPickup(currentPar, currentSiPrimary, currentSiSecondary, Number(entry?.playingHandicap || 0))
       : 20;
@@ -1074,13 +1215,23 @@
     const op = { opId, scorecardId: Number(scorecardId), holeNumber: Number(holeNumber), payload: { scorecardId, holeNumber, grossScore, opId, baseVersion } };
     sendQueuedGrossOp(op).then((result) => {
       if (result.ok) {
-        if (!fromConfirm) setExpectedGross(Number(scorecardId), holeNumber, grossScore);
+        const isPlayerWrite = result.payload?.writeTarget === 'player';
+        if (!fromConfirm && !isPlayerWrite) {
+          setExpectedGross(Number(scorecardId), holeNumber, grossScore);
+        }
         clearConflict(Number(scorecardId), holeNumber);
-        if (Number(holeNumber) === Number(currentHole) && result.payload?.holeVersion !== undefined) {
+        if (Number(holeNumber) === Number(currentHole)) {
           updateCurrentHoleEntry(scorecardId, (entry) => {
-            entry.holeVersion = Number(result.payload.holeVersion || 0);
+            if (result.payload?.holeVersion !== undefined) entry.holeVersion = Number(result.payload.holeVersion || 0);
+            if (isPlayerWrite && result.payload) {
+              if (result.payload.grossScore !== undefined) entry.grossScore = result.payload.grossScore != null ? Number(result.payload.grossScore) : null;
+              if (result.payload.playerGrossScore !== undefined) entry.playerGrossScore = result.payload.playerGrossScore != null ? Number(result.payload.playerGrossScore) : null;
+              entry.hasScoreConflict = Boolean(result.payload.hasConflict);
+              setHoleConflict(scorecardId, holeNumber, entry.hasScoreConflict);
+            }
             return entry;
           });
+          if (isPlayerWrite && currentHoleData) render(currentHoleData).catch(() => {});
         }
         return;
       }
@@ -1110,6 +1261,21 @@
     if (!Number.isFinite(Number(scorecardId))) return;
     const normalizedGross = normalizeGross(grossScore);
 
+    // Player advisory path — don't touch the pill (marker owns gross_score display).
+    // Immediately resolve or set conflict based on whether the advisory matches the marker's score.
+    if (ctx && !isMarkerPathForCard(scorecardId)) {
+      const entry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
+      const markerGross = entry?.grossScore != null ? Number(entry.grossScore) : null;
+      const nowConflict = markerGross != null && markerGross > 0 && normalizedGross > 0 && normalizedGross !== markerGross;
+      const wasConflict = Boolean(entry?.hasScoreConflict);
+      updateCurrentHoleEntry(scorecardId, (e) => { e.hasScoreConflict = nowConflict; e.playerGrossScore = normalizedGross; return e; });
+      if (nowConflict !== wasConflict) setHoleConflict(scorecardId, currentHole, nowConflict);
+      if (currentHoleData) render(currentHoleData).catch(() => {});
+      scoredHoles.add(Number(currentHole));
+      scheduleGrossSend(scorecardId, Number(currentHole), normalizedGross);
+      return;
+    }
+
     const prevEntry = currentHoleData?.entries?.find((e) => Number(e.scorecardId) === Number(scorecardId));
     const prevStableford = prevEntry?.stableford ?? null;
     const playingHandicap = Number(prevEntry?.playingHandicap || 0);
@@ -1124,13 +1290,21 @@
     const nextTotal = Number(prevEntry?.stablefordTotal || 0) + deltaTotal;
     const nextRelative = Number(prevEntry?.stablefordRelative || 0) + deltaRelative;
 
+    const playerGross = prevEntry?.playerGrossScore != null ? Number(prevEntry.playerGrossScore) : null;
+    const nextConflict = playerGross != null && playerGross > 0 && normalizedGross > 0 && normalizedGross !== playerGross;
+
     updateCurrentHoleEntry(scorecardId, (entry) => {
       entry.grossScore = normalizedGross;
       entry.stableford = nextStableford;
       entry.stablefordTotal = nextTotal;
       entry.stablefordRelative = nextRelative;
+      entry.hasScoreConflict = nextConflict;
       return entry;
     });
+
+    if (nextConflict !== Boolean(prevEntry?.hasScoreConflict)) {
+      setHoleConflict(scorecardId, currentHole, nextConflict);
+    }
 
     // Surgical DOM update — instant, no full re-render.
     const updated = updateScoreDisplay(scorecardId, normalizedGross, nextStableford, nextTotal, nextRelative);
