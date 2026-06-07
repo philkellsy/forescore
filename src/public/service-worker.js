@@ -1,7 +1,7 @@
-const CACHE_NAME = 'forescore-cache-v3';
+const CACHE_NAME = 'forescore-cache-v4';
 const WARMING_URL = '/warming.html';
 const OFFLINE_URL = '/offline.html';
-const NAV_TIMEOUT_MS = 4000;
+const NAV_TIMEOUT_MS = 12000;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

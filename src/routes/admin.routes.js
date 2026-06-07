@@ -491,28 +491,25 @@ function adminRouter(db) {
           return { id: r.id, name: r.name, gross, handicap, total: gross - handicap };
         }).sort((a, b) => a.total - b.total).map((r, i) => ({ ...r, position: i + 1 }));
       } else {
-        const lb = await calculateStablefordLeaderboards(db, tourId, { roundNumbers: [roundNumber] });
-        dayBoard = (lb.byDay[roundNumber] || []).map((r, i) => ({ ...r, position: i + 1 }));
-      }
-
-      // --- Championship standings (all stableford rounds through this one) ---
-      let championship = [];
-      let championshipRounds = [];
-      if (roundsThrough.length) {
-        const champLb = await calculateStablefordLeaderboards(db, tourId, {
-          roundNumbers: roundsThrough,
+        // Single query covers both the day board and championship standings
+        const lb = await calculateStablefordLeaderboards(db, tourId, {
+          roundNumbers: roundsThrough.length ? roundsThrough : [roundNumber],
           bestOf: tour.leaderboard_best_of_rounds || null,
         });
-        const byDay = champLb.byDay;
-        const roundMaps = {};
-        roundsThrough.forEach((rn) => {
-          roundMaps[rn] = new Map((byDay[rn] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
-        });
-        championship = champLb.championship.map((row) => ({
-          ...row,
-          rounds: Object.fromEntries(roundsThrough.map((rn) => [rn, roundMaps[rn].get(Number(row.userId)) ?? null])),
-        }));
-        championshipRounds = roundsThrough;
+        dayBoard = (lb.byDay[roundNumber] || []).map((r, i) => ({ ...r, position: i + 1 }));
+
+        // --- Championship standings ---
+        if (roundsThrough.length) {
+          const roundMaps = {};
+          roundsThrough.forEach((rn) => {
+            roundMaps[rn] = new Map((lb.byDay[rn] || []).map((row) => [Number(row.userId), Number(row.total || 0)]));
+          });
+          championship = lb.championship.map((row) => ({
+            ...row,
+            rounds: Object.fromEntries(roundsThrough.map((rn) => [rn, roundMaps[rn].get(Number(row.userId)) ?? null])),
+          }));
+          championshipRounds = roundsThrough;
+        }
       }
 
       // --- Skins for this round ---

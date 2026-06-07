@@ -36,20 +36,20 @@ function analyzeHole(rows) {
   };
 }
 
-async function getHoleResults(db, tourId, roundNumber, holeNumber, participantType) {
+async function getAllRoundHoleResults(db, tourId, roundNumber, participantType) {
   if (participantType === 'team') {
     return db('scorecards as s')
       .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-      .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'team', 'sh.hole_number': holeNumber })
+      .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'team' })
       .whereNotNull('s.team_id')
-      .select({ participant_id: 's.team_id', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
+      .select({ participant_id: 's.team_id', hole_number: 'sh.hole_number', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
   }
 
   return db('scorecards as s')
     .join('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
-    .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'individual', 'sh.hole_number': holeNumber })
+    .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'individual' })
     .whereNotNull('s.user_id')
-    .select({ participant_id: 's.user_id', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
+    .select({ participant_id: 's.user_id', hole_number: 'sh.hole_number', stableford: 'sh.stableford_points', gross: 'sh.gross_score' });
 }
 
 async function writeSkinsHole(db, row) {
@@ -101,8 +101,17 @@ async function calculateEventSkinsForDays(db, tourId, finalizedRoundNumbers = []
     const calcType = roundTypeMap.get(roundNumber);
     const participantType = calcType === 'ambrose_nett' ? 'team' : 'player';
 
+    // Fetch all hole results for this round in one query, then group by hole in JS
+    const allResults = await getAllRoundHoleResults(db, tourId, roundNumber, participantType);
+    const resultsByHole = new Map();
+    for (const row of allResults) {
+      const h = Number(row.hole_number);
+      if (!resultsByHole.has(h)) resultsByHole.set(h, []);
+      resultsByHole.get(h).push(row);
+    }
+
     for (const holeNumber of HOLE_SEQUENCE) {
-      const results = await getHoleResults(db, tourId, roundNumber, holeNumber, participantType);
+      const results = resultsByHole.get(holeNumber) || [];
       if (!results.length) continue; // hole not yet scored — no pot contribution, no carry change
       const totalPot = basePot + carryIn;
       const { winner, tiedCount, topStableford } = analyzeHole(results);
@@ -146,7 +155,10 @@ async function calculateEventSkinsForDays(db, tourId, finalizedRoundNumbers = []
     .orderBy([{ column: 'round_number', order: 'asc' }, { column: 'hole_number', order: 'asc' }]);
 
   const teamNames = await db('teams').where({ tour_id: tourId }).select('id', 'name');
-  const userNames = await db('users').select('id', 'first_name', 'last_name');
+  const userNames = await db('users as u')
+    .join('event_players as ep', 'ep.user_id', 'u.id')
+    .where({ 'ep.tour_id': tourId })
+    .select('u.id', 'u.first_name', 'u.last_name');
 
   const teamNameMap = new Map(teamNames.map((t) => [t.id, t.name]));
   const userNameMap = new Map(userNames.map((u) => [u.id, `${u.first_name} ${u.last_name}`]));
