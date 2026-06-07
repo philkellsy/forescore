@@ -230,7 +230,7 @@ function superAdminRouter(db) {
 
       const memberships = await db('tenant_memberships as m')
         .join('tenants as t', 't.id', 'm.tenant_id')
-        .where({ 'm.user_id': req.session.user.id })
+        .where({ 'm.user_id': req.session.user.id, 't.is_test_tenant': false })
         .select('t.id', 't.slug', 't.name')
         .orderBy('t.name');
 
@@ -255,7 +255,7 @@ function superAdminRouter(db) {
       if (!req.session.user.isSuperAdmin) {
         const membership = await db('tenant_memberships as m')
           .join('tenants as t', 't.id', 'm.tenant_id')
-          .where({ 'm.user_id': req.session.user.id })
+          .where({ 'm.user_id': req.session.user.id, 't.is_test_tenant': false })
           .select('t.slug')
           .orderBy('m.joined_at')
           .first();
@@ -386,6 +386,7 @@ function superAdminRouter(db) {
       const name = String(req.body.name || '').trim();
       const slug = String(req.body.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
       const plan = ['free', 'starter', 'pro'].includes(req.body.plan) ? req.body.plan : tenant.plan;
+      const is_test_tenant = req.body.is_test_tenant === '1';
 
       if (!name || !slug) {
         return res.redirect(`/?error=${encodeURIComponent('Name and slug are required.')}`);
@@ -396,7 +397,7 @@ function superAdminRouter(db) {
         if (taken) return res.redirect(`/?error=${encodeURIComponent('That slug is already taken.')}`);
       }
 
-      await db('tenants').where({ id: tenantId }).update({ name, slug, plan });
+      await db('tenants').where({ id: tenantId }).update({ name, slug, plan, is_test_tenant });
       return res.redirect(`/?message=${encodeURIComponent(`"${name}" updated`)}`);
     } catch (err) { return next(err); }
   });

@@ -322,7 +322,9 @@ MCP Postgres server is configured in [.vscode/mcp.json](.vscode/mcp.json) for in
 
 ## Test tenant
 
-`TEST_TENANT_ID = 1` (defined in `src/config/constants.js`). This tenant sees **all courses system-wide** — the `tenant_id` filter is bypassed in course list queries, round-config dropdowns, and course edit/duplicate lookups. Delete remains strict: the test tenant can only delete courses it actually owns. Useful for replicating cross-tenant issues and testing with real course data from other tenants.
+Tenants with `is_test_tenant = true` on the `tenants` table see **all courses system-wide** — the `tenant_id` filter is bypassed in course list queries, round-config dropdowns, and course edit/duplicate lookups. Delete remains strict: the test tenant can only delete courses it actually owns. Useful for replicating cross-tenant issues and testing with real course data from other tenants.
+
+Test tenants are only visible to super admins: they are filtered out of the `/select-tenant` picker and the auto-redirect for regular users. The `init` (ForeScore) tenant is seeded as `is_test_tenant = true` by `bootstrap.js`. Super admins can toggle the flag via the tenant edit modal on the super admin tenant list.
 
 Key schema notes:
 - `event_players` table is still named that in the DB (not renamed by original migration)

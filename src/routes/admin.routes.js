@@ -15,12 +15,11 @@ const { calculateVirtualTeamResults } = require('../services/scoring/virtual-tea
 const { dayLabel } = require('../services/events/day-label.service');
 const virtualTeamsRepo = require('../db/repositories/virtual-teams');
 const { sendWelcomeEmail } = require('../services/email/mailer');
-const { TEST_TENANT_ID } = require('../config/constants');
 
 // Test tenant bypasses tenant_id filter to access all courses system-wide.
-function courseWhere(tenantId, extra = {}) {
-  if (tenantId === TEST_TENANT_ID) return extra;
-  return { tenant_id: tenantId, ...extra };
+function courseWhere(tenant, extra = {}) {
+  if (tenant?.is_test_tenant) return extra;
+  return { tenant_id: tenant?.id, ...extra };
 }
 
 const NOVELTY_TYPES = ['NTP', 'Long Drive'];
@@ -183,7 +182,7 @@ function adminRouter(db) {
 
       const rounds = await db('golf_rounds').where({ tour_id: tourId }).orderBy('round_number');
       const roundByNumber = new Map(rounds.map((r) => [r.round_number, r]));
-      const courses = await db('courses').where(courseWhere(req.tenant.id)).orderBy('course_name');
+      const courses = await db('courses').where(courseWhere(req.tenant)).orderBy('course_name');
       const courseById = new Map(courses.map((c) => [c.id, c]));
 
       const tourPlayers = await db('event_players as ep')
@@ -389,7 +388,7 @@ function adminRouter(db) {
         return res.redirect(res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`));
       }
 
-      const allCourses = await db('courses').where(courseWhere(req.tenant.id)).orderBy('course_name');
+      const allCourses = await db('courses').where(courseWhere(req.tenant)).orderBy('course_name');
       const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first() || null;
       const noveltyEvents = round ? await findNoveltyEvents(db, tourId, roundNumber) : [];
 
@@ -1005,14 +1004,14 @@ function adminRouter(db) {
       const tourDate = req.body.tourDate ? String(req.body.tourDate) : null;
       const femaleCourseIdRaw = req.body.femaleCourseId ? parseInt(req.body.femaleCourseId, 10) : null;
 
-      const course = await db('courses').where(courseWhere(req.tenant.id, { id: courseId })).first();
+      const course = await db('courses').where(courseWhere(req.tenant, { id: courseId })).first();
       if (!course) {
         return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Invalid+course`);
       }
 
       let femaleCourseId = null;
       if (tour.gender === 'mixed' && femaleCourseIdRaw) {
-        const femaleCourse = await db('courses').where(courseWhere(req.tenant.id, { id: femaleCourseIdRaw })).first();
+        const femaleCourse = await db('courses').where(courseWhere(req.tenant, { id: femaleCourseIdRaw })).first();
         if (femaleCourse) femaleCourseId = femaleCourse.id;
       }
 
@@ -1769,7 +1768,7 @@ function adminRouter(db) {
   router.get('/courses/:courseId', anyAdminGuard, async (req, res, next) => {
     try {
       const courseId = parseInt(req.params.courseId, 10);
-      const course = await db('courses').where(courseWhere(req.tenant.id, { id: courseId })).first();
+      const course = await db('courses').where(courseWhere(req.tenant, { id: courseId })).first();
       if (!course) return res.status(404).send('Course not found');
 
       // Tour admins cannot edit a course that is currently assigned to an open round
@@ -1826,7 +1825,7 @@ function adminRouter(db) {
   router.post('/courses/:courseId', anyAdminGuard, async (req, res, next) => {
     try {
       const courseId = parseInt(req.params.courseId, 10);
-      const course = await db('courses').where(courseWhere(req.tenant.id, { id: courseId })).first();
+      const course = await db('courses').where(courseWhere(req.tenant, { id: courseId })).first();
       if (!course) return res.status(404).send('Course not found');
 
       if (!isTenantAdmin(req.tenantMembership)) {
@@ -1923,7 +1922,7 @@ function adminRouter(db) {
   router.post('/courses/:courseId/duplicate', anyAdminGuard, async (req, res, next) => {
     try {
       const courseId = parseInt(req.params.courseId, 10);
-      const source = await db('courses').where(courseWhere(req.tenant.id, { id: courseId })).first();
+      const source = await db('courses').where(courseWhere(req.tenant, { id: courseId })).first();
       if (!source) return res.status(404).send('Course not found');
 
       const teeName = String(req.body.teeName || '').trim();

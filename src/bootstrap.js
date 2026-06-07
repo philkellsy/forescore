@@ -24,7 +24,8 @@ async function seedDefaults(db) {
     await db('users').where({ id: user.id }).update({ is_super_admin: true });
   }
 
-  // Seed initial tenant — exists so admins have somewhere to log in while setting up
+  // Seed initial tenant — exists so admins have somewhere to log in while setting up.
+  // Marked as test tenant so it sees all courses system-wide and is hidden from the normal tenant picker.
   let tenant = await db('tenants').where({ slug: 'init' }).first();
   if (!tenant) {
     [tenant] = await db('tenants')
@@ -34,8 +35,11 @@ async function seedDefaults(db) {
         plan: 'pro',
         subscription_status: 'active',
         settings: JSON.stringify({}),
+        is_test_tenant: true,
       })
       .returning('*');
+  } else if (!tenant.is_test_tenant) {
+    await db('tenants').where({ id: tenant.id }).update({ is_test_tenant: true });
   }
 
   const membership = await db('tenant_memberships')

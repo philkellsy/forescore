@@ -8,7 +8,6 @@ const { canEditAllScores } = require('../services/permissions/scoring-permission
 const { upsertHoleScore, ScoreConflictError } = require('../services/scoring/score-entry.service');
 const { stablefordPoints } = require('../services/scoring/stableford.service');
 const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
-const { TEST_TENANT_ID } = require('../config/constants');
 const { dayLabel } = require('../services/events/day-label.service');
 const { computeCourseHandicap, getCachedCourseData, getCachedParByHole, warmRoundCourseCache, isRoundCacheWarm } = require('../services/scoring/handicap.service');
 const { buildIndividualScorecardModel } = require('../services/scoring/scorecard-model.service');
@@ -151,9 +150,13 @@ async function getTeamHandicapInfo(db, scorecard) {
 async function getOrCreateRoundStatus(db, tourId, roundNumber) {
   let row = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
   if (!row) {
-    const tour = await db('tours').where({ id: tourId }).first();
+    const tour = await db('tours as t')
+      .join('tenants as tn', 'tn.id', 't.tenant_id')
+      .where({ 't.id': tourId })
+      .select('t.*', 'tn.is_test_tenant')
+      .first();
     const defaultCourse = await db('courses')
-      .where(tour?.tenant_id === TEST_TENANT_ID ? {} : { tenant_id: tour?.tenant_id })
+      .where(tour?.is_test_tenant ? {} : { tenant_id: tour?.tenant_id })
       .orderBy('id', 'asc').first();
     if (!defaultCourse) throw new Error('No courses configured');
     await db('golf_rounds').insert({
