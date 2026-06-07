@@ -423,6 +423,7 @@ function adminRouter(db) {
         mensCourses,
         womensCourses,
         calcTypes: Object.entries(CALC_TYPE_LABELS),
+        isTestTenant: Boolean(req.tenant?.is_test_tenant),
         message: req.query.message || null,
         error: req.query.error || null,
       });
