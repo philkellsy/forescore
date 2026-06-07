@@ -53,10 +53,10 @@ test('stableford leaderboard applies countback last-9/6/3/1 for day ties', async
     ]);
 
     const [scorecardA] = await db('scorecards').insert({
-      tour_id: tour.id, round_number: 2, type: 'individual', user_id: userA.id, status: 'draft',
+      tour_id: tour.id, round_number: 2, type: 'individual', user_id: userA.id, status: 'submitted',
     }).returning('*');
     const [scorecardB] = await db('scorecards').insert({
-      tour_id: tour.id, round_number: 2, type: 'individual', user_id: userB.id, status: 'draft',
+      tour_id: tour.id, round_number: 2, type: 'individual', user_id: userB.id, status: 'submitted',
     }).returning('*');
 
     const rows = [];

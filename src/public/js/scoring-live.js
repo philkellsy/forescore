@@ -309,7 +309,8 @@
 
   // ── Init fetch ────────────────────────────────────────────────────────────
   async function fetchInitFromServer() {
-    const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/init`));
+    const initSuffix = state.sessionMode ? '?session=1' : '';
+    const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/init${initSuffix}`));
     if (!res.ok) {
       if (offlineStore) {
         const cached = await offlineStore.getInit(state.scorecardId);
@@ -355,6 +356,11 @@
         ownerUserId: score.ownerUserId ?? null
       };
     });
+    const passiveScores = (ctx.passivePlayers || []).map((p) => {
+      const score = scoreByCard.get(Number(p.scorecardId)) || {};
+      return { scorecardId: p.scorecardId, stablefordPoints: score.stablefordPoints ?? null };
+    });
+
     return {
       mode: ctx.mode,
       holeNumber: Number(holeNumber),
@@ -364,6 +370,7 @@
         strokeIndexSecondary: hole.strokeIndexSecondary || 0
       },
       entries,
+      passiveScores,
       individualContext: ctx.individualContext || null,
       ambroseContext: null
     };
@@ -372,7 +379,8 @@
   // ── Lean hole fetch (used when ctx is loaded) ─────────────────────────────
   async function fetchHoleLeanFromServer(holeNumber) {
     const hole = Number(holeNumber);
-    const sids = (ctx.scorecardIds || []).join(',');
+    // In session mode use allScorecardIds to fetch passive players' scores too.
+    const sids = (ctx.allScorecardIds || ctx.scorecardIds || []).join(',');
     const start = ctx.startingHole || 1;
     const res = await fetch(tp(`/scoring/api/live/${state.scorecardId}/hole/${hole}?sids=${sids}&start=${start}`));
     if (!res.ok) {
@@ -757,10 +765,23 @@
     const teamDivider = `<div class="two-ball-team-divider" aria-hidden="true">
       <span></span><i class="fa-solid fa-chevron-down"></i><span></span>
     </div>`;
-    entriesContainer.innerHTML = holeData.entries.map((entry, i) => {
+    let html = holeData.entries.map((entry, i) => {
       const card = entryCard(entry);
       return (showTeamDivider && i === 2) ? teamDivider + card : card;
     }).join('');
+
+    if (ctx.passivePlayers && ctx.passivePlayers.length) {
+      const passiveHtml = ctx.passivePlayers.map((p) => {
+        const score = (holeData.passiveScores || []).find((s) => Number(s.scorecardId) === Number(p.scorecardId));
+        const pts = score ? `${score.stablefordPoints != null ? score.stablefordPoints + ' pts' : '—'}` : '—';
+        return `<div class="passive-player-row d-flex justify-content-between align-items-center small text-muted px-1 py-1 border-top">
+          <span>${p.displayName}</span><span>${pts}</span>
+        </div>`;
+      }).join('');
+      html += `<div class="passive-players-section mt-2">${passiveHtml}</div>`;
+    }
+
+    entriesContainer.innerHTML = html;
     bindAdjustmentHandlers();
     bindPickupHandlers();
     bindDriveHandlers();

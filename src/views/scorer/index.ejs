@@ -144,20 +144,48 @@
                 <% } %>
 
                 <% if (scorecard.status !== 'submitted') { %>
-                <div class="d-flex gap-2 flex-wrap align-items-center">
                   <% if (scorecard.round_status === 'open') { %>
-                    <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
-                      <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
-                    </a>
-                    <% if (scorecard.type === 'individual') { %>
-                      <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
-                        <i class="fa-solid fa-users me-1"></i>Group
-                      </a>
+                    <% if (scorecard.type === 'individual' && scorecard.markerInfo) { %>
+                      <% if (scorecard.markerInfo.assigned) { %>
+                        <% if (scorecard.markerInfo.playerBeingMarked) { %>
+                          <p class="small mb-2"><span class="text-muted">Marking:</span> <strong><%= scorecard.markerInfo.playerBeingMarked %></strong></p>
+                        <% } %>
+                        <% if (scorecard.markerInfo.markedBy) { %>
+                          <p class="small mb-3 text-muted">Your marker: <%= scorecard.markerInfo.markedBy %></p>
+                        <% } %>
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
+                          <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/session/${scorecard.round_number}`) %>">
+                            <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Scoring
+                          </a>
+                          <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
+                            <i class="fa-solid fa-users me-1"></i>Group
+                          </a>
+                        </div>
+                      <% } else if (scorecard.markerInfo.selectablePlayers && scorecard.markerInfo.selectablePlayers.length) { %>
+                        <p class="small fw-semibold mb-2">Select your player to mark:</p>
+                        <div class="d-flex gap-2 flex-wrap">
+                          <% scorecard.markerInfo.selectablePlayers.forEach((p) => { %>
+                            <form action="<%= tenantPath('/scoring/select-player') %>" method="post" class="m-0" data-no-loading>
+                              <input type="hidden" name="playerUserId" value="<%= p.userId %>" />
+                              <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                <i class="fa-solid fa-user-plus me-1"></i><%= p.fullName %>
+                              </button>
+                            </form>
+                          <% }) %>
+                        </div>
+                      <% } else { %>
+                        <p class="text-muted small mb-0">Waiting for tee time assignment.</p>
+                      <% } %>
+                    <% } else if (scorecard.type === 'team') { %>
+                      <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
+                          <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                        </a>
+                      </div>
                     <% } %>
                   <% } else { %>
                     <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
                   <% } %>
-                </div>
                 <% } %>
               </div>
             </article>
