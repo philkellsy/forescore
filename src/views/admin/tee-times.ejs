@@ -65,7 +65,7 @@
       </div>
     <% } %>
 
-    <% if (tour.id === 1 && round && round.status === 'open') { %>
+    <% if (isTestTenant && round && round.status === 'open') { %>
       <div class="alert alert-warning py-2 d-flex justify-content-between align-items-center mb-3">
         <span class="small"><i class="fa-solid fa-flask me-1"></i>Test environment</span>
         <div class="d-flex gap-2">

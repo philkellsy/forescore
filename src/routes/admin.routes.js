@@ -2060,6 +2060,7 @@ function adminRouter(db) {
         title: `Tee Times — Round ${roundNumber}`,
         ...data,
         groupSizes,
+        isTestTenant: Boolean(req.tenant?.is_test_tenant),
         message: req.query.message || null,
         error: req.query.error || null,
       });
