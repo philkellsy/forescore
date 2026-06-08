@@ -522,24 +522,46 @@ async function buildConfirmationData(db, scorecard) {
 
   let entryCards;
   if (scorecard.type === 'individual') {
-    // Scope to just the single scorecard being confirmed — not all group members.
-    const [player, roundHcp, tourHcp] = await Promise.all([
-      db('users').where({ id: scorecard.user_id }).select('id', 'first_name', 'last_name').first(),
-      db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first(),
-      db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first(),
+    // Show the marker's own card plus the player they are marking (if assigned).
+    // Order: player being marked first (matching the live scoring view), then marker.
+    const markerId = Number(scorecard.user_id);
+    const playerCard = await db('scorecards')
+      .where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number, marked_by_user_id: markerId, type: 'individual' })
+      .first();
+
+    const pairUserIds = [];
+    const pairScorecardIds = [];
+    if (playerCard) {
+      pairUserIds.push(Number(playerCard.user_id));
+      pairScorecardIds.push(Number(playerCard.id));
+    }
+    pairUserIds.push(markerId);
+    pairScorecardIds.push(Number(scorecard.id));
+
+    const [users, tourHandicaps, roundHandicaps] = await Promise.all([
+      db('users').whereIn('id', pairUserIds).select('id', 'first_name', 'last_name'),
+      db('player_handicaps').where({ tour_id: scorecard.tour_id }).whereIn('user_id', pairUserIds).select('user_id', 'playing_handicap'),
+      db('player_day_handicaps').where({ tour_id: scorecard.tour_id, round_number: scorecard.round_number }).whereIn('user_id', pairUserIds).select('user_id', 'handicap_index'),
     ]);
-    const isHcpOverride = !!roundHcp;
-    const idx = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-    const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isHcpOverride);
-    entryCards = [{
-      type: 'player',
-      scorecardId: Number(scorecard.id),
-      participantId: Number(scorecard.user_id),
-      displayName: toPlayerLabel(player?.first_name, player?.last_name),
-      fullName: `${player?.first_name || ''} ${player?.last_name || ''}`.trim(),
-      playingHandicap,
-      handicapDisplay: formatHandicapDisplay(playingHandicap),
-    }];
+    const userMap = new Map(users.map((u) => [Number(u.id), u]));
+    const tourHcpMap = new Map(tourHandicaps.map((h) => [Number(h.user_id), Number(h.playing_handicap || 0)]));
+    const roundHcpMap = new Map(roundHandicaps.map((h) => [Number(h.user_id), Number(h.handicap_index)]));
+
+    entryCards = await Promise.all(pairUserIds.map(async (uid, i) => {
+      const u = userMap.get(uid);
+      const isOverride = roundHcpMap.has(uid);
+      const idx = isOverride ? roundHcpMap.get(uid) : (tourHcpMap.get(uid) || 0);
+      const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isOverride);
+      return {
+        type: 'player',
+        scorecardId: pairScorecardIds[i],
+        participantId: uid,
+        displayName: toPlayerLabel(u?.first_name, u?.last_name),
+        fullName: `${u?.first_name || ''} ${u?.last_name || ''}`.trim(),
+        playingHandicap,
+        handicapDisplay: formatHandicapDisplay(playingHandicap),
+      };
+    }));
   } else {
     const context = await getAmbroseEntriesForHole(db, scorecard, holeConfig);
     entryCards = context.entries || [];
@@ -579,7 +601,11 @@ async function buildConfirmationData(db, scorecard) {
     };
   });
 
-  const hasMissing = entries.some((entry) => (entry.missingHoles || []).length > 0);
+  // hasMissing only blocks submission for the primary scorecard being confirmed.
+  // The partner's card may have unscored holes without blocking this submission.
+  const hasMissing = entries.some((entry) =>
+    Number(entry.scorecardId) === Number(scorecard.id) && (entry.missingHoles || []).length > 0
+  );
   const holes = [];
   for (let holeNumber = 1; holeNumber <= 18; holeNumber += 1) {
     holes.push({
