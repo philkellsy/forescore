@@ -86,56 +86,6 @@
         </div>
       </section>
 
-      <% if (confirmation.holes && confirmation.holes.length) { %>
-        <section class="card border-0 shadow-sm mb-3">
-          <div class="card-body">
-            <h2 class="h6 mb-2">Hole Scores</h2>
-            <div class="table-responsive">
-              <table class="table table-sm align-middle confirm-score-grid mb-0">
-                <thead>
-                  <tr>
-                    <th scope="col">Hole</th>
-                    <% (confirmation.entries || []).forEach((entry) => { %>
-                      <th scope="col">
-                        <div class="confirm-score-grid-header">
-                          <span class="fw-semibold"><%= entry.displayName %></span>
-                          <span class="text-muted"><%= entry.type === 'team' ? `Net ${entry.netTotalDisplay || Number(entry.netTotalRaw || 0)}` : `${Number(entry.stablefordTotal || 0)} pts` %></span>
-                        </div>
-                      </th>
-                    <% }) %>
-                  </tr>
-                </thead>
-                <tbody>
-                  <% confirmation.holes.forEach((hole) => { %>
-                    <tr>
-                      <th scope="row">
-                        <span class="confirm-hole-pill" style="cursor:default"><%= hole.holeNumber %></span>
-                      </th>
-                      <% hole.cells.forEach((cell) => { %>
-                        <td class="<%= cell.missing ? 'is-missing' : cell.hasConflict ? 'has-conflict' : '' %>">
-                          <div class="confirm-score-cell">
-                            <span class="confirm-score-value"><%= cell.displayScore %></span>
-                            <% if (!cell.missing && confirmation.mode !== 'ambrose' && cell.playerGrossScore != null) { %>
-                              <span class="confirm-score-player<%= cell.hasConflict ? ' is-conflict' : '' %>">Plr: <%= cell.playerGrossScore %></span>
-                            <% } %>
-                            <% if (!cell.missing && confirmation.mode !== 'ambrose' && cell.stablefordPoints !== null) { %>
-                              <span class="confirm-score-meta"><%= Number(cell.stablefordPoints) %> pts</span>
-                            <% } %>
-                            <% if (cell.missing) { %>
-                              <span class="confirm-score-meta"><%= (confirmation.mode !== 'ambrose' && cell.playerGrossScore != null) ? `Plr: ${cell.playerGrossScore}` : 'Missing' %></span>
-                            <% } %>
-                          </div>
-                        </td>
-                      <% }) %>
-                    </tr>
-                  <% }) %>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      <% } %>
-
       <%
         const missingEntries = (confirmation.entries || []).filter((entry) => (entry.missingHoles || []).length > 0);
         const conflictHoles = (confirmation.holes || []).filter((h) => h.cells && h.cells.some((c) => c.hasConflict));
