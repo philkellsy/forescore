@@ -87,8 +87,8 @@ function buildDayBoards(rows, days) {
 }
 
 // Sums only the counting rounds for each player.
-// When bestOf is set, each player's rounds are ranked by score descending and only the
-// top bestOf count — matching the rounds excluded from their total score.
+// When bestOf is set, each player's worst round(s) are dropped; the returned rows include
+// a droppedRounds Set of round numbers excluded from that player's total.
 function buildChampionshipBoard(dayBoards, days, bestOf) {
   const byUser = new Map();
 
@@ -99,6 +99,7 @@ function buildChampionshipBoard(dayBoards, days, bestOf) {
         byUser.set(key, { userId: key, name: row.name, rounds: [] });
       }
       byUser.get(key).rounds.push({
+        roundNumber: day,
         total: Number(row.total || 0),
         countbackLast9: Number(row.countbackLast9 || 0),
         countbackLast6: Number(row.countbackLast6 || 0),
@@ -112,8 +113,10 @@ function buildChampionshipBoard(dayBoards, days, bestOf) {
   for (const { userId, name, rounds } of byUser.values()) {
     const sorted = [...rounds].sort((a, b) => b.total - a.total);
     const counting = bestOf && bestOf < sorted.length ? sorted.slice(0, bestOf) : sorted;
+    const dropped = bestOf && bestOf < sorted.length ? sorted.slice(bestOf) : [];
+    const droppedRounds = new Set(dropped.map((r) => r.roundNumber));
 
-    const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0 };
+    const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0, droppedRounds };
     for (const r of counting) {
       entry.total += r.total;
       entry.countbackLast9 += r.countbackLast9;

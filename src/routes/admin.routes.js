@@ -533,6 +533,7 @@ function adminRouter(db) {
           championship = lb.championship.map((row) => ({
             ...row,
             rounds: Object.fromEntries(roundsThrough.map((rn) => [rn, roundMaps[rn].get(Number(row.userId)) ?? null])),
+            droppedRounds: row.droppedRounds ? [...row.droppedRounds] : [],
           }));
           championshipRounds = roundsThrough;
         }

@@ -170,3 +170,25 @@ test('buildChampionshipBoard bestOf tie-breaking excludes dropped rounds countba
   assert.equal(board[0].countbackLast9, 29); // 15+14, not 15+14+5
   assert.equal(board[1].countbackLast9, 28); // 14+14, not 14+14+5
 });
+
+test('buildChampionshipBoard droppedRounds is empty when bestOf not set', () => {
+  const dayBoards = {
+    1: [{ userId: 1, name: 'Alice', total: 30, countbackLast9: 15, countbackLast6: 10, countbackLast3: 5, countbackLast1: 2, position: 1 }],
+    2: [{ userId: 1, name: 'Alice', total: 28, countbackLast9: 13, countbackLast6:  8, countbackLast3: 4, countbackLast1: 1, position: 1 }],
+  };
+  const board = buildChampionshipBoard(dayBoards, [1, 2], undefined);
+  assert.deepEqual([...board[0].droppedRounds], []);
+});
+
+test('buildChampionshipBoard droppedRounds identifies the worst round', () => {
+  const dayBoards = {
+    1: [{ userId: 1, name: 'Alice', total: 30, countbackLast9: 15, countbackLast6: 10, countbackLast3: 5, countbackLast1: 2, position: 1 }],
+    2: [{ userId: 1, name: 'Alice', total: 28, countbackLast9: 13, countbackLast6:  8, countbackLast3: 4, countbackLast1: 1, position: 1 }],
+    3: [{ userId: 1, name: 'Alice', total: 20, countbackLast9:  9, countbackLast6:  5, countbackLast3: 2, countbackLast1: 1, position: 1 }],
+  };
+  const board = buildChampionshipBoard(dayBoards, [1, 2, 3], 2);
+  // Round 3 (total=20) is the worst and should be dropped
+  assert.ok(board[0].droppedRounds.has(3), 'round 3 should be dropped');
+  assert.ok(!board[0].droppedRounds.has(1), 'round 1 should not be dropped');
+  assert.ok(!board[0].droppedRounds.has(2), 'round 2 should not be dropped');
+});

@@ -287,7 +287,10 @@
                 <td class="fw-semibold text-muted"><%= row.position %></td>
                 <td><%= row.name %></td>
                 <% championshipRounds.forEach((rn) => { %>
-                  <td class="text-end text-muted small"><%= row.rounds[rn] != null ? row.rounds[rn] : '—' %></td>
+                  <% const isDropped = row.droppedRounds && row.droppedRounds.includes(rn); %>
+                  <td class="text-end small <%= isDropped ? 'text-muted' : '' %>">
+                    <% if (isDropped) { %><s><%= row.rounds[rn] != null ? row.rounds[rn] : '—' %></s><% } else { %><%= row.rounds[rn] != null ? row.rounds[rn] : '—' %><% } %>
+                  </td>
                 <% }) %>
                 <td class="text-end fw-semibold"><%= row.total %></td>
               </tr>

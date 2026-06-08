@@ -330,7 +330,7 @@
               <% if (rnList.length) { %>
                 <p class="text-muted small mb-3">
                   <%= rnList.map((rn, i) => `R${i + 1} (${dayLabel(rn)})`).join(', ') %>.
-                  Ties use countback.
+                  Ties use countback.<% if (activeTour && activeTour.leaderboard_best_of_rounds) { %> Best <%= activeTour.leaderboard_best_of_rounds %> of <%= rnList.length %> rounds count — dropped round shown as strikethrough.<% } %>
                 </p>
               <% } %>
               <% if (!championshipTable.length) { %>
@@ -359,11 +359,15 @@
                             }) %>
                           </td>
                           <% rnList.forEach((rn) => { %>
-                            <td>
-                              <% if (publishedByRound[rn]) { %>
-                                <a href="<%= tenantPath(`/leaderboards/tour/${activeTour.id}/scorecards/individual/${row.userId}?round=${rn}`) %>"><%= (row.rounds && row.rounds[rn] != null) ? row.rounds[rn] : 0 %></a>
+                            <% const isDropped = row.droppedRounds && row.droppedRounds.includes(rn); %>
+                            <td class="<%= isDropped ? 'text-muted' : '' %>">
+                              <% const roundScore = (row.rounds && row.rounds[rn] != null) ? row.rounds[rn] : 0; %>
+                              <% if (isDropped) { %>
+                                <s><%= roundScore %></s>
+                              <% } else if (publishedByRound[rn]) { %>
+                                <a href="<%= tenantPath(`/leaderboards/tour/${activeTour.id}/scorecards/individual/${row.userId}?round=${rn}`) %>"><%= roundScore %></a>
                               <% } else { %>
-                                <%= (row.rounds && row.rounds[rn] != null) ? row.rounds[rn] : 0 %>
+                                <%= roundScore %>
                               <% } %>
                             </td>
                           <% }) %>

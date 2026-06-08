@@ -152,7 +152,8 @@ function buildChampionshipTable(stablefordBoards, stablefordRoundNumbers) {
       cb6: Number(row.countbackLast6 || 0),
       cb3: Number(row.countbackLast3 || 0),
       cb1: Number(row.countbackLast1 || 0),
-      countbackUsed: Number(totalCount.get(total) || 0) > 1
+      countbackUsed: Number(totalCount.get(total) || 0) > 1,
+      droppedRounds: row.droppedRounds ? [...row.droppedRounds] : [],
     };
   });
 }
