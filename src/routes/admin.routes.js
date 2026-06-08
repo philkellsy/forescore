@@ -521,6 +521,7 @@ function adminRouter(db) {
         const lb = await calculateStablefordLeaderboards(db, tourId, {
           roundNumbers: roundsThrough.length ? roundsThrough : [roundNumber],
           bestOf: tour.leaderboard_best_of_rounds || null,
+          lastRoundRequired: tour.leaderboard_last_round_required || false,
         });
         dayBoard = (lb.byDay[roundNumber] || []).map((r, i) => ({ ...r, position: i + 1 }));
 

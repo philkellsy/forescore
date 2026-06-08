@@ -21,7 +21,7 @@ async function buildLeaderboards(db, tourId, options = {}) {
 
   const [ambrose, stableford, eclectic, skins] = await Promise.all([
     calculateAmbroseLeaderboard(db, tourId),
-    calculateStablefordLeaderboards(db, tourId, { roundNumbers, bestOf: options.bestOf }),
+    calculateStablefordLeaderboards(db, tourId, { roundNumbers, bestOf: options.bestOf, lastRoundRequired: options.lastRoundRequired }),
     calculateEclecticLeaderboard(db, tourId, roundNumbers),
     calculateEventSkinsForDays(db, tourId, finalizedRoundsForSkins, {
       initialCarryInSkins: options.initialCarryInSkins || 0

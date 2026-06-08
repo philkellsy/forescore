@@ -86,10 +86,34 @@ function buildDayBoards(rows, days) {
   return boards;
 }
 
+// Returns { counting, dropped } for a player's rounds.
+// When lastRoundRequired is true, the round with the highest round number is protected from
+// being dropped — only other rounds are candidates. The last round is identified from the
+// rounds array itself (max roundNumber), so it works correctly for any visible subset.
+function selectCountingRounds(rounds, bestOf, lastRoundRequired) {
+  if (!bestOf || bestOf >= rounds.length) {
+    return { counting: rounds, dropped: [] };
+  }
+  if (lastRoundRequired) {
+    const maxRoundNumber = Math.max(...rounds.map((r) => r.roundNumber));
+    const lastRound = rounds.find((r) => r.roundNumber === maxRoundNumber);
+    const others = rounds.filter((r) => r.roundNumber !== maxRoundNumber);
+    const sortedOthers = [...others].sort((a, b) => b.total - a.total);
+    const slotsForOthers = lastRound ? bestOf - 1 : bestOf;
+    return {
+      counting: lastRound ? [...sortedOthers.slice(0, slotsForOthers), lastRound] : sortedOthers.slice(0, slotsForOthers),
+      dropped: sortedOthers.slice(slotsForOthers),
+    };
+  }
+  const sorted = [...rounds].sort((a, b) => b.total - a.total);
+  return { counting: sorted.slice(0, bestOf), dropped: sorted.slice(bestOf) };
+}
+
 // Sums only the counting rounds for each player.
 // When bestOf is set, each player's worst round(s) are dropped; the returned rows include
 // a droppedRounds Set of round numbers excluded from that player's total.
-function buildChampionshipBoard(dayBoards, days, bestOf) {
+// When lastRoundRequired is true, the highest round number is protected from being dropped.
+function buildChampionshipBoard(dayBoards, days, bestOf, lastRoundRequired) {
   const byUser = new Map();
 
   for (const day of days) {
@@ -111,9 +135,7 @@ function buildChampionshipBoard(dayBoards, days, bestOf) {
 
   const result = [];
   for (const { userId, name, rounds } of byUser.values()) {
-    const sorted = [...rounds].sort((a, b) => b.total - a.total);
-    const counting = bestOf && bestOf < sorted.length ? sorted.slice(0, bestOf) : sorted;
-    const dropped = bestOf && bestOf < sorted.length ? sorted.slice(bestOf) : [];
+    const { counting, dropped } = selectCountingRounds(rounds, bestOf, lastRoundRequired);
     const droppedRounds = new Set(dropped.map((r) => r.roundNumber));
 
     const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0, droppedRounds };
@@ -130,13 +152,14 @@ function buildChampionshipBoard(dayBoards, days, bestOf) {
   return withPosition(result.sort(compareStablefordRows));
 }
 
-// options.roundNumbers — array of round numbers to include; required
-// options.bestOf       — if set, each player's championship total uses only their best N rounds
-async function calculateStablefordLeaderboards(db, tourId, { roundNumbers, bestOf } = {}) {
+// options.roundNumbers        — array of round numbers to include; required
+// options.bestOf              — if set, each player's championship total uses only their best N rounds
+// options.lastRoundRequired   — if true, the highest round number is protected from being dropped
+async function calculateStablefordLeaderboards(db, tourId, { roundNumbers, bestOf, lastRoundRequired } = {}) {
   const activeRounds = roundNumbers && roundNumbers.length ? roundNumbers : [];
   const rows = await getStablefordRows(db, tourId, activeRounds);
   const byDay = buildDayBoards(rows, activeRounds);
-  const championship = buildChampionshipBoard(byDay, activeRounds, bestOf);
+  const championship = buildChampionshipBoard(byDay, activeRounds, bestOf, lastRoundRequired);
   return { byDay, championship };
 }
 
@@ -145,4 +168,5 @@ module.exports = {
   // Exported for unit tests
   countbackMetrics,
   buildChampionshipBoard,
+  selectCountingRounds,
 };

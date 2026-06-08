@@ -8,6 +8,7 @@ const {
   calculateStablefordLeaderboards,
   countbackMetrics,
   buildChampionshipBoard,
+  selectCountingRounds,
 } = require('../../src/services/scoring/stableford-leaderboard.service');
 
 async function withDb(run) {
@@ -191,4 +192,61 @@ test('buildChampionshipBoard droppedRounds identifies the worst round', () => {
   assert.ok(board[0].droppedRounds.has(3), 'round 3 should be dropped');
   assert.ok(!board[0].droppedRounds.has(1), 'round 1 should not be dropped');
   assert.ok(!board[0].droppedRounds.has(2), 'round 2 should not be dropped');
+});
+
+// ── selectCountingRounds ─────────────────────────────────────────────────────
+
+const makeRound = (roundNumber, total) => ({ roundNumber, total, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0 });
+
+test('selectCountingRounds — no bestOf: all rounds count, nothing dropped', () => {
+  const rounds = [makeRound(1, 30), makeRound(2, 28), makeRound(3, 20)];
+  const { counting, dropped } = selectCountingRounds(rounds, null, false);
+  assert.equal(counting.length, 3);
+  assert.equal(dropped.length, 0);
+});
+
+test('selectCountingRounds — bestOf without lastRoundRequired: drops worst round', () => {
+  // rounds 1=20, 2=30, 3=25 — bestOf=2 — round 1 (worst) should be dropped
+  const rounds = [makeRound(1, 20), makeRound(2, 30), makeRound(3, 25)];
+  const { counting, dropped } = selectCountingRounds(rounds, 2, false);
+  assert.equal(counting.length, 2);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0].roundNumber, 1);
+});
+
+test('selectCountingRounds — lastRoundRequired: last round protected even if it is worst', () => {
+  // rounds 1=30, 2=28, 3=10 — bestOf=2, lastRoundRequired — round 3 (last) must count
+  // so round 2 (second worst among non-last) is dropped, not round 3
+  const rounds = [makeRound(1, 30), makeRound(2, 28), makeRound(3, 10)];
+  const { counting, dropped } = selectCountingRounds(rounds, 2, true);
+  assert.equal(counting.length, 2);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0].roundNumber, 2, 'round 2 (worst of non-last) should be dropped, not round 3');
+  const countingNums = counting.map((r) => r.roundNumber).sort();
+  assert.deepEqual(countingNums, [1, 3], 'rounds 1 and 3 should count');
+});
+
+test('selectCountingRounds — lastRoundRequired when last round is best: drops worst non-last round', () => {
+  // rounds 1=20, 2=25, 3=30 — bestOf=2, lastRoundRequired — round 3 is best so would count anyway
+  // but round 1 (worst non-last) should be dropped
+  const rounds = [makeRound(1, 20), makeRound(2, 25), makeRound(3, 30)];
+  const { counting, dropped } = selectCountingRounds(rounds, 2, true);
+  assert.equal(dropped[0].roundNumber, 1, 'round 1 (worst non-last) should be dropped');
+  const countingNums = counting.map((r) => r.roundNumber).sort();
+  assert.deepEqual(countingNums, [2, 3]);
+});
+
+test('buildChampionshipBoard — lastRoundRequired: last round protected in drop selection', () => {
+  // 3 rounds, bestOf=2, lastRoundRequired — round 3 total=10 but must count
+  // so round 2 (20) should be dropped rather than round 3
+  const dayBoards = {
+    1: [{ userId: 1, name: 'Alice', total: 30, countbackLast9: 15, countbackLast6: 10, countbackLast3: 5, countbackLast1: 2, position: 1 }],
+    2: [{ userId: 1, name: 'Alice', total: 20, countbackLast9:  9, countbackLast6:  5, countbackLast3: 2, countbackLast1: 1, position: 1 }],
+    3: [{ userId: 1, name: 'Alice', total: 10, countbackLast9:  4, countbackLast6:  2, countbackLast3: 1, countbackLast1: 0, position: 1 }],
+  };
+  const board = buildChampionshipBoard(dayBoards, [1, 2, 3], 2, true);
+  // With lastRoundRequired: counts rounds 1+3=40, drops round 2
+  assert.equal(board[0].total, 40);
+  assert.ok(board[0].droppedRounds.has(2), 'round 2 should be dropped (worst non-last)');
+  assert.ok(!board[0].droppedRounds.has(3), 'round 3 (last) must not be dropped');
 });

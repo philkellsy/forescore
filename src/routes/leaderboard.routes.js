@@ -3,6 +3,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { buildLeaderboards } = require('../services/leaderboard/leaderboard.service');
+const { selectCountingRounds } = require('../services/scoring/stableford-leaderboard.service');
 const { calculateEventSkinsForDays } = require('../services/scoring/skins.service');
 const { calculateVirtualTeamResults } = require('../services/scoring/virtual-teams.service');
 const { calculateTwoBallLeaderboard } = require('../services/scoring/two-ball.service');
@@ -296,7 +297,7 @@ function buildSkinsDetail(holes, visibleRoundNumbers, stakePerPlayerPerHole) {
     }));
 }
 
-function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRounds, bestOf) {
+function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRounds, bestOf, lastRoundRequired) {
   const byUser = new Map();
   (visibleStablefordRounds || []).forEach((roundNumber) => {
     (stablefordByDay?.[roundNumber] || []).forEach((row) => {
@@ -315,9 +316,7 @@ function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRoun
 
   return [...byUser.values()]
     .map(({ userId, name, rounds }) => {
-      const sorted = [...rounds].sort((a, b) => b.total - a.total);
-      const counting = bestOf && bestOf < sorted.length ? sorted.slice(0, bestOf) : sorted;
-      const dropped = bestOf && bestOf < sorted.length ? sorted.slice(bestOf) : [];
+      const { counting, dropped } = selectCountingRounds(rounds, bestOf, lastRoundRequired);
       const droppedRounds = new Set(dropped.map((r) => r.roundNumber));
       const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0, droppedRounds };
       for (const r of counting) {
@@ -890,12 +889,13 @@ function leaderboardRouter(db) {
         finalizedRoundsForSkins: finalizedRoundNumbers,
         roundNumbers: stablefordRoundNumbers,
         bestOf: tour.leaderboard_best_of_rounds || null,
+        lastRoundRequired: tour.leaderboard_last_round_required || false,
         initialCarryInSkins: tour.skins_carry_in_skins || 0,
         leaderboardDirtyAt: tour.leaderboard_dirty_at || null,
       });
 
       const championship = showAggregate
-        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, tour.leaderboard_best_of_rounds || null)
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, tour.leaderboard_best_of_rounds || null, tour.leaderboard_last_round_required || false)
         : [];
       const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
       const visibleBoards = buildVisibleBoards(
@@ -1021,12 +1021,13 @@ function leaderboardRouter(db) {
         finalizedRoundsForSkins: finalizedRoundNumbers,
         roundNumbers: stablefordRoundNumbers,
         bestOf: active.leaderboard_best_of_rounds || null,
+        lastRoundRequired: active.leaderboard_last_round_required || false,
         initialCarryInSkins: active.skins_carry_in_skins || 0,
         leaderboardDirtyAt: active.leaderboard_dirty_at || null,
       });
 
       const championship = showAggregate
-        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, active.leaderboard_best_of_rounds || null)
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, active.leaderboard_best_of_rounds || null, active.leaderboard_last_round_required || false)
         : [];
       const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
       const visibleBoards = buildVisibleBoards(
