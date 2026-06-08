@@ -798,10 +798,23 @@ function leaderboardRouter(db) {
         return res.redirect(tp(`/leaderboards/tour/${tourId}?error=No%20published%20rounds`));
       }
 
-      const modelsRaw = await Promise.all(
-        publishedStablefordRounds.map((rn) => buildIndividualScorecardModel(db, tour, rn, userId))
-      );
-      const models = modelsRaw.filter(Boolean);
+      const [modelsRaw, roundMetaRows] = await Promise.all([
+        Promise.all(publishedStablefordRounds.map((rn) => buildIndividualScorecardModel(db, tour, rn, userId))),
+        db('golf_rounds as gr')
+          .leftJoin('courses as c', 'c.id', 'gr.course_id')
+          .where({ 'gr.tour_id': tourId })
+          .whereIn('gr.round_number', publishedStablefordRounds)
+          .select('gr.round_number', 'gr.tour_date', 'c.name as course_name'),
+      ]);
+      const roundMeta = {};
+      for (const r of roundMetaRows) {
+        roundMeta[r.round_number] = { courseName: r.course_name, tourDate: r.tour_date };
+      }
+
+      const models = modelsRaw.filter(Boolean).map((m) => {
+        const meta = roundMeta[m.roundNumber] || {};
+        return { ...m, courseName: meta.courseName || null, tourDate: meta.tourDate || null };
+      });
       if (!models.length) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=No%20scorecards%20found`));
 
       const playerName = models[0].title;

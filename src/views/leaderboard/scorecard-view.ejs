@@ -25,6 +25,13 @@
 
       <div class="d-grid gap-3">
         <% (models || []).forEach((model) => { %>
+          <% if (model.courseName || model.tourDate) { %>
+            <div class="text-muted small">
+              <% if (model.dayLabel) { %><strong class="text-dark"><%= model.dayLabel %></strong><% } %>
+              <% if (model.courseName) { %><% if (model.dayLabel) { %> &middot; <% } %><%= model.courseName %><% } %>
+              <% if (model.tourDate) { %> &middot; <%= new Date(model.tourDate).toLocaleDateString('en-AU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }) %><% } %>
+            </div>
+          <% } %>
           <%- include('../partials/scorecard-viewer', { model }) %>
         <% }) %>
       </div>
