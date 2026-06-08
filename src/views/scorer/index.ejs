@@ -146,37 +146,44 @@
                   </div>
                 <% } %>
 
-                <% if (scorecard.status !== 'submitted') { %>
-                  <% if (scorecard.round_status === 'open') { %>
-                    <% if (scorecard.type === 'individual' && scorecard.markerInfo) { %>
-                      <% if (scorecard.markerInfo.assigned) { %>
-                        <% if (scorecard.markerInfo.playerBeingMarked) { %>
-                          <p class="small mb-2"><span class="text-muted">Marking:</span> <strong><%= scorecard.markerInfo.playerBeingMarked %></strong></p>
-                        <% } %>
-                        <% if (scorecard.markerInfo.markedBy) { %>
-                          <p class="small mb-3 text-muted">Your marker: <%= scorecard.markerInfo.markedBy %></p>
-                        <% } %>
-                        <div class="d-flex gap-2 flex-wrap align-items-center">
-                          <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/session/${scorecard.round_number}`) %>">
-                            <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Scoring
-                          </a>
-                          <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
-                            <i class="fa-solid fa-users me-1"></i>Group
-                          </a>
-                        </div>
-                      <% } else { %>
-                        <p class="text-muted small mb-0">Waiting for tee time assignment.</p>
+                <% if (scorecard.status === 'submitted') { %>
+                  <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <span class="badge text-bg-secondary">Submitted</span>
+                    <% if (scorecard.type === 'individual') { %>
+                      <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
+                        <i class="fa-solid fa-users me-1"></i>Group
+                      </a>
+                    <% } %>
+                  </div>
+                <% } else if (scorecard.round_status === 'open') { %>
+                  <% if (scorecard.type === 'individual' && scorecard.markerInfo) { %>
+                    <% if (scorecard.markerInfo.assigned) { %>
+                      <% if (scorecard.markerInfo.playerBeingMarked) { %>
+                        <p class="small mb-2"><span class="text-muted">Marking:</span> <strong><%= scorecard.markerInfo.playerBeingMarked %></strong></p>
                       <% } %>
-                    <% } else if (scorecard.type === 'team') { %>
+                      <% if (scorecard.markerInfo.markedBy) { %>
+                        <p class="small mb-3 text-muted">Your marker: <%= scorecard.markerInfo.markedBy %></p>
+                      <% } %>
                       <div class="d-flex gap-2 flex-wrap align-items-center">
-                        <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
-                          <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                        <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/session/${scorecard.round_number}`) %>">
+                          <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Scoring
+                        </a>
+                        <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
+                          <i class="fa-solid fa-users me-1"></i>Group
                         </a>
                       </div>
+                    <% } else { %>
+                      <p class="text-muted small mb-0">Waiting for tee time assignment.</p>
                     <% } %>
-                  <% } else { %>
-                    <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
+                  <% } else if (scorecard.type === 'team') { %>
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                      <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/live/${scorecard.id}`) %>">
+                        <i class="fa-solid fa-mobile-screen-button me-1"></i>Open Live Scorecard
+                      </a>
+                    </div>
                   <% } %>
+                <% } else { %>
+                  <p class="text-danger small fw-semibold mb-0">Scoring not yet open</p>
                 <% } %>
               </div>
             </article>
