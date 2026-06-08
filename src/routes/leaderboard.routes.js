@@ -28,7 +28,7 @@ async function recalculateSkins(db, tour) {
   });
 }
 
-async function getNoveltyResults(db, tourId, publishedRoundNumbers) {
+async function getNoveltyResults(db, tourId, publishedRoundNumbers, tour = null) {
   if (!publishedRoundNumbers.length) return [];
   const events = await db('novelty_events')
     .whereIn('round_number', publishedRoundNumbers)
@@ -46,6 +46,11 @@ async function getNoveltyResults(db, tourId, publishedRoundNumbers) {
     : [];
   const winnerById = new Map(winnerRows.map((u) => [u.id, `${u.first_name || ''} ${u.last_name || ''}`.trim()]));
 
+  const prizeByType = tour ? {
+    'NTP': Number(tour.prize_ntp_amount || 0) || null,
+    'Long Drive': Number(tour.prize_long_drive_amount || 0) || null,
+  } : {};
+
   return events.map((ne) => {
     const result = resultByEventId.get(ne.id) || null;
     return {
@@ -54,6 +59,7 @@ async function getNoveltyResults(db, tourId, publishedRoundNumbers) {
       holeNumber: ne.hole_number,
       noveltyType: ne.novelty_type,
       label: ne.label,
+      prizeAmount: prizeByType[ne.novelty_type] || null,
       result: result ? {
         isNoWinner: Boolean(result.is_no_winner),
         winnerName: result.winner_user_id ? (winnerById.get(result.winner_user_id) || null) : null,
@@ -931,7 +937,7 @@ function leaderboardRouter(db) {
       const championshipTable = buildChampionshipTable(visibleBoards.stableford, stablefordRoundNumbers);
 
       const playerMetaById = await getPlayerMetaByUserIds(db, tour.id, championshipTable.map((row) => Number(row.userId)));
-      const noveltyResults = await getNoveltyResults(db, tour.id, effectivePublished);
+      const noveltyResults = await getNoveltyResults(db, tour.id, effectivePublished, tour);
 
       const dailyPrizes = Array.isArray(tour.daily_prizes)
         ? tour.daily_prizes
@@ -1063,7 +1069,7 @@ function leaderboardRouter(db) {
       const championshipTable = buildChampionshipTable(visibleBoards.stableford, stablefordRoundNumbers);
 
       const playerMetaById = await getPlayerMetaByUserIds(db, active.id, championshipTable.map((row) => Number(row.userId)));
-      const noveltyResults = await getNoveltyResults(db, active.id, effectivePublished);
+      const noveltyResults = await getNoveltyResults(db, active.id, effectivePublished, active);
 
       const dailyPrizes = Array.isArray(active.daily_prizes)
         ? active.daily_prizes
