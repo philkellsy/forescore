@@ -514,7 +514,30 @@
       return entry.grossScore || 0;
     })();
     const holePar = Number(currentPar || 0);
-    const stableford = entry.stableford === null || entry.stableford === undefined ? '-' : entry.stableford;
+
+    // On player path, stableford + totals reflect the player's own gross, not the marker's.
+    const effectiveStableford = isPlayerPath && gross > 0
+      ? stablefordForGross(gross, currentPar, currentSiPrimary, currentSiSecondary, entry.playingHandicap)
+      : (isPlayerPath ? null : entry.stableford);
+    const stableford = effectiveStableford === null || effectiveStableford === undefined ? '-' : effectiveStableford;
+
+    const effectiveTotal = (() => {
+      if (!isPlayerPath) return Number(entry.stablefordTotal || 0);
+      const serverHoleStab = entry.stableford != null ? Number(entry.stableford) : 0;
+      const playerHoleStab = effectiveStableford != null ? effectiveStableford : 0;
+      return Number(entry.stablefordTotal || 0) - serverHoleStab + playerHoleStab;
+    })();
+    const effectiveRelative = (() => {
+      if (!isPlayerPath) return Number(entry.stablefordRelative || 0);
+      const serverHoleStab = entry.stableford != null ? Number(entry.stableford) : 0;
+      const playerHoleStab = effectiveStableford != null ? effectiveStableford : 0;
+      const stabDelta = playerHoleStab - serverHoleStab;
+      // When the server hasn't scored this hole yet, adding a player score changes holesPlayed by +1.
+      const holesPlayedDelta = entry.stableford == null && effectiveStableford != null ? 1
+        : entry.stableford != null && effectiveStableford == null ? -1 : 0;
+      return Number(entry.stablefordRelative || 0) + stabDelta - (holesPlayedDelta * 2);
+    })();
+
     const hasScorecard = Number.isFinite(Number(entry.scorecardId));
     const shotDots = (hcp) => {
       const n = strokesForHole(hcp, currentSiPrimary, currentSiSecondary);
@@ -628,7 +651,7 @@
           <div class="card-body py-2">
             <div class="d-flex justify-content-between align-items-center mb-2">
               <h2 class="h6 mb-0 individual-entry-title flex-grow-1">${label}</h2>
-              <span class="fw-bold entry-rel ${upDnClass(entry.stablefordRelative)}">${formatUpDn(entry.stablefordRelative)}</span>
+              <span class="fw-bold entry-rel ${upDnClass(effectiveRelative)}">${formatUpDn(effectiveRelative)}</span>
             </div>
             <div class="d-flex align-items-center justify-content-between gap-2">
               <div class="score-adjuster" data-scorecard-id="${entry.scorecardId}">
@@ -644,7 +667,7 @@
                 </div>
                 <div>
                   <div class="entry-metrics-label">Total</div>
-                  <div class="entry-metrics-value entry-total text-dark">${Number(entry.stablefordTotal || 0)}</div>
+                  <div class="entry-metrics-value entry-total text-dark">${effectiveTotal}</div>
                 </div>
               </div>
             </div>
