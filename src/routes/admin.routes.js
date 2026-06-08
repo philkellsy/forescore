@@ -13,6 +13,7 @@ const { calculateStablefordLeaderboards } = require('../services/scoring/stablef
 const { calculateEventSkinsForDays } = require('../services/scoring/skins.service');
 const { calculateVirtualTeamResults } = require('../services/scoring/virtual-teams.service');
 const { dayLabel } = require('../services/events/day-label.service');
+const { markLeaderboardDirty } = require('../services/leaderboard/dirty.service');
 const virtualTeamsRepo = require('../db/repositories/virtual-teams');
 const { sendWelcomeEmail } = require('../services/email/mailer');
 
@@ -944,7 +945,17 @@ function adminRouter(db) {
       }
 
       const coursePar = holes.reduce((s, h) => s + Number(h.par || 0), 0);
-      const scorecards = await db('scorecards').where({ tour_id: tourId, round_number: roundNumber, type: 'individual' }).whereNotNull('user_id');
+      const allScorecards = await db('scorecards').where({ tour_id: tourId, round_number: roundNumber, type: 'individual' }).whereNotNull('user_id');
+
+      // Skip cards that already have any holes scored
+      const scoredIds = new Set(
+        (await db('scorecard_holes')
+          .whereIn('scorecard_id', allScorecards.map((s) => s.id))
+          .distinct('scorecard_id')
+          .select('scorecard_id'))
+          .map((r) => Number(r.scorecard_id))
+      );
+      const scorecards = allScorecards.filter((s) => !scoredIds.has(Number(s.id)));
 
       const tourHandicaps = await db('player_handicaps').where({ tour_id: tourId });
       const tourHcpMap = new Map(tourHandicaps.map((h) => [Number(h.user_id), Number(h.playing_handicap)]));
@@ -975,16 +986,21 @@ function adminRouter(db) {
           await db('scorecard_holes')
             .insert({ scorecard_id: sc.id, hole_number: hole.hole_number, gross_score: grossScore, stableford_points: stablefordPoints, version: 1 })
             .onConflict(['scorecard_id', 'hole_number'])
-            .merge({ gross_score: grossScore, stableford_points: stablefordPoints, version: db.raw('scorecard_holes.version + 1') });
+            .ignore();
         }
 
         await db('scorecards').where({ id: sc.id }).update({ status: 'draft', updated_at: db.fn.now() });
       }
 
+      const skipped = allScorecards.length - scorecards.length;
+      const msg = scorecards.length
+        ? `Scores+seeded+for+${scorecards.length}+player(s)${skipped ? `+(${skipped}+already+had+scores)` : ''}`
+        : `All+${skipped}+player(s)+already+have+scores`;
+
       const returnTo = req.body.returnTo === 'round-config'
         ? res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)
         : `${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}`;
-      return res.redirect(`${returnTo}?message=Scores+seeded+for+${scorecards.length}+players`);
+      return res.redirect(`${returnTo}?message=${msg}`);
     } catch (err) { return next(err); }
   });
 
@@ -1004,6 +1020,57 @@ function adminRouter(db) {
         ? res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)
         : `${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}`;
       return res.redirect(`${returnTo}?message=${count}+scorecard(s)+unsubmitted`);
+    } catch (err) { return next(err); }
+  });
+
+  router.post('/tours/:tourId/rounds/:roundNumber/submit-all-scores', tourGuard, async (req, res, next) => {
+    try {
+      const tourId = parseInt(req.params.tourId, 10);
+      if (!req.tenant?.is_test_tenant) return res.status(403).send('Not available');
+      const roundNumber = parseInt(req.params.roundNumber, 10);
+
+      const returnTo = req.body.returnTo === 'round-config'
+        ? res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)
+        : `${res.locals.tenantPath(`/admin/tours/${tourId}/tee-times`)}?round=${roundNumber}`;
+
+      const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
+      if (!round || round.status !== 'open') {
+        return res.redirect(`${returnTo}?error=Round+must+be+open+to+submit+scores`);
+      }
+
+      const pending = await db('scorecards')
+        .where({ tour_id: tourId, round_number: roundNumber })
+        .whereNot({ status: 'submitted' });
+
+      if (!pending.length) {
+        return res.redirect(`${returnTo}?message=All+scorecards+already+submitted`);
+      }
+
+      // Count holes per pending card — block if any have incomplete scores
+      const course = await db('courses').where({ id: round.course_id }).first();
+      const holeCount = course
+        ? Number((await db('holes').where({ course_id: course.id }).count('id as n').first()).n)
+        : 18;
+
+      const holeCounts = await db('scorecard_holes')
+        .whereIn('scorecard_id', pending.map((s) => s.id))
+        .groupBy('scorecard_id')
+        .select('scorecard_id')
+        .count('hole_number as n');
+      const holeCountMap = new Map(holeCounts.map((r) => [Number(r.scorecard_id), Number(r.n)]));
+
+      const unscored = pending.filter((s) => (holeCountMap.get(Number(s.id)) || 0) < holeCount);
+      if (unscored.length) {
+        return res.redirect(`${returnTo}?error=${encodeURIComponent(`${unscored.length} scorecard(s) have incomplete scores — seed scores first`)}`);
+      }
+
+      const count = await db('scorecards')
+        .whereIn('id', pending.map((s) => s.id))
+        .update({ status: 'submitted', updated_at: db.fn.now() });
+
+      await markLeaderboardDirty(db, tourId);
+
+      return res.redirect(`${returnTo}?message=${count}+scorecard(s)+submitted`);
     } catch (err) { return next(err); }
   });
 

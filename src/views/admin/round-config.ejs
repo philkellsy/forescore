@@ -305,9 +305,14 @@
           <button class="btn btn-sm btn-outline-warning">Unsubmit all</button>
         </form>
         <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/seed-scores`) %>" method="post"
-              onsubmit="return confirm('Seed random scores for all players in this round? Existing scores will be overwritten.')">
+              onsubmit="return confirm('Seed random scores for players with no scores yet?')">
           <input type="hidden" name="returnTo" value="round-config" />
           <button class="btn btn-sm btn-warning">Seed scores</button>
+        </form>
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/submit-all-scores`) %>" method="post"
+              onsubmit="return confirm('Submit all unsubmitted scorecards for this round?')">
+          <input type="hidden" name="returnTo" value="round-config" />
+          <button class="btn btn-sm btn-warning">Submit all</button>
         </form>
       </div>
     </div>
