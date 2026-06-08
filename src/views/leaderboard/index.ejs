@@ -303,7 +303,7 @@
                   <% activeDayView.noveltyEvents.forEach((ne) => { %>
                     <tr>
                       <td><span class="badge text-bg-secondary me-1"><%= ne.noveltyType %></span><%= ne.label %></td>
-                      <td><%= ne.holeNumber %></td>
+                      <td><%= ne.holeNumber || '—' %></td>
                       <td><% if (ne.prizeAmount) { %><span class="text-success fw-semibold">$<%= ne.prizeAmount %></span><% } else { %><span class="text-muted">—</span><% } %></td>
                       <td>
                         <% if (!ne.result) { %>

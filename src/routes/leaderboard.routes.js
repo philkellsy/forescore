@@ -33,7 +33,7 @@ async function getNoveltyResults(db, tourId, publishedRoundNumbers, tour = null)
   const events = await db('novelty_events')
     .whereIn('round_number', publishedRoundNumbers)
     .where({ tour_id: tourId })
-    .orderBy(['round_number', 'hole_number']);
+    .orderBy(['round_number', 'novelty_type', 'hole_number']);
   if (!events.length) return [];
 
   const results = await db('novelty_results')
@@ -53,13 +53,16 @@ async function getNoveltyResults(db, tourId, publishedRoundNumbers, tour = null)
 
   return events.map((ne) => {
     const result = resultByEventId.get(ne.id) || null;
+    const prizeAmount = ne.novelty_type === 'Other'
+      ? (Number(ne.prize_amount || 0) || null)
+      : (prizeByType[ne.novelty_type] || null);
     return {
       id: ne.id,
       roundNumber: ne.round_number,
       holeNumber: ne.hole_number,
       noveltyType: ne.novelty_type,
       label: ne.label,
-      prizeAmount: prizeByType[ne.novelty_type] || null,
+      prizeAmount,
       result: result ? {
         isNoWinner: Boolean(result.is_no_winner),
         winnerName: result.winner_user_id ? (winnerById.get(result.winner_user_id) || null) : null,

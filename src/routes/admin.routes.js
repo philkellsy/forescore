@@ -23,7 +23,7 @@ function courseWhere(tenant, extra = {}) {
   return { tenant_id: tenant?.id, ...extra };
 }
 
-const NOVELTY_TYPES = ['NTP', 'Long Drive'];
+const NOVELTY_TYPES = ['NTP', 'Long Drive', 'Other'];
 
 const GOLF_API_BASE = 'https://api.golfcourseapi.com/v1';
 
@@ -902,22 +902,29 @@ function adminRouter(db) {
       if (!tour) return res.status(404).send('Tour not found');
 
       const round = await db('golf_rounds').where({ tour_id: tourId, round_number: roundNumber }).first();
-      if (!round || !round.course_id) {
-        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Round+must+have+a+course+before+adding+novelty+events`);
+      if (!round) {
+        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Round+not+found`);
       }
 
-      const holeNumber = parseInt(req.body.holeNumber, 10);
       const noveltyType = String(req.body.noveltyType || '');
       const label = String(req.body.label || '').trim() || noveltyType;
 
-      if (!holeNumber || holeNumber < 1 || holeNumber > 18) {
-        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Invalid+hole+number`);
-      }
       if (!NOVELTY_TYPES.includes(noveltyType)) {
         return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Invalid+novelty+type`);
       }
 
-      await createNoveltyEvent(db, { tour_id: tourId, round_number: roundNumber, course_id: round.course_id, hole_number: holeNumber, novelty_type: noveltyType, label });
+      const isOther = noveltyType === 'Other';
+      const holeNumber = isOther ? null : parseInt(req.body.holeNumber, 10);
+      const prizeAmount = isOther ? (parseInt(req.body.prizeAmount, 10) || null) : null;
+
+      if (!isOther && (!holeNumber || holeNumber < 1 || holeNumber > 18)) {
+        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Invalid+hole+number`);
+      }
+      if (!isOther && !round.course_id) {
+        return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?error=Round+must+have+a+course+before+adding+NTP+or+Long+Drive+events`);
+      }
+
+      await createNoveltyEvent(db, { tour_id: tourId, round_number: roundNumber, course_id: isOther ? null : round.course_id, hole_number: holeNumber, novelty_type: noveltyType, label, prize_amount: prizeAmount });
       return res.redirect(`${res.locals.tenantPath(`/admin/tours/${tourId}/rounds/${roundNumber}`)}?message=Novelty+event+added`);
     } catch (err) { return next(err); }
   });

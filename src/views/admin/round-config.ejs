@@ -226,7 +226,8 @@
                 <div class="small">
                   <span class="badge text-bg-secondary me-2"><%= ne.novelty_type %></span>
                   <strong><%= ne.label %></strong>
-                  <span class="text-muted ms-2">Hole <%= ne.hole_number %></span>
+                  <% if (ne.hole_number) { %><span class="text-muted ms-2">Hole <%= ne.hole_number %></span><% } %>
+                  <% if (ne.prize_amount) { %><span class="text-success ms-2">$<%= ne.prize_amount %></span><% } %>
                 </div>
                 <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/novelties/${ne.id}/delete`) %>" method="post">
                   <button class="btn btn-sm btn-outline-danger border-0 py-0 px-1" title="Remove">
@@ -239,19 +240,24 @@
         <% } else { %>
           <p class="text-muted small mb-3">No novelty events added yet.</p>
         <% } %>
-        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/novelties`) %>" method="post" class="row g-2 align-items-end">
+        <form action="<%= tenantPath(`/admin/tours/${tour.id}/rounds/${roundNumber}/novelties`) %>" method="post" class="row g-2 align-items-end" id="noveltyAddForm">
           <div class="col-5 col-sm-3">
             <label class="form-label small mb-1">Type</label>
-            <select name="noveltyType" class="form-select form-select-sm">
+            <select name="noveltyType" class="form-select form-select-sm" id="noveltyTypeSelect" onchange="toggleNoveltyFields()">
               <option value="NTP">NTP</option>
               <option value="Long Drive">Long Drive</option>
+              <option value="Other">Other</option>
             </select>
           </div>
-          <div class="col-4 col-sm-2">
+          <div class="col-4 col-sm-2" id="noveltyHoleField">
             <label class="form-label small mb-1">Hole</label>
             <select name="holeNumber" class="form-select form-select-sm">
               <% for (let h = 1; h <= 18; h++) { %><option value="<%= h %>"><%= h %></option><% } %>
             </select>
+          </div>
+          <div class="col-4 col-sm-2 d-none" id="noveltyPrizeField">
+            <label class="form-label small mb-1">Prize $</label>
+            <input type="number" name="prizeAmount" class="form-control form-control-sm" min="0" placeholder="0" />
           </div>
           <div class="col-12 col-sm-4">
             <label class="form-label small mb-1">Label <span class="text-muted">(optional)</span></label>
@@ -263,6 +269,14 @@
             </button>
           </div>
         </form>
+        <script>
+          function toggleNoveltyFields() {
+            const type = document.getElementById('noveltyTypeSelect').value;
+            const isOther = type === 'Other';
+            document.getElementById('noveltyHoleField').classList.toggle('d-none', isOther);
+            document.getElementById('noveltyPrizeField').classList.toggle('d-none', !isOther);
+          }
+        </script>
       </div>
       <% if (noveltyEvents.length && noveltyPlayers && noveltyPlayers.length) { %>
         <div class="card-body border-top">
