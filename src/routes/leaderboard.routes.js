@@ -729,8 +729,14 @@ function leaderboardRouter(db) {
       const publishedRounds = await getPublishedRoundSet(db, tourId);
       if (!publishedRounds.has(roundNumber)) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Round%20not%20published`));
 
-      const scorecardModel = await buildIndividualScorecardModel(db, tour, roundNumber, userId);
+      const [scorecardModel, roundRow] = await Promise.all([
+        buildIndividualScorecardModel(db, tour, roundNumber, userId),
+        db('golf_rounds as gr').leftJoin('courses as c', 'c.id', 'gr.course_id')
+          .where({ 'gr.tour_id': tourId, 'gr.round_number': roundNumber })
+          .select('gr.tour_date', 'c.course_name').first(),
+      ]);
       if (!scorecardModel) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Scorecard%20not%20found`));
+      if (roundRow) { scorecardModel.courseName = roundRow.course_name; scorecardModel.tourDate = roundRow.tour_date; }
 
       return res.render('leaderboard/scorecard-view', {
         title: `${scorecardModel.title} ${dayLabel(roundNumber)} Scorecard`,
@@ -760,10 +766,16 @@ function leaderboardRouter(db) {
       const scorecardModel = await buildAmbroseScorecardModel(db, tour, teamId);
       if (!scorecardModel) return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Scorecard%20not%20found`));
 
-      const publishedRounds = await getPublishedRoundSet(db, tourId);
+      const [publishedRounds, roundRow] = await Promise.all([
+        getPublishedRoundSet(db, tourId),
+        db('golf_rounds as gr').leftJoin('courses as c', 'c.id', 'gr.course_id')
+          .where({ 'gr.tour_id': tourId, 'gr.round_number': scorecardModel.roundNumber })
+          .select('gr.tour_date', 'c.course_name').first(),
+      ]);
       if (!publishedRounds.has(Number(scorecardModel.roundNumber))) {
         return res.redirect(tp(`/leaderboards/tour/${tourId}?error=Ambrose%20not%20published`));
       }
+      if (roundRow) { scorecardModel.courseName = roundRow.course_name; scorecardModel.tourDate = roundRow.tour_date; }
 
       return res.render('leaderboard/scorecard-view', {
         title: `${scorecardModel.title} ${scorecardModel.dayLabel} Scorecard`,
