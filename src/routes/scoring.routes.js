@@ -282,7 +282,7 @@ async function getCumulativeByScorecard(db, scorecardIds, holes, parByHole) {
   const rows = await db('scorecard_holes')
     .whereIn('scorecard_id', scorecardIds)
     .whereIn('hole_number', holes)
-    .select('scorecard_id', 'hole_number', 'gross_score', 'stableford_points');
+    .select('scorecard_id', 'hole_number', 'gross_score', 'stableford_points', 'player_stableford_points');
 
   const byScorecard = new Map();
   for (const row of rows) {
@@ -292,7 +292,9 @@ async function getCumulativeByScorecard(db, scorecardIds, holes, parByHole) {
         holesPlayed: 0,
         grossTotal: 0,
         parTotal: 0,
-        stablefordTotal: 0
+        stablefordTotal: 0,
+        playerHolesPlayed: 0,
+        playerStablefordTotal: 0
       });
     }
     const target = byScorecard.get(sId);
@@ -301,6 +303,14 @@ async function getCumulativeByScorecard(db, scorecardIds, holes, parByHole) {
     target.grossTotal += Number(row.gross_score || 0);
     target.parTotal += Number(parByHole.get(hole) || 0);
     target.stablefordTotal += Number(row.stableford_points || 0);
+    // Player-effective stableford: advisory takes priority over marker's authoritative
+    const playerStab = row.player_stableford_points != null
+      ? Number(row.player_stableford_points)
+      : (row.stableford_points != null ? Number(row.stableford_points) : null);
+    if (playerStab != null) {
+      target.playerHolesPlayed += 1;
+      target.playerStablefordTotal += playerStab;
+    }
   }
 
   return byScorecard;
@@ -632,6 +642,8 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
       .where({ scorecard_id: scorecard.id, hole_number: holeConfig.hole_number })
       .first();
     const grossScore = saved ? Number(saved.gross_score) : null;
+    const pgs = saved?.player_gross_score != null ? Number(saved.player_gross_score) : null;
+    const ppStab = saved?.player_stableford_points != null ? Number(saved.player_stableford_points) : null;
     const stableford =
       saved && saved.stableford_points !== null
         ? Number(saved.stableford_points)
@@ -644,6 +656,7 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
               strokeIndexSecondary: holeConfig.stroke_index_secondary,
               playingHandicap
             }).points;
+    const playerStableford = ppStab !== null ? ppStab : stableford;
 
     return {
       entries: [
@@ -656,10 +669,15 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
           playingHandicap,
           handicapDisplay: formatHandicapDisplay(playingHandicap),
           grossScore,
+          playerGrossScore: pgs,
           holeVersion: saved ? Number(saved.version || 1) : 0,
           stableford,
+          playerStablefordPoints: ppStab,
           stablefordTotal: stableford === null ? 0 : stableford,
-          stablefordRelative: stableford === null ? 0 : stableford - 2
+          stablefordRelative: stableford === null ? 0 : stableford - 2,
+          playerStablefordTotal: playerStableford === null ? 0 : playerStableford,
+          playerStablefordRelative: playerStableford === null ? 0 : playerStableford - 2,
+          hasScoreConflict: grossScore != null && grossScore > 0 && pgs != null && pgs !== grossScore,
         }
       ],
       startingHole: 1,
@@ -719,7 +737,7 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
       'sh.hole_number': holeConfig.hole_number
     })
     .whereIn('s.user_id', playerIds)
-    .select('s.user_id', 'sh.gross_score', 'sh.stableford_points', 'sh.version');
+    .select('s.user_id', 'sh.gross_score', 'sh.stableford_points', 'sh.player_stableford_points', 'sh.version', 'sh.player_gross_score');
   const holeScoreByUser = new Map(holeScores.map((row) => [row.user_id, row]));
   const scorecardIds = [...scorecardByUser.values()].filter((v) => Number.isFinite(Number(v))).map(Number);
   const parByHole = await getParByHole(db, scorecard.tour_id, scorecard.round_number);
@@ -732,6 +750,8 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
       const playingHandicap = handicapByUser.get(userId) || 0;
       const saved = holeScoreByUser.get(userId);
       const grossScore = saved ? Number(saved.gross_score) : null;
+      const pgs = saved?.player_gross_score != null ? Number(saved.player_gross_score) : null;
+      const ppStab = saved?.player_stableford_points != null ? Number(saved.player_stableford_points) : null;
       const scorecardId = scorecardByUser.get(userId);
       const playerHoleConfig = (holeConfigByUser && holeConfigByUser.get(userId)) || holeConfig;
       const stableford =
@@ -748,10 +768,14 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
               }).points;
       const cumulative = cumulativeByScorecard.get(Number(scorecardId)) || {
         holesPlayed: 0,
-        stablefordTotal: 0
+        stablefordTotal: 0,
+        playerHolesPlayed: 0,
+        playerStablefordTotal: 0
       };
       const stablefordTotal = Number(cumulative.stablefordTotal || 0);
       const stablefordRelative = stablefordTotal - (Number(cumulative.holesPlayed || 0) * 2);
+      const playerStablefordTotal = Number(cumulative.playerStablefordTotal || 0);
+      const playerStablefordRelative = playerStablefordTotal - (Number(cumulative.playerHolesPlayed || 0) * 2);
 
       return {
         type: 'player',
@@ -762,10 +786,15 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
         playingHandicap,
         handicapDisplay: formatHandicapDisplay(playingHandicap),
         grossScore,
+        playerGrossScore: pgs,
         holeVersion: saved ? Number(saved.version || 1) : 0,
         stableford,
+        playerStablefordPoints: ppStab,
         stablefordTotal,
-        stablefordRelative
+        stablefordRelative,
+        playerStablefordTotal,
+        playerStablefordRelative,
+        hasScoreConflict: grossScore != null && grossScore > 0 && pgs != null && pgs !== grossScore,
       };
     });
 
@@ -2233,16 +2262,17 @@ function scoringRouter(db) {
           db('scorecard_holes')
             .whereIn('scorecard_id', sids)
             .where({ hole_number: holeNumber })
-            .select('scorecard_id', 'gross_score', 'stableford_points', 'version', 'owner_user_id', 'player_gross_score'),
+            .select('scorecard_id', 'gross_score', 'stableford_points', 'player_stableford_points', 'version', 'owner_user_id', 'player_gross_score'),
           getCumulativeByScorecard(db, sids, windowHoles, parByHole),
         ]);
 
         const holeScoreByCard = new Map(holeScores.map((r) => [Number(r.scorecard_id), r]));
         const scores = sids.map((sid) => {
           const saved = holeScoreByCard.get(sid);
-          const cumulative = cumulativeByScorecard.get(sid) || { holesPlayed: 0, stablefordTotal: 0 };
+          const cumulative = cumulativeByScorecard.get(sid) || { holesPlayed: 0, stablefordTotal: 0, playerHolesPlayed: 0, playerStablefordTotal: 0 };
           const gs = saved?.gross_score != null ? Number(saved.gross_score) : null;
           const pgs = saved?.player_gross_score != null ? Number(saved.player_gross_score) : null;
+          const psp = saved?.player_stableford_points != null ? Number(saved.player_stableford_points) : null;
           return {
             scorecardId: sid,
             grossScore: gs,
@@ -2250,9 +2280,12 @@ function scoringRouter(db) {
             hasConflict: gs != null && gs > 0 && pgs != null && pgs !== gs,
             version: saved ? Number(saved.version || 1) : 0,
             stablefordPoints: saved && saved.stableford_points !== null ? Number(saved.stableford_points) : null,
+            playerStablefordPoints: psp,
             stablefordTotal: Number(cumulative.stablefordTotal || 0),
             stablefordRelative: Number(cumulative.stablefordTotal || 0) - (Number(cumulative.holesPlayed || 0) * 2),
             holesPlayed: Number(cumulative.holesPlayed || 0),
+            playerStablefordTotal: Number(cumulative.playerStablefordTotal || 0),
+            playerStablefordRelative: Number(cumulative.playerStablefordTotal || 0) - (Number(cumulative.playerHolesPlayed || 0) * 2),
             ownerUserId: saved?.owner_user_id ? Number(saved.owner_user_id) : null
           };
         });
@@ -2547,16 +2580,36 @@ function scoringRouter(db) {
 
       // ── Player advisory path ──────────────────────────────────────────────
       if (writeTarget === 'player') {
+        // Fetch hole config + handicap to compute advisory stableford points
+        const [hole, roundHcp, tourHcp] = await Promise.all([
+          getHoleConfig(db, scorecard.tour_id, scorecard.round_number, holeNumber),
+          db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first(),
+          db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first(),
+        ]);
+        let playerStabPoints = null;
+        if (hole && grossScore > 0) {
+          const isHcpOverride = !!roundHcp;
+          const idx = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+          const ph = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isHcpOverride);
+          playerStabPoints = stablefordPoints({
+            grossScore,
+            par: hole.par,
+            strokeIndexPrimary: hole.stroke_index_primary,
+            strokeIndexSecondary: hole.stroke_index_secondary,
+            playingHandicap: ph
+          }).points;
+        }
+
         const existing = await db('scorecard_holes')
           .where({ scorecard_id: scorecardId, hole_number: holeNumber })
           .first();
         if (existing) {
           await db('scorecard_holes')
             .where({ id: existing.id })
-            .update({ player_gross_score: grossScore, updated_at: db.fn.now() });
+            .update({ player_gross_score: grossScore, player_stableford_points: playerStabPoints, updated_at: db.fn.now() });
         } else {
           await db('scorecard_holes').insert({
-            scorecard_id: scorecardId, hole_number: holeNumber, player_gross_score: grossScore,
+            scorecard_id: scorecardId, hole_number: holeNumber, player_gross_score: grossScore, player_stableford_points: playerStabPoints,
           });
         }
         const row = await db('scorecard_holes')
@@ -2570,6 +2623,7 @@ function scoringRouter(db) {
           writeTarget: 'player',
           grossScore: gs,
           playerGrossScore: pgs,
+          playerStablefordPoints: row?.player_stableford_points != null ? Number(row.player_stableford_points) : null,
           hasConflict,
           stableford: row?.stableford_points != null ? Number(row.stableford_points) : null,
           holeVersion: row?.version != null ? Number(row.version) : 1,

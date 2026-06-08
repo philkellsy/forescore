@@ -383,8 +383,11 @@
         hasScoreConflict: score.hasConflict || false,
         holeVersion: score.version || 0,
         stableford: score.stablefordPoints ?? null,
+        playerStablefordPoints: score.playerStablefordPoints ?? null,
         stablefordTotal: score.stablefordTotal || 0,
         stablefordRelative: score.stablefordRelative || 0,
+        playerStablefordTotal: score.playerStablefordTotal || 0,
+        playerStablefordRelative: score.playerStablefordRelative || 0,
         ownerUserId: score.ownerUserId ?? null
       };
     });
@@ -523,19 +526,23 @@
 
     const effectiveTotal = (() => {
       if (!isPlayerPath) return Number(entry.stablefordTotal || 0);
-      const serverHoleStab = entry.stableford != null ? Number(entry.stableford) : 0;
-      const playerHoleStab = effectiveStableford != null ? effectiveStableford : 0;
-      return Number(entry.stablefordTotal || 0) - serverHoleStab + playerHoleStab;
+      // playerStablefordTotal = cumulative across all holes using player's own advisory scores.
+      // Subtract the server's stored advisory for THIS hole, add what we're displaying right now.
+      const baseTotal = Number(entry.playerStablefordTotal || 0);
+      const serverCurrentStab = entry.playerStablefordPoints != null ? Number(entry.playerStablefordPoints) : 0;
+      const playerCurrentStab = effectiveStableford != null ? effectiveStableford : 0;
+      return baseTotal - serverCurrentStab + playerCurrentStab;
     })();
     const effectiveRelative = (() => {
       if (!isPlayerPath) return Number(entry.stablefordRelative || 0);
-      const serverHoleStab = entry.stableford != null ? Number(entry.stableford) : 0;
-      const playerHoleStab = effectiveStableford != null ? effectiveStableford : 0;
-      const stabDelta = playerHoleStab - serverHoleStab;
-      // When the server hasn't scored this hole yet, adding a player score changes holesPlayed by +1.
-      const holesPlayedDelta = entry.stableford == null && effectiveStableford != null ? 1
-        : entry.stableford != null && effectiveStableford == null ? -1 : 0;
-      return Number(entry.stablefordRelative || 0) + stabDelta - (holesPlayedDelta * 2);
+      const baseRelative = Number(entry.playerStablefordRelative || 0);
+      const serverCurrentStab = entry.playerStablefordPoints != null ? Number(entry.playerStablefordPoints) : 0;
+      const playerCurrentStab = effectiveStableford != null ? effectiveStableford : 0;
+      const stabDelta = playerCurrentStab - serverCurrentStab;
+      // If player now has a score but server had none for this hole, holesPlayed increases by 1.
+      const holesPlayedDelta = entry.playerStablefordPoints == null && effectiveStableford != null ? 1
+        : entry.playerStablefordPoints != null && effectiveStableford == null ? -1 : 0;
+      return baseRelative + stabDelta - (holesPlayedDelta * 2);
     })();
 
     const hasScorecard = Number.isFinite(Number(entry.scorecardId));
@@ -1268,6 +1275,7 @@
             if (isPlayerWrite && result.payload) {
               if (result.payload.grossScore !== undefined) entry.grossScore = result.payload.grossScore != null ? Number(result.payload.grossScore) : null;
               if (result.payload.playerGrossScore !== undefined) entry.playerGrossScore = result.payload.playerGrossScore != null ? Number(result.payload.playerGrossScore) : null;
+              if (result.payload.playerStablefordPoints !== undefined) entry.playerStablefordPoints = result.payload.playerStablefordPoints != null ? Number(result.payload.playerStablefordPoints) : null;
               entry.hasScoreConflict = Boolean(result.payload.hasConflict);
               setHoleConflict(scorecardId, holeNumber, entry.hasScoreConflict);
             }
