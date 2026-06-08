@@ -1,6 +1,6 @@
 {
   "name": "forescore",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "description": "Golf trip scoring and admin PWA",
   "main": "src/server.js",
   "type": "commonjs",

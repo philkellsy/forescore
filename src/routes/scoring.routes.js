@@ -1229,9 +1229,8 @@ function scoringRouter(db) {
             if (groupSize === 4) {
               const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
               const myPartner = membersWithHcp.find((m) => !m.isMe && myBallPositions.includes(m.position));
-              const otherBall = membersWithHcp.filter((m) => !myBallPositions.includes(m.position));
-              const selectablePartners = scoringStarted ? [] : otherBall.filter((m) => !m.isMe);
-              twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, otherBall, selectablePartners, scoringStarted };
+              const selectablePartners = scoringStarted ? [] : membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
+              twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners, scoringStarted };
             } else if (groupSize === 3) {
               const sorted = [...membersWithHcp].sort((a, b) => a.courseHcp - b.courseHcp);
               const shared = { ...sorted[0], isShared: true };
@@ -1241,8 +1240,8 @@ function scoringRouter(db) {
                 twoBallType,
                 scoringStarted,
                 teams: [
-                  { label: `with ${others[0].fullName.split(' ')[0]}`, players: [others[0], shared] },
-                  { label: `with ${others[1].fullName.split(' ')[0]}`, players: [others[1], shared] },
+                  { label: 'Ball A', players: [others[0], shared] },
+                  { label: 'Ball B', players: [others[1], shared] },
                 ],
               };
             }
@@ -2455,10 +2454,12 @@ function scoringRouter(db) {
       const formatPlayers = (members) => members.map((m) => ({
         displayName: toPlayerLabel(m.first_name, m.last_name),
         scorecardId: m.scorecard_id,
+        userId: Number(m.user_id),
       }));
 
       return res.json({
         twoBallType,
+        groupSize,
         startingHole,
         holeOrder,
         teamA: {

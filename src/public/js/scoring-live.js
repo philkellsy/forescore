@@ -1069,10 +1069,26 @@
   }
 
   function renderTwoBallStatus(data) {
-    const { twoBallType, teamA, teamB, firstHalf, secondHalf, match } = data;
+    const { twoBallType, groupSize, teamA, teamB, firstHalf, secondHalf, match } = data;
     const typeLabel = twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball';
     const t1Name = teamA.players.map((p) => p.displayName).join(' & ');
     const t2Name = teamB.players.map((p) => p.displayName).join(' & ');
+
+    // Team labels: Us/Them for 4-ball; "with [name]" per unique player for 3-ball
+    const currentUserId = ctx?.currentUserId;
+    let t1Label, t2Label;
+    if (groupSize === 3) {
+      const bIds = new Set(teamB.players.map((p) => p.userId));
+      const aIds = new Set(teamA.players.map((p) => p.userId));
+      const t1Unique = teamA.players.find((p) => !bIds.has(p.userId));
+      const t2Unique = teamB.players.find((p) => !aIds.has(p.userId));
+      t1Label = t1Unique ? `with ${t1Unique.displayName.split(' ')[0]}` : 'Ball A';
+      t2Label = t2Unique ? `with ${t2Unique.displayName.split(' ')[0]}` : 'Ball B';
+    } else {
+      const meInA = teamA.players.some((p) => Number(p.userId) === Number(currentUserId));
+      t1Label = meInA ? 'Us' : 'Them';
+      t2Label = meInA ? 'Them' : 'Us';
+    }
 
     function holeRangeLabel(holes) {
       const sorted = [...holes].sort((a, b) => a - b);
@@ -1092,7 +1108,8 @@
     function matchSummaryLabel(status, played) {
       if (played === 0) return '—';
       if (status === 0) return 'All Square';
-      return status > 0 ? `T1 &nbsp;<strong>${status} UP</strong>` : `T2 &nbsp;<strong>${Math.abs(status)} UP</strong>`;
+      const winner = status > 0 ? t1Label : t2Label;
+      return `${winner}&nbsp;<strong>${Math.abs(status)} UP</strong>`;
     }
 
     const titleEl = document.getElementById('twoBallOffcanvasTitle');
@@ -1101,13 +1118,13 @@
     return `
       <div class="row g-0 text-center border rounded mb-3 overflow-hidden">
         <div class="col border-end py-3">
-          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Team 1</div>
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">${t1Label}</div>
           <div class="small fw-semibold">${t1Name}</div>
           <div class="h3 fw-bold mt-2 mb-0">${teamA.total}</div>
           <div class="text-muted" style="font-size:0.7rem">pts</div>
         </div>
         <div class="col py-3">
-          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Team 2</div>
+          <div class="small text-muted fw-semibold text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">${t2Label}</div>
           <div class="small fw-semibold">${t2Name}</div>
           <div class="h3 fw-bold mt-2 mb-0">${teamB.total}</div>
           <div class="text-muted" style="font-size:0.7rem">pts</div>
@@ -1119,8 +1136,8 @@
           <div class="border rounded p-2 text-center">
             <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">First 9 · ${holeRangeLabel(firstHalf.holes)}</div>
             <div class="d-flex justify-content-around">
-              <div><div class="text-muted" style="font-size:0.7rem">Team 1</div><div class="h5 fw-bold mb-0">${firstHalf.teamA}</div></div>
-              <div><div class="text-muted" style="font-size:0.7rem">Team 2</div><div class="h5 fw-bold mb-0">${firstHalf.teamB}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">${t1Label}</div><div class="h5 fw-bold mb-0">${firstHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">${t2Label}</div><div class="h5 fw-bold mb-0">${firstHalf.teamB}</div></div>
             </div>
           </div>
         </div>
@@ -1128,8 +1145,8 @@
           <div class="border rounded p-2 text-center">
             <div class="small fw-semibold text-muted text-uppercase mb-2" style="letter-spacing:.05em;font-size:.65rem">Second 9 · ${holeRangeLabel(secondHalf.holes)}</div>
             <div class="d-flex justify-content-around">
-              <div><div class="text-muted" style="font-size:0.7rem">Team 1</div><div class="h5 fw-bold mb-0">${secondHalf.teamA}</div></div>
-              <div><div class="text-muted" style="font-size:0.7rem">Team 2</div><div class="h5 fw-bold mb-0">${secondHalf.teamB}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">${t1Label}</div><div class="h5 fw-bold mb-0">${secondHalf.teamA}</div></div>
+              <div><div class="text-muted" style="font-size:0.7rem">${t2Label}</div><div class="h5 fw-bold mb-0">${secondHalf.teamB}</div></div>
             </div>
           </div>
         </div>
