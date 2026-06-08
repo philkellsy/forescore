@@ -16,7 +16,7 @@ async function send(to, subject, html, text) {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'api-key': brevoApiKey },
     body: JSON.stringify({
-      sender: { name: brevoSenderName, email: brevoSenderEmail },
+      sender: { name: brevoSenderName, email: 'welcome@forescore.me' },
       to: [{ email: to }],
       subject,
       htmlContent: html,

@@ -28,7 +28,7 @@ async function sendWithBrevo(email, subject, htmlContent, textContent) {
     body: JSON.stringify({
       sender: {
         name: brevoSenderName,
-        email: brevoSenderEmail
+        email: 'security@forescore.me'
       },
       to: [{ email }],
       subject,
