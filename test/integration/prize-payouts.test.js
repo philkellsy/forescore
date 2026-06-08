@@ -54,7 +54,7 @@ test('leaderboard page includes configured daily prize labels and amounts', asyn
 
   try {
     const { tenant, owner } = await seedTenantAndOwner(db, { slug: `prizes-lb-${ts}` });
-    const { tour } = await seedScoringScenario(db, tenant.id, owner.id);
+    const { tour, scorecard } = await seedScoringScenario(db, tenant.id, owner.id);
     const cookie = await getSessionCookie(baseUrl, tenant.slug, db, owner);
 
     await db('tours').where({ id: tour.id }).update({
@@ -63,6 +63,17 @@ test('leaderboard page includes configured daily prize labels and amounts', asyn
         { label: 'Runner Up', amount: 50 },
       ]),
     });
+
+    // Prizes only render when the round is finalized (all scorecards submitted)
+    // and the dayBoard has entries (prizes sit inside the scores table section).
+    await db('scorecard_holes').insert({
+      scorecard_id: scorecard.id,
+      hole_number: 1,
+      gross_score: 4,
+      stableford_points: 2,
+      version: 1,
+    });
+    await db('scorecards').where({ id: scorecard.id }).update({ status: 'submitted' });
     await db('golf_rounds')
       .where({ tour_id: tour.id, round_number: 1 })
       .update({ leaderboard_published: true });

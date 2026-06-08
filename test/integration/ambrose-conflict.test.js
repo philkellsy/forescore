@@ -120,29 +120,43 @@ test('ambrose live gross scoring enforces and resolves conflict over HTTP', asyn
 
   try {
     const { tenant, owner } = await seedTenantAndOwner(db, { slug: `ambrose-conflict-${ts}` });
-    const { scorecard } = await seedAmbroseScenario(db, tenant.id, owner.id);
-    const cookie = await getSessionCookie(baseUrl, tenant.slug, db, owner);
+    const { scorecard, teeGroup } = await seedAmbroseScenario(db, tenant.id, owner.id);
 
-    // First POST — no baseVersion, sets the score and returns version 1
-    const first = await postGross(baseUrl, tenant.slug, cookie, scorecard.id, 1, 4);
+    // Add a second player with role 'player' (non-admin) to the same tee group.
+    // Conflict detection only triggers for different non-privileged users — admin/owner/scorer
+    // have force=true and bypass version checks intentionally.
+    const [player2] = await db('users').insert({
+      first_name: 'Player',
+      last_name: 'Two',
+      email: `player2-${ts}@test.local`,
+      email_verified_at: db.fn.now(),
+    }).returning('*');
+    await db('tenant_memberships').insert({ tenant_id: tenant.id, user_id: player2.id, role: 'player' });
+    await db('tee_group_players').insert({ tee_group_id: teeGroup.id, user_id: player2.id, position: 2 });
+
+    const ownerCookie = await getSessionCookie(baseUrl, tenant.slug, db, owner);
+    const playerCookie = await getSessionCookie(baseUrl, tenant.slug, db, player2);
+
+    // Owner (marker) scores 4 — sets owner_user_id on the row
+    const first = await postGross(baseUrl, tenant.slug, ownerCookie, scorecard.id, 1, 4);
     assert.equal(first.status, 200);
     const firstJson = await first.json();
     assert.equal(firstJson.ok, true);
     const v1 = firstJson.holeVersion;
     assert.ok(v1 >= 1, 'expected version >= 1 after first score');
 
-    // Second POST with stale baseVersion (0) — should 409 conflict
-    const stale = await postGross(baseUrl, tenant.slug, cookie, scorecard.id, 1, 5, 0);
+    // Player2 (non-admin, different user) tries to score 5 with stale baseVersion 0 → 409
+    const stale = await postGross(baseUrl, tenant.slug, playerCookie, scorecard.id, 1, 5, 0);
     assert.equal(stale.status, 409);
     const staleJson = await stale.json();
     assert.equal(staleJson.error, 'conflict');
 
-    // Third POST with current baseVersion — should succeed
-    const resolved = await postGross(baseUrl, tenant.slug, cookie, scorecard.id, 1, 5, v1);
+    // Player2 accepts the canonical score (same as owner's score) with current version → 200
+    const resolved = await postGross(baseUrl, tenant.slug, playerCookie, scorecard.id, 1, 4, v1);
     assert.equal(resolved.status, 200);
     const resolvedJson = await resolved.json();
     assert.equal(resolvedJson.ok, true);
-    assert.equal(resolvedJson.grossScore, 5);
+    assert.equal(resolvedJson.grossScore, 4);
   } finally {
     await teardown(server, db);
   }
