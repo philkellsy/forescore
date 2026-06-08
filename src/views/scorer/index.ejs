@@ -134,21 +134,6 @@
                           <% }) %>
                         </div>
                       <% } %>
-                      <% if (scorecard.twoBallInfo.playerTwoBall && scorecard.twoBallInfo.playerTwoBall.selectablePartners.length) { %>
-                        <% const ptb = scorecard.twoBallInfo.playerTwoBall; %>
-                        <p class="small text-muted mb-1"><%= ptb.playerName %>: <% if (ptb.myPartner) { %><span class="fw-semibold text-body"><%= ptb.myPartner.fullName %></span><% } %></p>
-                        <div class="d-flex gap-2 flex-wrap">
-                          <% ptb.selectablePartners.forEach((p) => { %>
-                            <form action="<%= tenantPath('/scoring/select-partner') %>" method="post" class="m-0" data-no-loading>
-                              <input type="hidden" name="scorecardId" value="<%= ptb.scorecardId %>" />
-                              <input type="hidden" name="partnerId" value="<%= p.userId %>" />
-                              <button type="submit" class="btn btn-sm btn-outline-secondary">
-                                Pair with <%= p.fullName %>
-                              </button>
-                            </form>
-                          <% }) %>
-                        </div>
-                      <% } %>
                     <% } else if (scorecard.twoBallInfo.groupSize === 3) { %>
                       <% scorecard.twoBallInfo.teams.forEach((team) => { %>
                         <p class="small mb-1">
