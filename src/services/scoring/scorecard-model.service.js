@@ -59,14 +59,15 @@ async function buildIndividualScorecardModel(db, tour, roundNumber, userId) {
   ]);
   if (!scorecard || !user || !holeConfig.length) return null;
 
-  const handicapIndex = roundHcp ? Number(roundHcp.handicap_index) : Number(handicap?.playing_handicap || 0);
+  const isHcpOverride = !!roundHcp;
+  const handicapIndex = isHcpOverride ? Number(roundHcp.handicap_index) : Number(handicap?.playing_handicap || 0);
   let hcp = Math.round(handicapIndex);
-  if (roundRow?.course_id) {
+  if (!isHcpOverride && roundRow?.course_id) {
     const [course, parRow] = await Promise.all([
       db('courses').where({ id: roundRow.course_id }).first(),
       db('holes').where({ course_id: roundRow.course_id }).sum({ total: 'par' }).first()
     ]);
-    if (course) hcp = computeCourseHandicap(handicapIndex, course.slope_rating, course.course_rating, parRow?.total || 72);
+    if (course) hcp = computeCourseHandicap(handicapIndex, course.slope_rating, course.course_rating, parRow?.total || 72, user?.gender || null);
   }
   const byHole = new Map(holeScores.map((row) => [Number(row.hole_number), row]));
   const holes = holeConfig.map((hole) => {

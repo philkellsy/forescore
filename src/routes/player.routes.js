@@ -113,18 +113,23 @@ function playerRouter(db) {
           : null;
 
         if (rawIndex !== null) {
-          const playerUser = await db('users').where({ id: user.id }).select('gender').first();
-          const courseId = (playerUser?.gender === 'female' && openRound.female_course_id)
-            ? openRound.female_course_id
-            : openRound.course_id;
-          if (courseId) {
-            const [course, parRow] = await Promise.all([
-              db('courses').where({ id: courseId }).first(),
-              db('holes').where({ course_id: courseId }).sum('par as total').first(),
-            ]);
-            todayHandicap = computeCourseHandicap(rawIndex, course?.slope_rating, course?.course_rating, Number(parRow?.total) || 72);
-          } else {
+          const isOverride = !!roundHcpRow;
+          if (isOverride) {
             todayHandicap = Math.round(rawIndex);
+          } else {
+            const playerUser = await db('users').where({ id: user.id }).select('gender').first();
+            const courseId = (playerUser?.gender === 'female' && openRound.female_course_id)
+              ? openRound.female_course_id
+              : openRound.course_id;
+            if (courseId) {
+              const [course, parRow] = await Promise.all([
+                db('courses').where({ id: courseId }).first(),
+                db('holes').where({ course_id: courseId }).sum('par as total').first(),
+              ]);
+              todayHandicap = computeCourseHandicap(rawIndex, course?.slope_rating, course?.course_rating, Number(parRow?.total) || 72, playerUser?.gender || null);
+            } else {
+              todayHandicap = Math.round(rawIndex);
+            }
           }
         }
       }

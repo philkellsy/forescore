@@ -960,9 +960,10 @@ function adminRouter(db) {
 
       for (const sc of scorecards) {
         const userId = Number(sc.user_id);
-        const idx = roundHcpMap.has(userId) ? roundHcpMap.get(userId) : (tourHcpMap.get(userId) ?? null);
+        const isOverride = roundHcpMap.has(userId);
+        const idx = isOverride ? roundHcpMap.get(userId) : (tourHcpMap.get(userId) ?? null);
         const courseHandicap = idx !== null
-          ? computeCourseHandicap(idx, course.slope_rating, course.course_rating, coursePar)
+          ? (isOverride ? Math.round(idx) : computeCourseHandicap(idx, course.slope_rating, course.course_rating, coursePar, null))
           : 18;
 
         for (const hole of holes) {
@@ -2010,7 +2011,7 @@ function adminRouter(db) {
     const rawPlayers = await db('event_players as ep')
       .join('users as u', 'u.id', 'ep.user_id')
       .where({ 'ep.tour_id': tourId, 'ep.status': 'active' })
-      .select('ep.user_id', 'u.first_name', 'u.last_name');
+      .select('ep.user_id', 'u.first_name', 'u.last_name', 'u.gender');
 
     const groups = await db('tee_groups as tg')
       .where({ 'tg.tour_id': tourId, 'tg.round_number': roundNumber })
@@ -2036,8 +2037,9 @@ function adminRouter(db) {
       const tourIndex = tourHcpMap.get(uid) ?? null;
       const roundOverride = roundHcpMap.has(uid) ? roundHcpMap.get(uid) : null;
       const effectiveIndex = roundOverride ?? tourIndex;
+      const isOverride = roundOverride !== null;
       const courseHandicap = (effectiveIndex !== null && course)
-        ? computeCourseHandicap(effectiveIndex, course.slope_rating, course.course_rating, coursePar)
+        ? (isOverride ? Math.round(effectiveIndex) : computeCourseHandicap(effectiveIndex, course.slope_rating, course.course_rating, coursePar, p.gender || null))
         : null;
       return {
         user_id: uid,

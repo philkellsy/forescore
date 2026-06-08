@@ -135,10 +135,10 @@ positions 1+2 = ball A, positions 3+4 = ball B. Independent cross-group pairing 
 
 ### Handicaps
 - **Tour handicap index**: stored in `player_handicaps.playing_handicap` (decimal 5,1) — per tour/player.
-- **Round override**: stored in `player_day_handicaps.handicap_index` (decimal 5,1) — per tour/player/round_number. Falls back to tour handicap when absent.
-- **Round playing handicap** is always computed in real-time (never stored):
-  `ROUND(handicap_index × (slope_rating / 113) + (course_rating − course_par))`
-  where `course_par = SUM(holes.par)` for the tee set.
+- **Round override**: stored in `player_day_handicaps.handicap_index` (decimal 5,1) — per round/player. When set, it is used **directly** as the playing handicap (no formula applied, whole numbers). Falls back to tour handicap when absent.
+- **Round playing handicap** is always computed in real-time from the tour handicap index (never stored) using the GA daily handicap formula:
+  `ROUND((index × slope/113 + (course_rating − par)) × 0.93 × consistencyFactor)`
+  where `consistencyFactor` = 1.0483 (female) or 0.9986 (male/default), and `par = SUM(holes.par)` for the tee set.
 
 ### Competition types
 Individual stableford, ambrose teams, skins (individual + team), calcutta
@@ -297,7 +297,7 @@ All DB access goes through `src/db/repositories/`. Each file exports pure functi
 - **Scoring routes** (`/:tenantSlug/scoring`):
   - Scorer index — shows scorecards for the logged-in player with computed course handicap
   - Live scorecard (`/scoring/live/:id`) — per-hole gross score entry, offline-capable PWA
-    - Shot dots (•) show strokes received per hole based on WHS course handicap
+    - Shot dots (•) show strokes received per hole based on GA daily handicap
     - Optimistic concurrency; conflict detection and resolution
     - Ambrose team scoring with drive selection
   - Confirm / confirm-final flows for score submission

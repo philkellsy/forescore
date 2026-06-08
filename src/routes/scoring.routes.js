@@ -132,8 +132,9 @@ async function getTeamHandicapInfo(db, scorecard) {
   const count = members.length;
   const allowance = ambroseAllowance(count);
   const courseHandicaps = await Promise.all(members.map((m) => {
-    const idx = m.round_handicap_index != null ? Number(m.round_handicap_index) : Number(m.playing_handicap || 0);
-    return getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx);
+    const isOverride = m.round_handicap_index != null;
+    const idx = isOverride ? Number(m.round_handicap_index) : Number(m.playing_handicap || 0);
+    return getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isOverride);
   }));
   const total = courseHandicaps.reduce((sum, h) => sum + h, 0);
   const raw = total * allowance;
@@ -182,7 +183,8 @@ function resolvePlayerCourseId(round, gender) {
   return Number(round.course_id);
 }
 
-async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null, _reqCache = null) {
+async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex, gender = null, _reqCache = null, isOverride = false) {
+  if (isOverride) return Math.round(Number(handicapIndex) || 0);
   const reqCacheKey = `${tourId}:${roundNumber}:${gender || 'any'}`;
   let cached = _reqCache?.get(reqCacheKey);
   if (cached === undefined) {
@@ -194,7 +196,7 @@ async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex,
     // Module-level cache populated when the round was opened — zero extra DB queries.
     const moduleCached = getCachedCourseData(tourId, roundNumber, courseId);
     if (moduleCached) {
-      return computeCourseHandicap(handicapIndex, moduleCached.slope, moduleCached.rating, moduleCached.par);
+      return computeCourseHandicap(handicapIndex, moduleCached.slope, moduleCached.rating, moduleCached.par, gender);
     }
 
     // Fallback: round is still draft or cache missed (e.g. first boot) — query DB.
@@ -205,7 +207,7 @@ async function getCourseHandicapForRound(db, tourId, roundNumber, handicapIndex,
     _reqCache?.set(reqCacheKey, cached);
   }
   if (!cached) return Math.round(Number(handicapIndex) || 0);
-  return computeCourseHandicap(handicapIndex, cached.course.slope_rating, cached.course.course_rating, cached.coursePar?.total || 72);
+  return computeCourseHandicap(handicapIndex, cached.course.slope_rating, cached.course.course_rating, cached.coursePar?.total || 72, gender);
 }
 
 async function getHoleConfig(db, tourId, roundNumber, holeNumber, courseIdOverride = null) {
@@ -622,8 +624,9 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
     const tourHcp = await db('player_handicaps')
       .where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id })
       .first();
-    const handicapIndex = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-    const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, handicapIndex);
+    const isHcpOverride = !!roundHcp;
+    const handicapIndex = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+    const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, handicapIndex, null, null, isHcpOverride);
 
     const saved = await db('scorecard_holes')
       .where({ scorecard_id: scorecard.id, hole_number: holeConfig.hole_number })
@@ -690,10 +693,13 @@ async function getGroupEntriesForHole(db, scorecard, holeConfig, preloadedTarget
   ]);
   const tourHcpByUser = new Map(tourHandicaps.map((h) => [Number(h.user_id), Number(h.playing_handicap || 0)]));
   const roundHcpByUser = new Map(roundHandicaps.map((h) => [Number(h.user_id), Number(h.handicap_index)]));
-  const handicapIndexByUser = new Map(playerIds.map((uid) => [uid, roundHcpByUser.has(uid) ? roundHcpByUser.get(uid) : (tourHcpByUser.get(uid) || 0)]));
   const genderByUser = new Map(playerGenderRows.map((r) => [Number(r.id), r.gender]));
   const handicapByUser = new Map(
-    await Promise.all(playerIds.map(async (uid) => [uid, await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, handicapIndexByUser.get(uid), genderByUser.get(uid) || null)]))
+    await Promise.all(playerIds.map(async (uid) => {
+      const isOverride = roundHcpByUser.has(uid);
+      const idx = isOverride ? roundHcpByUser.get(uid) : (tourHcpByUser.get(uid) || 0);
+      return [uid, await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, genderByUser.get(uid) || null, null, isOverride)];
+    }))
   );
 
   const holeConfigByUser = hasFemaleCoourse
@@ -828,8 +834,9 @@ async function getAmbroseEntriesForHole(db, scorecard, holeConfig) {
     .select('tm.team_id', 'u.id', 'u.first_name', 'u.last_name', 'ph.playing_handicap', 'pdh.handicap_index as round_handicap_index');
 
   const membersRows = await Promise.all(membersRaw.map(async (m) => {
-    const idx = m.round_handicap_index != null ? Number(m.round_handicap_index) : Number(m.playing_handicap || 0);
-    const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx);
+    const isOverride = m.round_handicap_index != null;
+    const idx = isOverride ? Number(m.round_handicap_index) : Number(m.playing_handicap || 0);
+    const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isOverride);
     return { ...m, playing_handicap: courseHcp };
   }));
 
@@ -1053,8 +1060,9 @@ function scoringRouter(db) {
         if (scorecard.type === 'individual' && scorecard.user_id) {
           const roundHcp = await db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first();
           const tourHcp = await db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first();
-          const idx = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-          const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, scorecard.user_gender || null, hcpCache);
+          const isHcpOverride = !!roundHcp;
+          const idx = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+          const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, scorecard.user_gender || null, hcpCache, isHcpOverride);
           ownHandicapDisplay = formatHandicapDisplay(courseHcp);
         }
 
@@ -1082,8 +1090,9 @@ function scoringRouter(db) {
             .select('u.first_name', 'u.last_name', 'u.gender', 'ph.playing_handicap', 'pdh.handicap_index as round_handicap_index', 'psc.id as peer_scorecard_id', 'psc.status as peer_status')
             .orderBy('peers.position', 'asc');
           otherPlayers = await Promise.all(rawOtherPlayers.map(async (p) => {
-            const idx = p.round_handicap_index != null ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
-            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, p.gender || null, hcpCache);
+            const isOverride = p.round_handicap_index != null;
+            const idx = isOverride ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
+            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, p.gender || null, hcpCache, isOverride);
             return { ...p, playing_handicap: courseHcp };
           }));
         }
@@ -1112,8 +1121,9 @@ function scoringRouter(db) {
             .select('u.first_name', 'u.last_name', 'ph.playing_handicap', 'pdh.handicap_index as round_handicap_index')
             .orderBy('u.first_name', 'asc');
           otherPlayers = await Promise.all(rawOtherTeamPlayers.map(async (p) => {
-            const idx = p.round_handicap_index != null ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
-            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, hcpCache);
+            const isOverride = p.round_handicap_index != null;
+            const idx = isOverride ? Number(p.round_handicap_index) : Number(p.playing_handicap || 0);
+            const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, hcpCache, isOverride);
             return { ...p, playing_handicap: courseHcp };
           }));
 
@@ -1206,8 +1216,9 @@ function scoringRouter(db) {
             const twoBallType = scorecard.two_ball_type || 'best_ball';
 
             const membersWithHcp = await Promise.all(groupMembers.map(async (m, idx) => {
-              const hIdx = m.round_hcp_index != null ? Number(m.round_hcp_index) : Number(m.playing_handicap || 0);
-              const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hIdx, m.gender || null, hcpCache);
+              const isOverride = m.round_hcp_index != null;
+              const hIdx = isOverride ? Number(m.round_hcp_index) : Number(m.playing_handicap || 0);
+              const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hIdx, m.gender || null, hcpCache, isOverride);
               return {
                 userId: Number(m.userId),
                 fullName: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
@@ -2021,9 +2032,10 @@ function scoringRouter(db) {
           // getCourseHandicapForRound hits the module cache — 0 DB queries when warm.
           const handicapByUser = new Map(
             await Promise.all(playerIds.map(async (uid) => {
-              const hcpIndex = roundHcpByUser.has(uid) ? roundHcpByUser.get(uid) : (tourHcpByUser.get(uid) || 0);
+              const isOverride = roundHcpByUser.has(uid);
+              const hcpIndex = isOverride ? roundHcpByUser.get(uid) : (tourHcpByUser.get(uid) || 0);
               const gender = genderByUser.get(uid) || null;
-              return [uid, await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, gender)];
+              return [uid, await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, gender, null, isOverride)];
             }))
           );
 
@@ -2049,8 +2061,9 @@ function scoringRouter(db) {
             db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first(),
           ]);
           if (player) {
-            const hcpIndex = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-            const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, player.gender || null);
+            const isHcpOverride = !!roundHcp;
+            const hcpIndex = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+            const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hcpIndex, player.gender || null, null, isHcpOverride);
             players = [{
               scorecardId: Number(scorecard.id),
               participantId: Number(player.id),
@@ -2578,8 +2591,9 @@ function scoringRouter(db) {
 
       let playingHandicap = 0;
       if (isIndividual) {
-        const idx = roundHcp ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
-        playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx);
+        const isHcpOverride = !!roundHcp;
+        const idx = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+        playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isHcpOverride);
       } else if (scorecard.type === 'team') {
         const teamHcp = await getTeamHandicapInfo(db, scorecard);
         playingHandicap = teamHcp.wholeShots;

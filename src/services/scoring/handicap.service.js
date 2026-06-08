@@ -84,14 +84,16 @@ function strokesForHole(playingHandicap, strokeIndexPrimary, strokeIndexSecondar
   return primary > 18 - plusSize ? -1 : 0;
 }
 
-// WHS course handicap: ROUND(index × slope/113 + (course_rating − par))
+// GA daily handicap: ROUND(((index × slope/113) + (rating − par)) × 0.93 × consistencyFactor)
+// consistencyFactor: female = 1.0483, male/default = 0.9986
 // coursePar is the sum of all hole pars for the tee set being played.
-function computeCourseHandicap(handicapIndex, slopeRating, courseRating, coursePar) {
+function computeCourseHandicap(handicapIndex, slopeRating, courseRating, coursePar, gender = null) {
   const index = Number(handicapIndex) || 0;
   const slope = Number(slopeRating) || 113;
   const rating = Number(courseRating) || Number(coursePar) || 0;
   const par = Number(coursePar) || 0;
-  return Math.round(index * (slope / 113) + (rating - par));
+  const consistencyFactor = gender === 'female' ? 1.0483 : 0.9986;
+  return Math.round((index * (slope / 113) + (rating - par)) * 0.93 * consistencyFactor);
 }
 
 module.exports = {
