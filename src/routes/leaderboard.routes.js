@@ -296,32 +296,39 @@ function buildSkinsDetail(holes, visibleRoundNumbers, stakePerPlayerPerHole) {
     }));
 }
 
-function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRounds) {
+function buildChampionshipFromVisibleDays(stablefordByDay, visibleStablefordRounds, bestOf) {
   const byUser = new Map();
   (visibleStablefordRounds || []).forEach((roundNumber) => {
     (stablefordByDay?.[roundNumber] || []).forEach((row) => {
       const key = Number(row.userId);
-      if (!byUser.has(key)) {
-        byUser.set(key, {
-          userId: key,
-          name: row.name,
-          total: 0,
-          countbackLast9: 0,
-          countbackLast6: 0,
-          countbackLast3: 0,
-          countbackLast1: 0
-        });
-      }
-      const target = byUser.get(key);
-      target.total += Number(row.total || 0);
-      target.countbackLast9 += Number(row.countbackLast9 || 0);
-      target.countbackLast6 += Number(row.countbackLast6 || 0);
-      target.countbackLast3 += Number(row.countbackLast3 || 0);
-      target.countbackLast1 += Number(row.countbackLast1 || 0);
+      if (!byUser.has(key)) byUser.set(key, { userId: key, name: row.name, rounds: [] });
+      byUser.get(key).rounds.push({
+        roundNumber,
+        total: Number(row.total || 0),
+        countbackLast9: Number(row.countbackLast9 || 0),
+        countbackLast6: Number(row.countbackLast6 || 0),
+        countbackLast3: Number(row.countbackLast3 || 0),
+        countbackLast1: Number(row.countbackLast1 || 0),
+      });
     });
   });
 
   return [...byUser.values()]
+    .map(({ userId, name, rounds }) => {
+      const sorted = [...rounds].sort((a, b) => b.total - a.total);
+      const counting = bestOf && bestOf < sorted.length ? sorted.slice(0, bestOf) : sorted;
+      const dropped = bestOf && bestOf < sorted.length ? sorted.slice(bestOf) : [];
+      const droppedRounds = new Set(dropped.map((r) => r.roundNumber));
+      const entry = { userId, name, total: 0, countbackLast9: 0, countbackLast6: 0, countbackLast3: 0, countbackLast1: 0, droppedRounds };
+      for (const r of counting) {
+        entry.total += r.total;
+        entry.countbackLast9 += r.countbackLast9;
+        entry.countbackLast6 += r.countbackLast6;
+        entry.countbackLast3 += r.countbackLast3;
+        entry.countbackLast1 += r.countbackLast1;
+      }
+      return entry;
+    })
     .sort((a, b) => (
       Number(b.total || 0) - Number(a.total || 0) ||
       Number(b.countbackLast9 || 0) - Number(a.countbackLast9 || 0) ||
@@ -732,6 +739,7 @@ function leaderboardRouter(db) {
         activeTour: tour,
         models: [scorecardModel],
         backUrl: tp(`/leaderboards/tour/${tourId}?view=championship`),
+        backLabel: 'Back to Leaderboard',
         pageSubtitle: `${tour.year} · ${tour.location}`
       });
     } catch (error) {
@@ -764,6 +772,7 @@ function leaderboardRouter(db) {
         activeTour: tour,
         models: [scorecardModel],
         backUrl: tp(`/leaderboards/tour/${tourId}?view=ambrose`),
+        backLabel: 'Back to Leaderboard',
         pageSubtitle: `${tour.year} · ${tour.location}`
       });
     } catch (error) {
@@ -803,6 +812,7 @@ function leaderboardRouter(db) {
         activeTour: tour,
         models,
         backUrl: tp(`/leaderboards/tour/${tourId}?view=championship`),
+        backLabel: 'Back to Championship',
         pageSubtitle: `${tour.year} · ${tour.location} · Championship`
       });
     } catch (error) {
@@ -840,6 +850,7 @@ function leaderboardRouter(db) {
         activeTour: tour,
         models: [scorecardModel],
         backUrl: tp(`/leaderboards/tour/${tourId}?view=eclectic`),
+        backLabel: 'Back to Eclectic',
         pageSubtitle: `${tour.year} · ${tour.location} · Eclectic`
       });
     } catch (error) {
@@ -884,7 +895,7 @@ function leaderboardRouter(db) {
       });
 
       const championship = showAggregate
-        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible)
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, tour.leaderboard_best_of_rounds || null)
         : [];
       const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
       const visibleBoards = buildVisibleBoards(
@@ -1015,7 +1026,7 @@ function leaderboardRouter(db) {
       });
 
       const championship = showAggregate
-        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible)
+        ? buildChampionshipFromVisibleDays(boards.stableford?.byDay || {}, effectiveVisible, active.leaderboard_best_of_rounds || null)
         : [];
       const skinsNormalized = normalizeSkins(boards.skins.holes, effectivePublished);
       const visibleBoards = buildVisibleBoards(
