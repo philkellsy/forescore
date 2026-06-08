@@ -59,14 +59,17 @@
                         <a class="confirm-hole-pill" href="<%= tenantPath(`/scoring/live/${scorecard.id}?hole=${hole.holeNumber}&from=confirm`) %>" aria-label="Edit hole <%= hole.holeNumber %>"><%= hole.holeNumber %></a>
                       </th>
                       <% hole.cells.forEach((cell) => { %>
-                        <td class="<%= cell.missing ? 'is-missing' : '' %>">
+                        <td class="<%= cell.missing ? 'is-missing' : cell.hasConflict ? 'has-conflict' : '' %>">
                           <div class="confirm-score-cell">
                             <span class="confirm-score-value"><%= cell.displayScore %></span>
+                            <% if (!cell.missing && confirmation.mode !== 'ambrose' && cell.playerGrossScore != null) { %>
+                              <span class="confirm-score-player<%= cell.hasConflict ? ' is-conflict' : '' %>">Plr: <%= cell.playerGrossScore %></span>
+                            <% } %>
                             <% if (!cell.missing && confirmation.mode !== 'ambrose' && cell.stablefordPoints !== null) { %>
                               <span class="confirm-score-meta"><%= Number(cell.stablefordPoints) %> pts</span>
                             <% } %>
                             <% if (cell.missing) { %>
-                              <span class="confirm-score-meta">Missing</span>
+                              <span class="confirm-score-meta"><%= (confirmation.mode !== 'ambrose' && cell.playerGrossScore != null) ? `Plr: ${cell.playerGrossScore}` : 'Missing' %></span>
                             <% } %>
                           </div>
                         </td>

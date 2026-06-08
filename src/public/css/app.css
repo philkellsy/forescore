@@ -885,6 +885,24 @@ body {
   color: #9a6700;
 }
 
+.confirm-score-grid td.has-conflict {
+  background: #fff3cd;
+}
+
+.confirm-score-grid td.has-conflict .confirm-score-value {
+  color: #856404;
+}
+
+.confirm-score-player {
+  font-size: 0.72rem;
+  color: #6c757d;
+}
+
+.confirm-score-player.is-conflict {
+  color: #856404;
+  font-weight: 600;
+}
+
 @media (max-width: 576px) {
   .table {
     font-size: 0.9rem;
