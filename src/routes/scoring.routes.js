@@ -1982,11 +1982,13 @@ function scoringRouter(db) {
         });
       }
 
-      // Only the designated marker (or admin) may submit — the player's role is to confirm, not submit.
+      // The card owner or their designated marker (or admin) may submit.
+      // A third-party player (neither owner nor marker) may not.
       const requesterId = Number(req.session.user.id);
       const markerUserId = scorecard.marked_by_user_id != null ? Number(scorecard.marked_by_user_id) : null;
-      if (!canEditAllScores(req.tenantMembership?.role) && markerUserId != null && requesterId !== markerUserId) {
-        return res.status(403).send('Only the marker can submit this scorecard');
+      const cardOwnerId = Number(scorecard.user_id);
+      if (!canEditAllScores(req.tenantMembership?.role) && markerUserId != null && requesterId !== markerUserId && requesterId !== cardOwnerId) {
+        return res.status(403).send('Not allowed to submit this scorecard');
       }
 
       const confirmation = await buildConfirmationData(db, scorecard);
