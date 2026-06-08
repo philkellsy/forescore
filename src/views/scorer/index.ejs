@@ -118,8 +118,15 @@
                       2-ball (<%= scorecard.twoBallInfo.twoBallType === 'aggregate' ? 'Aggregate' : 'Best Ball' %>)
                     </p>
                     <% if (scorecard.twoBallInfo.groupSize === 4) { %>
-                      <% if (scorecard.twoBallInfo.myPartner) { %>
-                        <p class="small mb-2">Partner: <strong><%= scorecard.twoBallInfo.myPartner.fullName %></strong></p>
+                      <p class="small mb-1">
+                        <span class="text-muted">Us:</span>
+                        <strong><%= scorecard.first_name %><% if (scorecard.twoBallInfo.myPartner) { %> + <%= scorecard.twoBallInfo.myPartner.fullName %><% } %></strong>
+                      </p>
+                      <% if (scorecard.twoBallInfo.otherBall && scorecard.twoBallInfo.otherBall.length) { %>
+                        <p class="small mb-2">
+                          <span class="text-muted">Them:</span>
+                          <%= scorecard.twoBallInfo.otherBall.map(p => p.fullName).join(' + ') %>
+                        </p>
                       <% } %>
                       <% if (scorecard.twoBallInfo.selectablePartners && scorecard.twoBallInfo.selectablePartners.length) { %>
                         <div class="d-flex gap-2 flex-wrap mb-2">
