@@ -1168,7 +1168,7 @@ function scoringRouter(db) {
           scorecard.round_status === 'open' &&
           scorecard.status !== 'submitted'
         ) {
-          const groupMembers = await db('tee_groups as tg')
+          const groupMembersRaw = await db('tee_groups as tg')
             .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
             .join('users as u', 'u.id', 'tgp.user_id')
             .leftJoin('player_handicaps as ph2', function joinPh2() {
@@ -1187,25 +1187,31 @@ function scoringRouter(db) {
             )
             .select(
               'u.id as userId', 'u.first_name', 'u.last_name', 'u.gender',
-              'tgp.position',
+              'tgp.id as tgpId', 'tgp.position',
               'ph2.playing_handicap',
               'pdh2.handicap_index as round_hcp_index'
             )
-            .orderBy('tgp.position');
+            .orderByRaw('tgp.position ASC, tgp.id ASC');
+
+          // Use stable ordinal rank (sort by position then row id) so corrupt or
+          // gapped positions from the DB do not misassign ball pairings.
+          const groupMembers = [...groupMembersRaw].sort(
+            (a, b) => Number(a.position) - Number(b.position) || Number(a.tgpId) - Number(b.tgpId)
+          );
 
           if (groupMembers.length >= 2) {
-            const myRow = groupMembers.find((m) => Number(m.userId) === Number(scorecard.user_id));
-            const myPosition = myRow ? Number(myRow.position) : Number(groupMembers[0].position);
+            const myOrdinal = groupMembers.findIndex((m) => Number(m.userId) === Number(scorecard.user_id));
+            const myPosition = myOrdinal >= 0 ? myOrdinal + 1 : 1;
             const groupSize = groupMembers.length;
             const twoBallType = scorecard.two_ball_type || 'best_ball';
 
-            const membersWithHcp = await Promise.all(groupMembers.map(async (m) => {
-              const idx = m.round_hcp_index != null ? Number(m.round_hcp_index) : Number(m.playing_handicap || 0);
-              const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, m.gender || null, hcpCache);
+            const membersWithHcp = await Promise.all(groupMembers.map(async (m, idx) => {
+              const hIdx = m.round_hcp_index != null ? Number(m.round_hcp_index) : Number(m.playing_handicap || 0);
+              const courseHcp = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, hIdx, m.gender || null, hcpCache);
               return {
                 userId: Number(m.userId),
                 fullName: `${m.first_name || ''} ${m.last_name || ''}`.trim(),
-                position: Number(m.position),
+                position: idx + 1,
                 isMe: Number(m.userId) === scorecard.user_id,
                 courseHcp,
               };
@@ -1220,15 +1226,10 @@ function scoringRouter(db) {
               .count('sh.id as cnt');
             const scoringStarted = Number(scoredCount) > 0;
 
-            // DEBUG: remove before merge
-            console.log('[twoBall debug] sc.user_id=%s groupSize=%d myPosition=%d members=%j', scorecard.user_id, groupSize, myPosition, membersWithHcp.map((m) => ({ uid: m.userId, pos: m.position, isMe: m.isMe })));
-
             if (groupSize === 4) {
               const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
               const myPartner = membersWithHcp.find((m) => !m.isMe && myBallPositions.includes(m.position));
               const selectablePartners = scoringStarted ? [] : membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
-              // DEBUG: remove before merge
-              console.log('[twoBall debug] myBallPositions=%j scoringStarted=%s selectablePartners=%j', myBallPositions, scoringStarted, selectablePartners.map((m) => ({ uid: m.userId, pos: m.position })));
               twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners, scoringStarted };
             } else if (groupSize === 3) {
               const sorted = [...membersWithHcp].sort((a, b) => a.courseHcp - b.courseHcp);
@@ -1500,35 +1501,34 @@ function scoringRouter(db) {
         return res.redirect(res.locals.tenantPath('/scoring?error=Partner+cannot+be+changed+once+scoring+has+started'));
       }
 
-      const myPos = Number(mySlot.position);
-      const myBallPositions = myPos <= 2 ? [1, 2] : [3, 4];
+      // Use stable ordinal rank (sort by position then row id) to determine ball
+      // pairings — robust against corrupt or gapped position values in the DB.
+      const sortedSlots = [...slots].sort(
+        (a, b) => Number(a.position) - Number(b.position) || Number(a.id) - Number(b.id)
+      );
+      const myRank = sortedSlots.findIndex((s) => Number(s.user_id) === userId) + 1;
+      const partnerRank = sortedSlots.findIndex((s) => Number(s.user_id) === partnerId) + 1;
+      const myBallRanks = myRank <= 2 ? [1, 2] : [3, 4];
 
       // Already partners — nothing to do
-      if (myBallPositions.includes(Number(partnerSlot.position))) {
+      if (myBallRanks.includes(partnerRank)) {
         return res.redirect(res.locals.tenantPath('/scoring'));
       }
 
-      // Swap: selected partner takes my current partner's slot, and vice versa
-      const myCurrentPartnerPos = myBallPositions.find((p) => p !== myPos);
-      const currentPartnerSlot = slots.find((s) => Number(s.position) === myCurrentPartnerPos);
+      // Ball A: me + selected partner (positions 1, 2)
+      // Ball B: the remaining two players (positions 3, 4)
+      const ballBSlots = sortedSlots.filter((s) => Number(s.user_id) !== userId && Number(s.user_id) !== partnerId);
+      const bSlot = ballBSlots[0];
+      const dSlot = ballBSlots[1] || null;
 
-      if (!currentPartnerSlot) {
+      if (!bSlot) {
         return res.redirect(res.locals.tenantPath('/scoring?error=Unexpected+group+layout'));
       }
 
-      const swapToPos = Number(partnerSlot.position);
-
-      // In a 4-ball, partner = marker. Find C's old positional partner (D) so we can
-      // auto-assign the displaced B↔D pair after the swap.
-      const cOriginalPos = Number(partnerSlot.position);
-      const cOldPairPositions = cOriginalPos <= 2 ? [1, 2] : [3, 4];
-      const dPos = cOldPairPositions.find((p) => p !== cOriginalPos);
-      const dSlot = dPos != null ? slots.find((s) => Number(s.position) === dPos) : null;
-
-      // Ensure scorecards exist for A, B, C, and (if present) D.
+      // Ensure scorecards exist for all players in the group.
       const ensurePromises = [
         ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, userId),
-        ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(currentPartnerSlot.user_id)),
+        ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(bSlot.user_id)),
         ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, partnerId),
       ];
       if (dSlot) ensurePromises.push(ensureIndividualScorecard(db, scorecard.tour_id, scorecard.round_number, Number(dSlot.user_id)));
@@ -1537,9 +1537,12 @@ function scoringRouter(db) {
       const allGroupUserIds = slots.map((s) => s.user_id);
 
       await db.transaction(async (trx) => {
-        // Swap positions so A and C become positional partners.
-        await trx('tee_group_players').where({ id: partnerSlot.id }).update({ position: myCurrentPartnerPos });
-        await trx('tee_group_players').where({ id: currentPartnerSlot.id }).update({ position: swapToPos });
+        // Assign canonical positions 1-4 to all players so the group is always
+        // left in a clean state regardless of any prior position corruption.
+        await trx('tee_group_players').where({ id: mySlot.id }).update({ position: 1 });
+        await trx('tee_group_players').where({ id: partnerSlot.id }).update({ position: 2 });
+        await trx('tee_group_players').where({ id: bSlot.id }).update({ position: 3 });
+        if (dSlot) await trx('tee_group_players').where({ id: dSlot.id }).update({ position: 4 });
 
         // Clear all marker assignments in this group — all pairings change.
         await trx('scorecards')
@@ -1547,13 +1550,13 @@ function scoringRouter(db) {
           .whereIn('user_id', allGroupUserIds)
           .update({ marked_by_user_id: null, updated_at: trx.fn.now() });
 
-        // Mutual assignment for the new pair: A↔C.
+        // Mutual assignment for Ball A pair: me ↔ partner.
         await trx('scorecards').where({ id: myScorecardId }).update({ marked_by_user_id: partnerId, updated_at: trx.fn.now() });
         await trx('scorecards').where({ id: partnerScorecardId }).update({ marked_by_user_id: userId, updated_at: trx.fn.now() });
 
-        // Auto-assign the displaced pair B↔D so they don't need to re-select.
+        // Mutual assignment for Ball B pair: B ↔ D.
         if (bScorecardId && dScorecardId && dSlot) {
-          const bUserId = Number(currentPartnerSlot.user_id);
+          const bUserId = Number(bSlot.user_id);
           const dUserId = Number(dSlot.user_id);
           await trx('scorecards').where({ id: bScorecardId }).update({ marked_by_user_id: dUserId, updated_at: trx.fn.now() });
           await trx('scorecards').where({ id: dScorecardId }).update({ marked_by_user_id: bUserId, updated_at: trx.fn.now() });
