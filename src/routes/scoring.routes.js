@@ -616,8 +616,8 @@ async function buildConfirmationData(db, scorecard) {
   };
 }
 
-async function canUserEditScorecard(db, requester, scorecard) {
-  if (canEditAllScores(requester)) return true;
+async function canUserEditScorecard(db, requester, scorecard, role = null) {
+  if (canEditAllScores(role)) return true;
 
   if (scorecard.type === 'individual') {
     // Once a marker is assigned, only the card owner and the designated marker may write.
@@ -1784,7 +1784,7 @@ function scoringRouter(db) {
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
       const [permitted, roundStatus] = await Promise.all([
-        canUserEditScorecard(db, req.session.user, scorecard),
+        canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role),
         getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number),
       ]);
       if (!permitted) return res.status(403).send('Not allowed');
@@ -1795,6 +1795,7 @@ function scoringRouter(db) {
         scorecardId: scorecard.id,
         tourId: scorecard.tour_id,
         roundNumber: scorecard.round_number,
+        sessionMode: scorecard.type === 'individual',
       };
 
       return res.render('scorer/live', {
@@ -1815,7 +1816,7 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).send('Not allowed');
 
       const tour = await db('tours').where({ id: scorecard.tour_id, tenant_id: req.tenant.id }).first();
@@ -1848,7 +1849,7 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).send('Not allowed');
 
       const confirmation = await buildConfirmationData(db, scorecard);
@@ -1876,7 +1877,7 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).send('Not allowed');
 
       const confirmation = await buildConfirmationData(db, scorecard);
@@ -1909,7 +1910,7 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).send('Scorecard not found');
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).send('Not allowed');
       if (scorecard.status === 'submitted') {
         return res.status(409).json({
@@ -2001,7 +2002,7 @@ function scoringRouter(db) {
 
       // Permission: admin always passes. Others must share a tee group with the
       // scorecard owner. When requester IS the owner, reuse targetGroup (saves a query).
-      if (!canEditAllScores(req.session.user)) {
+      if (!canEditAllScores(req.tenantMembership?.role)) {
         let permitted = false;
         if (scorecard.type === 'individual') {
           const requesterGroup = Number(req.session.user.id) === Number(scorecard.user_id)
@@ -2196,7 +2197,7 @@ function scoringRouter(db) {
         mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
         scorecardId: Number(scorecard.id),
         currentUserId: Number(req.session.user.id),
-        canEditAll: Boolean(canEditAllScores(req.session.user)),
+        canEditAll: Boolean(canEditAllScores(req.tenantMembership?.role)),
         startingHole,
         currentHole,
         holeOrder,
@@ -2242,7 +2243,7 @@ function scoringRouter(db) {
         if (!sids.length) return res.status(400).json({ error: 'Invalid sids' });
 
         // Permission: same check as the full path. Admins skip the DB queries.
-        if (!canEditAllScores(req.session.user)) {
+        if (!canEditAllScores(req.tenantMembership?.role)) {
           if (scorecard.type === 'individual') {
             const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
             const targetGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id);
@@ -2312,7 +2313,7 @@ function scoringRouter(db) {
       ]);
       if (!holeConfig) return res.status(400).json({ error: 'Hole configuration missing' });
 
-      if (!canEditAllScores(req.session.user)) {
+      if (!canEditAllScores(req.tenantMembership?.role)) {
         if (scorecard.type === 'individual') {
           const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
           if (!requesterGroup || !targetGroup || requesterGroup.id !== targetGroup.id) {
@@ -2352,7 +2353,7 @@ function scoringRouter(db) {
       const scorecard = await db('scorecards').where({ id: scorecardId }).first();
       if (!scorecard) return res.status(404).json({ error: 'Scorecard not found' });
 
-      if (!canEditAllScores(req.session.user)) {
+      if (!canEditAllScores(req.tenantMembership?.role)) {
         const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
         const targetGroup = scorecard.type === 'individual'
           ? await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, scorecard.user_id)
@@ -2400,7 +2401,7 @@ function scoringRouter(db) {
       if (!round?.two_ball_enabled) return res.status(400).json({ error: 'Two-ball not enabled' });
       if (!teeGroup) return res.status(404).json({ error: 'Tee group not found' });
 
-      if (!canEditAllScores(req.session.user)) {
+      if (!canEditAllScores(req.tenantMembership?.role)) {
         const requesterGroup = await getTeeGroupForUser(db, scorecard.tour_id, scorecard.round_number, req.session.user.id);
         if (!requesterGroup || requesterGroup.id !== teeGroup.id) {
           return res.status(403).json({ error: 'Not allowed' });
@@ -2555,7 +2556,7 @@ function scoringRouter(db) {
       const requesterId = Number(req.session.user.id);
       const markerUserId = scorecard.marked_by_user_id != null ? Number(scorecard.marked_by_user_id) : null;
       const cardOwnerId = scorecard.user_id != null ? Number(scorecard.user_id) : null;
-      const isAdmin = canEditAllScores(req.session.user);
+      const isAdmin = canEditAllScores(req.tenantMembership?.role);
 
       let writeTarget; // 'marker' | 'player'
       if (isAdmin) {
@@ -2569,7 +2570,7 @@ function scoringRouter(db) {
           return res.status(403).json({ error: 'Not allowed' });
         }
       } else {
-        const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+        const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
         if (!permitted) return res.status(403).json({ error: 'Not allowed' });
         writeTarget = 'marker';
       }
@@ -2723,7 +2724,7 @@ function scoringRouter(db) {
         return res.status(409).json({ error: 'Scorecard has been submitted and is locked' });
       }
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).json({ error: 'Not allowed' });
       const roundStatus = await getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number);
       if (roundStatus.status !== 'open') {
@@ -2778,7 +2779,7 @@ function scoringRouter(db) {
         return res.status(409).send('Scorecard has been submitted and is locked');
       }
 
-      const permitted = await canUserEditScorecard(db, req.session.user, scorecard);
+      const permitted = await canUserEditScorecard(db, req.session.user, scorecard, req.tenantMembership?.role);
       if (!permitted) return res.status(403).send('Not allowed');
       const roundStatus = await getOrCreateRoundStatus(db, scorecard.tour_id, scorecard.round_number);
       if (roundStatus.status !== 'open') return res.status(409).send('Scoring is not open for this round');
