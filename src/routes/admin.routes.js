@@ -593,6 +593,45 @@ function adminRouter(db) {
         ? await calculateVirtualTeamResults(db, tourId, roundNumber)
         : [];
 
+      // --- Scoring status (individual rounds only) ---
+      let scoringStatus = [];
+      if (!isAmbrose && round.course_id) {
+        const statusCourse = await db('courses').where({ id: round.course_id }).first();
+        const totalHoles = statusCourse
+          ? Number((await db('holes').where({ course_id: statusCourse.id }).count('id as n').first()).n)
+          : 18;
+
+        const statusRows = await db('scorecards as s')
+          .join('users as u', 'u.id', 's.user_id')
+          .leftJoin('scorecard_holes as sh', 'sh.scorecard_id', 's.id')
+          .where({ 's.tour_id': tourId, 's.round_number': roundNumber, 's.type': 'individual' })
+          .whereNotNull('s.user_id')
+          .groupBy('s.id', 's.status', 's.user_id', 'u.first_name', 'u.last_name')
+          .orderByRaw('u.last_name, u.first_name')
+          .select('s.id as scorecardId', 's.status', 'u.first_name', 'u.last_name')
+          .count('sh.hole_number as holesScored')
+          .sum('sh.stableford_points as stablefordTotal');
+
+        scoringStatus = statusRows.map((r) => {
+          const holesScored = Number(r.holesScored || 0);
+          const stablefordTotal = Number(r.stablefordTotal || 0);
+          let state;
+          if (r.status === 'submitted') state = 'submitted';
+          else if (holesScored >= totalHoles) state = 'pending';
+          else if (holesScored > 0) state = 'incomplete';
+          else state = 'awaiting';
+          return {
+            name: `${r.first_name} ${r.last_name}`.trim(),
+            scorecardId: Number(r.scorecardId),
+            status: r.status,
+            state,
+            holesScored,
+            totalHoles,
+            stablefordTotal,
+          };
+        });
+      }
+
       res.render('admin/round-results', {
         title: `${dayLabel(roundNumber)} Results — ${tour.label}`,
         user: req.session.user,
@@ -609,6 +648,7 @@ function adminRouter(db) {
         skinsCarryIn,
         skinsCarryOut,
         virtualTeamResults,
+        scoringStatus,
         dayLabel,
         message: req.query.message || null,
         error: req.query.error || null,

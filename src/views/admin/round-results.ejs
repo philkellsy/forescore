@@ -41,6 +41,72 @@
     <% if (message) { %><div class="alert alert-success no-print"><%= message %></div><% } %>
     <% if (error) { %><div class="alert alert-danger no-print"><%= error %></div><% } %>
 
+    <%# ── Scoring Status ─────────────────────────── %>
+    <% if (scoringStatus && scoringStatus.length) { %>
+    <section class="card border-0 shadow-sm mb-4 no-print">
+      <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+        <h2 class="h6 mb-0">Scoring Status</h2>
+        <%
+          const nSubmitted = scoringStatus.filter(r => r.state === 'submitted').length;
+          const nPending   = scoringStatus.filter(r => r.state === 'pending').length;
+          const nIncomplete = scoringStatus.filter(r => r.state === 'incomplete').length;
+          const nAwaiting  = scoringStatus.filter(r => r.state === 'awaiting').length;
+        %>
+        <span class="small text-muted">
+          <%= nSubmitted %>/<%= scoringStatus.length %> submitted
+          <% if (nPending) { %>&nbsp;&middot;&nbsp;<span class="text-warning fw-semibold"><%= nPending %> pending</span><% } %>
+          <% if (nIncomplete + nAwaiting) { %>&nbsp;&middot;&nbsp;<span class="text-danger fw-semibold"><%= nIncomplete + nAwaiting %> incomplete</span><% } %>
+        </span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Player</th>
+              <th>Status</th>
+              <th class="text-end">Score</th>
+              <th class="text-end no-print">Holes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% scoringStatus.forEach((row) => { %>
+              <tr>
+                <td><%= row.name %></td>
+                <td>
+                  <% if (row.state === 'submitted') { %>
+                    <span class="badge text-bg-success">Submitted</span>
+                  <% } else if (row.state === 'pending') { %>
+                    <span class="badge text-bg-warning text-dark">Pending</span>
+                  <% } else if (row.state === 'incomplete') { %>
+                    <span class="badge text-bg-danger">Incomplete</span>
+                  <% } else { %>
+                    <span class="badge text-bg-secondary">Awaiting</span>
+                  <% } %>
+                </td>
+                <td class="text-end">
+                  <% if (row.state === 'submitted' || row.state === 'pending') { %>
+                    <strong><%= row.stablefordTotal %></strong> <span class="text-muted small">pts</span>
+                  <% } else { %>
+                    <span class="text-muted">—</span>
+                  <% } %>
+                </td>
+                <td class="text-end text-muted small no-print">
+                  <% if (row.state === 'incomplete') { %>
+                    <%= row.holesScored %>/<%= row.totalHoles %>
+                  <% } else if (row.state === 'awaiting') { %>
+                    0/<%= row.totalHoles %>
+                  <% } else { %>
+                    <%= row.totalHoles %>/<%= row.totalHoles %>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <% } %>
+
     <%# ── Day Results ─────────────────────────────── %>
     <section class="card border-0 shadow-sm mb-4">
       <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
