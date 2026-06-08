@@ -1247,7 +1247,7 @@ function scoringRouter(db) {
             db('scorecards as s')
               .join('users as u', 'u.id', 's.user_id')
               .where({ 's.tour_id': scorecard.tour_id, 's.round_number': scorecard.round_number, 's.marked_by_user_id': user.id, 's.type': 'individual' })
-              .select('s.user_id as player_user_id', 'u.first_name', 'u.last_name')
+              .select('s.id as player_scorecard_id', 's.user_id as player_user_id', 'u.first_name', 'u.last_name')
               .first(),
             db('tee_groups as tg')
               .join('tee_group_players as tgp', 'tgp.tee_group_id', 'tg.id')
@@ -1292,6 +1292,31 @@ function scoringRouter(db) {
               };
             } else {
               markerInfo = { assigned: false };
+            }
+
+            // Build 2-ball info from the player's perspective so the marker can
+            // swap the player's partner as well (both pairs visible on one page).
+            if (
+              playerCardRow &&
+              twoBallInfo?.groupSize === 4 &&
+              !twoBallInfo.scoringStarted &&
+              Number(playerCardRow.player_scorecard_id)
+            ) {
+              const playerSlot = slots.find((s) => Number(s.user_id) === Number(playerCardRow.player_user_id));
+              if (playerSlot) {
+                const playerPos = Number(playerSlot.position);
+                const playerBallPositions = playerPos <= 2 ? [1, 2] : [3, 4];
+                const playerPartner = slots.find((s) => Number(s.user_id) !== Number(playerCardRow.player_user_id) && playerBallPositions.includes(Number(s.position)));
+                const playerSelectablePartners = slots
+                  .filter((s) => Number(s.user_id) !== Number(playerCardRow.player_user_id) && !playerBallPositions.includes(Number(s.position)))
+                  .map((s) => ({ userId: Number(s.user_id), fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim() }));
+                twoBallInfo.playerTwoBall = {
+                  scorecardId: Number(playerCardRow.player_scorecard_id),
+                  playerName: `${playerCardRow.first_name || ''} ${playerCardRow.last_name || ''}`.trim(),
+                  myPartner: playerPartner ? { userId: Number(playerPartner.user_id), fullName: `${playerPartner.first_name || ''} ${playerPartner.last_name || ''}`.trim() } : null,
+                  selectablePartners: playerSelectablePartners,
+                };
+              }
             }
           }
         }
