@@ -72,7 +72,11 @@
                           <div class="border rounded px-2 py-1 bg-light small">
                             <div class="d-flex justify-content-between align-items-center gap-2">
                               <span><%= entry.fullName %><% if (entry.handicapDisplay) { %> <span class="text-muted">(Hcp <%= entry.handicapDisplay %>)</span><% } %></span>
-                              <strong><%= entry.scoreLabel %></strong>
+                              <% if (entry.submitted) { %>
+                                <strong><%= entry.scoreLabel %></strong>
+                              <% } else { %>
+                                <span class="text-muted fst-italic"><%= entry.scoreLabel %></span>
+                              <% } %>
                             </div>
                             <% if (entry.detail) { %><div class="text-muted"><%= entry.detail %></div><% } %>
                           </div>

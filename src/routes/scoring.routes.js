@@ -1389,15 +1389,51 @@ function scoringRouter(db) {
           }
         }
 
-        const confirmation = await buildConfirmationData(db, scorecard);
-
         const peerById = new Map(
           otherPlayers
             .filter((p) => p.peer_scorecard_id)
             .map((p) => [Number(p.peer_scorecard_id), p])
         );
-        const groupSummary = scorecard.status === 'submitted'
-          ? confirmation.entries.map((entry) => {
+
+        let groupSummary = null;
+        if (scorecard.status === 'submitted') {
+          if (scorecard.type === 'individual') {
+            // Build full tee-group summary — all group members, not just the marking pair.
+            const allGroupScorecardIds = [Number(scorecard.id)];
+            for (const p of otherPlayers) {
+              if (p.peer_scorecard_id) allGroupScorecardIds.push(Number(p.peer_scorecard_id));
+            }
+            const groupTotals = await getScoreTotalsByCard(db, allGroupScorecardIds);
+            const ownTotals = groupTotals.get(Number(scorecard.id)) || { stablefordTotal: 0 };
+            groupSummary = [
+              {
+                isTeam: false,
+                fullName: `${scorecard.first_name || ''} ${scorecard.last_name || ''}`.trim(),
+                scorecardId: Number(scorecard.id),
+                scoreLabel: `${Number(ownTotals.stablefordTotal || 0)} pts`,
+                handicapDisplay: ownHandicapDisplay,
+                isCurrentUser: true,
+                submitted: true,
+              },
+              ...otherPlayers.map((p) => {
+                const scId = p.peer_scorecard_id ? Number(p.peer_scorecard_id) : null;
+                const submitted = p.peer_status === 'submitted';
+                const totals = scId ? (groupTotals.get(scId) || { stablefordTotal: 0 }) : null;
+                return {
+                  isTeam: false,
+                  fullName: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+                  scorecardId: submitted ? scId : null,
+                  scoreLabel: submitted && totals ? `${Number(totals.stablefordTotal || 0)} pts` : 'Pending',
+                  handicapDisplay: formatHandicapDisplay(p.playing_handicap),
+                  isCurrentUser: false,
+                  submitted,
+                };
+              }),
+            ];
+          } else {
+            // Team (ambrose) — derive summary from confirmation entries as before.
+            const confirmation = await buildConfirmationData(db, scorecard);
+            groupSummary = confirmation.entries.map((entry) => {
               const entryScId = Number(entry.scorecardId);
               const isCurrentUser = entryScId === Number(scorecard.id);
               const peer = peerById.get(entryScId);
@@ -1411,7 +1447,7 @@ function scoringRouter(db) {
                   detail: `Gross ${Number(entry.grossTotal || 0)} - Hcp ${entry.teamHandicapDisplay || Number(entry.teamHandicapRaw || 0)}`,
                   handicapDisplay: null,
                   isCurrentUser,
-                  submitted
+                  submitted,
                 };
               }
               return {
@@ -1422,10 +1458,11 @@ function scoringRouter(db) {
                 detail: null,
                 handicapDisplay: entry.handicapDisplay,
                 isCurrentUser,
-                submitted
+                submitted,
               };
-            })
-          : null;
+            });
+          }
+        }
 
         return {
           ...scorecard,

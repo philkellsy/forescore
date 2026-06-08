@@ -482,6 +482,8 @@ function adminRouter(db) {
       // --- Day board ---
       const isAmbrose = round.calc_type === 'ambrose_nett';
       let dayBoard = [];
+      let championship = [];
+      let championshipRounds = [];
 
       if (isAmbrose) {
         // Ambrose: query teams scoped to this round
