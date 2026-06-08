@@ -804,7 +804,7 @@ function leaderboardRouter(db) {
           .leftJoin('courses as c', 'c.id', 'gr.course_id')
           .where({ 'gr.tour_id': tourId })
           .whereIn('gr.round_number', publishedStablefordRounds)
-          .select('gr.round_number', 'gr.tour_date', 'c.name as course_name'),
+          .select('gr.round_number', 'gr.tour_date', 'c.course_name'),
       ]);
       const roundMeta = {};
       for (const r of roundMetaRows) {
