@@ -819,19 +819,24 @@ body {
 .confirm-score-grid thead th {
   background: #ebebea;
   font-size: 0.82rem;
+  text-align: center;
 }
 
 .confirm-score-grid-header {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.1rem;
   overflow: hidden;
+  width: 100%;
 }
 
 .confirm-score-grid-header span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 100%;
+  text-align: center;
 }
 
 .confirm-score-grid th:first-child {
