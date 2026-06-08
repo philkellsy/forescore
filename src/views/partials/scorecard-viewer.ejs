@@ -13,7 +13,9 @@
   <div class="card-body">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
       <div>
-        <h2 class="h6 mb-1"><%= model.dayLabel %></h2>
+        <h2 class="h6 mb-1">
+          <%= model.dayLabel %><% if (model.courseName) { %><span class="text-muted fw-normal"> &middot; <%= model.courseName %></span><% } %><% if (model.tourDate) { %><span class="text-muted fw-normal"> &middot; <%= new Date(model.tourDate).toLocaleDateString('en-AU', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }) %></span><% } %>
+        </h2>
         <div class="fw-semibold"><%= model.title %></div>
         <% if (model.subtitle) { %><div class="text-muted small"><%= model.subtitle %></div><% } %>
       </div>
