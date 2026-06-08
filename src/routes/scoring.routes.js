@@ -328,6 +328,38 @@ async function ensureIndividualScorecard(db, tourId, roundNumber, userId) {
   }
 }
 
+async function autoAssignGroupMarkers(db, tourId, roundNumber, slots) {
+  if (!slots || slots.length < 2) return;
+  const sorted = [...slots].sort((a, b) => Number(a.position) - Number(b.position));
+  const n = sorted.length;
+
+  // markerForIdx[i] = index in sorted[] of the player who marks sorted[i]
+  // 2-ball: mutual
+  // 3-ball: A marks B, B marks C, C marks A  → sorted[i] is marked by sorted[(i+n-1)%n]
+  // 4-ball: 1↔2, 3↔4
+  let markerForIdx;
+  if (n === 2) {
+    markerForIdx = [1, 0];
+  } else if (n === 3) {
+    markerForIdx = [2, 0, 1];
+  } else {
+    markerForIdx = [1, 0, 3, 2];
+  }
+
+  await Promise.all(sorted.map((s) => ensureIndividualScorecard(db, tourId, roundNumber, Number(s.user_id))));
+
+  await db.transaction(async (trx) => {
+    for (let i = 0; i < sorted.length; i++) {
+      const playerUserId = Number(sorted[i].user_id);
+      const markerUserId = Number(sorted[markerForIdx[i]].user_id);
+      await trx('scorecards')
+        .where({ tour_id: tourId, round_number: roundNumber, type: 'individual', user_id: playerUserId })
+        .whereNull('marked_by_user_id')
+        .update({ marked_by_user_id: markerUserId, updated_at: trx.fn.now() });
+    }
+  });
+}
+
 async function nextHoleForTeamScorecard(db, scorecardId, startingHole) {
   const rows = await db('scorecard_holes').where({ scorecard_id: scorecardId }).select('hole_number');
   const scored = new Set(rows.map((r) => Number(r.hole_number)));
@@ -1211,8 +1243,7 @@ function scoringRouter(db) {
         // Marker info for individual scorecards in open rounds
         let markerInfo = null;
         if (scorecard.type === 'individual' && scorecard.round_status === 'open' && scorecard.status !== 'submitted') {
-          // "Assigned" = I have selected someone to mark (a card exists with marked_by_user_id = me).
-          const [playerCardRow, slots] = await Promise.all([
+          let [playerCardRow, slots] = await Promise.all([
             db('scorecards as s')
               .join('users as u', 'u.id', 's.user_id')
               .where({ 's.tour_id': scorecard.tour_id, 's.round_number': scorecard.round_number, 's.marked_by_user_id': user.id, 's.type': 'individual' })
@@ -1233,24 +1264,20 @@ function scoringRouter(db) {
 
           const mySlot = slots.find((s) => Number(s.user_id) === user.id);
           if (mySlot) {
-            const groupSize = slots.length;
-            const isFourBall = groupSize >= 4;
-
-            // Build the full selectable list (all valid candidates).
-            // 4-ball: only positional partner — no change possible, so list stays empty unless unassigned.
-            // 3-ball: anyone in the group is selectable (last-write-wins; displaced players re-select).
-            let selectablePlayers = [];
-            if (!isFourBall) {
-              selectablePlayers = slots
-                .filter((s) => Number(s.user_id) !== user.id)
-                .map((s) => ({ userId: Number(s.user_id), fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim() }));
-            } else if (!playerCardRow) {
-              // 4-ball unassigned: show the positional partner as the only option.
-              const myPos = Number(mySlot.position);
-              const pairPositions = myPos <= 2 ? [1, 2] : [3, 4];
-              selectablePlayers = slots
-                .filter((s) => Number(s.user_id) !== user.id && pairPositions.includes(Number(s.position)))
-                .map((s) => ({ userId: Number(s.user_id), fullName: `${s.first_name || ''} ${s.last_name || ''}`.trim() }));
+            // Auto-assign markers based on tee group position if no assignment exists yet.
+            // Idempotent: only updates rows where marked_by_user_id IS NULL.
+            if (!playerCardRow && scorecard.marked_by_user_id == null) {
+              await autoAssignGroupMarkers(db, scorecard.tour_id, scorecard.round_number, slots);
+              const [freshCard, freshSc] = await Promise.all([
+                db('scorecards as s')
+                  .join('users as u', 'u.id', 's.user_id')
+                  .where({ 's.tour_id': scorecard.tour_id, 's.round_number': scorecard.round_number, 's.marked_by_user_id': user.id, 's.type': 'individual' })
+                  .select('s.user_id as player_user_id', 'u.first_name', 'u.last_name')
+                  .first(),
+                db('scorecards').where({ id: scorecard.id }).select('marked_by_user_id').first(),
+              ]);
+              playerCardRow = freshCard;
+              scorecard.marked_by_user_id = freshSc?.marked_by_user_id ?? null;
             }
 
             if (playerCardRow) {
@@ -1261,11 +1288,10 @@ function scoringRouter(db) {
                 assigned: true,
                 playerBeingMarked: `${playerCardRow.first_name || ''} ${playerCardRow.last_name || ''}`.trim(),
                 markedBy: markerRow ? `${markerRow.first_name || ''} ${markerRow.last_name || ''}`.trim() : null,
-                // 3-ball only: alternate players the marker could switch to.
-                changeOptions: isFourBall ? [] : selectablePlayers.filter((p) => p.userId !== Number(playerCardRow.player_user_id)),
+                changeOptions: [],
               };
             } else {
-              markerInfo = { assigned: false, selectablePlayers };
+              markerInfo = { assigned: false };
             }
           }
         }

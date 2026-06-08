@@ -70,6 +70,29 @@ async function ensureDayScorecards(db, tourId, roundNumber, calcType) {
       }
     }
   }
+
+  // Auto-assign markers based on tee group position for each group.
+  // Idempotent: only updates scorecards where marked_by_user_id IS NULL.
+  const groups = await db('tee_groups').where({ tour_id: tourId, round_number: roundNumber }).select('id');
+  for (const group of groups) {
+    const groupSlots = await db('tee_group_players')
+      .where({ tee_group_id: group.id })
+      .select('user_id', 'position')
+      .orderBy('position');
+    if (groupSlots.length >= 2) {
+      const sorted = [...groupSlots].sort((a, b) => Number(a.position) - Number(b.position));
+      const n = sorted.length;
+      const markerForIdx = n === 2 ? [1, 0] : n === 3 ? [2, 0, 1] : [1, 0, 3, 2];
+      await db.transaction(async (trx) => {
+        for (let i = 0; i < sorted.length; i++) {
+          await trx('scorecards')
+            .where({ tour_id: tourId, round_number: roundNumber, type: 'individual', user_id: Number(sorted[i].user_id) })
+            .whereNull('marked_by_user_id')
+            .update({ marked_by_user_id: Number(sorted[markerForIdx[i]].user_id), updated_at: trx.fn.now() });
+        }
+      });
+    }
+  }
 }
 
 function adminRouter(db) {

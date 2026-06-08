@@ -155,22 +155,6 @@
                         <% } %>
                         <% if (scorecard.markerInfo.markedBy) { %>
                           <p class="small mb-3 text-muted">Your marker: <%= scorecard.markerInfo.markedBy %></p>
-                        <% } else { %>
-                          <p class="small mb-3 text-muted">Waiting for your marker to select you.</p>
-                        <% } %>
-                        <% if (scorecard.markerInfo.changeOptions && scorecard.markerInfo.changeOptions.length) { %>
-                          <p class="small text-muted mb-1">Switch player:</p>
-                          <div class="d-flex gap-2 flex-wrap mb-3">
-                            <% scorecard.markerInfo.changeOptions.forEach((p) => { %>
-                              <form action="<%= tenantPath('/scoring/select-player') %>" method="post" class="m-0" data-no-loading>
-                                <input type="hidden" name="playerUserId" value="<%= p.userId %>" />
-                                <input type="hidden" name="roundNumber" value="<%= scorecard.round_number %>" />
-                                <button type="submit" class="btn btn-sm btn-outline-secondary">
-                                  <i class="fa-solid fa-arrows-rotate me-1"></i><%= p.fullName %>
-                                </button>
-                              </form>
-                            <% }) %>
-                          </div>
                         <% } %>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
                           <a class="btn btn-sm btn-success" href="<%= tenantPath(`/scoring/session/${scorecard.round_number}`) %>">
@@ -179,19 +163,6 @@
                           <a class="btn btn-sm btn-outline-secondary" href="<%= tenantPath(`/scoring/${scorecard.id}/group`) %>">
                             <i class="fa-solid fa-users me-1"></i>Group
                           </a>
-                        </div>
-                      <% } else if (scorecard.markerInfo.selectablePlayers && scorecard.markerInfo.selectablePlayers.length) { %>
-                        <p class="small fw-semibold mb-2">Select your player to mark:</p>
-                        <div class="d-flex gap-2 flex-wrap">
-                          <% scorecard.markerInfo.selectablePlayers.forEach((p) => { %>
-                            <form action="<%= tenantPath('/scoring/select-player') %>" method="post" class="m-0" data-no-loading>
-                              <input type="hidden" name="playerUserId" value="<%= p.userId %>" />
-                              <input type="hidden" name="roundNumber" value="<%= scorecard.round_number %>" />
-                              <button type="submit" class="btn btn-sm btn-outline-secondary">
-                                <i class="fa-solid fa-user-plus me-1"></i><%= p.fullName %>
-                              </button>
-                            </form>
-                          <% }) %>
                         </div>
                       <% } else { %>
                         <p class="text-muted small mb-0">Waiting for tee time assignment.</p>

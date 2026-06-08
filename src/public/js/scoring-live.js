@@ -282,12 +282,9 @@
   }
 
   function isMarkerPathForCard(scorecardId) {
-    // Admins/owners always write authoritative scores regardless of marker assignment.
-    if (ctx?.canEditAll) return true;
     const player = ctx?.players?.find((p) => Number(p.scorecardId) === Number(scorecardId));
     if (!player) return true;
     if (player.markedByUserId == null) {
-      // No marker assigned — only the card owner can enter scores (self-scoring).
       return Number(ctx.currentUserId) === Number(player.participantId);
     }
     return Number(ctx.currentUserId) === Number(player.markedByUserId);
