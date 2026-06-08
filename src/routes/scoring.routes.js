@@ -1220,10 +1220,15 @@ function scoringRouter(db) {
               .count('sh.id as cnt');
             const scoringStarted = Number(scoredCount) > 0;
 
+            // DEBUG: remove before merge
+            console.log('[twoBall debug] sc.user_id=%s groupSize=%d myPosition=%d members=%j', scorecard.user_id, groupSize, myPosition, membersWithHcp.map((m) => ({ uid: m.userId, pos: m.position, isMe: m.isMe })));
+
             if (groupSize === 4) {
               const myBallPositions = myPosition <= 2 ? [1, 2] : [3, 4];
               const myPartner = membersWithHcp.find((m) => !m.isMe && myBallPositions.includes(m.position));
               const selectablePartners = scoringStarted ? [] : membersWithHcp.filter((m) => !m.isMe && !myBallPositions.includes(m.position));
+              // DEBUG: remove before merge
+              console.log('[twoBall debug] myBallPositions=%j scoringStarted=%s selectablePartners=%j', myBallPositions, scoringStarted, selectablePartners.map((m) => ({ uid: m.userId, pos: m.position })));
               twoBallInfo = { groupSize: 4, twoBallType, myPartner: myPartner || null, selectablePartners, scoringStarted };
             } else if (groupSize === 3) {
               const sorted = [...membersWithHcp].sort((a, b) => a.courseHcp - b.courseHcp);
