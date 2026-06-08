@@ -2115,6 +2115,7 @@ function scoringRouter(db) {
         mode: scorecard.type === 'team' ? 'ambrose' : 'individual',
         scorecardId: Number(scorecard.id),
         currentUserId: Number(req.session.user.id),
+        canEditAll: Boolean(canEditAllScores(req.session.user)),
         startingHole,
         currentHole,
         holeOrder,
