@@ -520,12 +520,30 @@ async function buildConfirmationData(db, scorecard) {
   const holeConfig = await getHoleConfig(db, scorecard.tour_id, scorecard.round_number, 1);
   if (!holeConfig) return { mode: scorecard.type === 'team' ? 'ambrose' : 'individual', entries: [], hasMissing: true };
 
-  const context =
-    scorecard.type === 'individual'
-      ? await getGroupEntriesForHole(db, scorecard, holeConfig)
-      : await getAmbroseEntriesForHole(db, scorecard, holeConfig);
-
-  const entryCards = context.entries || [];
+  let entryCards;
+  if (scorecard.type === 'individual') {
+    // Scope to just the single scorecard being confirmed — not all group members.
+    const [player, roundHcp, tourHcp] = await Promise.all([
+      db('users').where({ id: scorecard.user_id }).select('id', 'first_name', 'last_name').first(),
+      db('player_day_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id, round_number: scorecard.round_number }).first(),
+      db('player_handicaps').where({ tour_id: scorecard.tour_id, user_id: scorecard.user_id }).first(),
+    ]);
+    const isHcpOverride = !!roundHcp;
+    const idx = isHcpOverride ? Number(roundHcp.handicap_index) : (tourHcp ? Number(tourHcp.playing_handicap || 0) : 0);
+    const playingHandicap = await getCourseHandicapForRound(db, scorecard.tour_id, scorecard.round_number, idx, null, null, isHcpOverride);
+    entryCards = [{
+      type: 'player',
+      scorecardId: Number(scorecard.id),
+      participantId: Number(scorecard.user_id),
+      displayName: toPlayerLabel(player?.first_name, player?.last_name),
+      fullName: `${player?.first_name || ''} ${player?.last_name || ''}`.trim(),
+      playingHandicap,
+      handicapDisplay: formatHandicapDisplay(playingHandicap),
+    }];
+  } else {
+    const context = await getAmbroseEntriesForHole(db, scorecard, holeConfig);
+    entryCards = context.entries || [];
+  }
   const scorecardIds = entryCards
     .map((entry) => Number(entry.scorecardId))
     .filter((id) => Number.isFinite(id));
@@ -1867,12 +1885,7 @@ function scoringRouter(db) {
       }
 
       const canSubmit = scorecard.status !== 'submitted' && !confirmation.hasMissing && !confirmation.hasConflict;
-      const groupScorecardIds = [...new Set(
-        (confirmation.entries || [])
-          .map((entry) => Number(entry.scorecardId))
-          .filter((id) => Number.isFinite(id))
-      )];
-      const submitSnapshot = await buildGroupSnapshot(db, groupScorecardIds);
+      const submitSnapshot = await buildGroupSnapshot(db, [scorecardId]);
 
       return res.render('scorer/confirm-final', {
         title: 'Submit Scorecard',
@@ -1908,7 +1921,7 @@ function scoringRouter(db) {
       // Only the designated marker (or admin) may submit — the player's role is to confirm, not submit.
       const requesterId = Number(req.session.user.id);
       const markerUserId = scorecard.marked_by_user_id != null ? Number(scorecard.marked_by_user_id) : null;
-      if (!canEditAllScores(req.session.user) && markerUserId != null && requesterId !== markerUserId) {
+      if (!canEditAllScores(req.tenantMembership?.role) && markerUserId != null && requesterId !== markerUserId) {
         return res.status(403).send('Only the marker can submit this scorecard');
       }
 
@@ -1922,34 +1935,23 @@ function scoringRouter(db) {
       if (confirmation.hasConflict) {
         return res.status(409).json({
           error: 'score_conflict',
-          message: 'Resolve all score disagreements before submission.'
+          message: 'Score disagreement must be resolved before submission.'
         });
       }
 
-      const groupScorecardIds = [...new Set(
-        (confirmation.entries || [])
-          .map((entry) => Number(entry.scorecardId))
-          .filter((id) => Number.isFinite(id))
-      )];
-      if (!groupScorecardIds.length) {
-        return res.status(409).json({
-          error: 'missing_scores',
-          message: 'No scorecards found to submit.'
-        });
-      }
-
+      // Submit only this single scorecard — not the whole group.
       const submittedSnapshot = String(req.body?.submitSnapshot || '').trim();
-      const currentSnapshot = await buildGroupSnapshot(db, groupScorecardIds);
+      const currentSnapshot = await buildGroupSnapshot(db, [scorecardId]);
       if (!submittedSnapshot || submittedSnapshot !== currentSnapshot) {
         return res.status(409).json({
           error: 'stale_scores',
-          message: 'Scores changed since confirmation. Please review conflicts before submitting.',
+          message: 'Scores changed since confirmation. Please review before submitting.',
           redirect: res.locals.tenantPath(`/scoring/confirm/${scorecardId}?error=stale_scores`)
         });
       }
 
       const updated = await db('scorecards')
-        .whereIn('id', groupScorecardIds)
+        .where({ id: scorecardId })
         .whereNot({ status: 'submitted' })
         .update({ status: 'submitted', updated_at: db.fn.now() });
 
@@ -1964,7 +1966,7 @@ function scoringRouter(db) {
 
       return res.json({
         ok: true,
-        redirect: res.locals.tenantPath('/scoring?message=Group%20scores%20submitted%20successfully')
+        redirect: res.locals.tenantPath('/scoring?message=Scores%20submitted%20successfully')
       });
     } catch (error) {
       return next(error);
