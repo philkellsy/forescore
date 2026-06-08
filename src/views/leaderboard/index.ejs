@@ -269,7 +269,10 @@
                     <% activeDayView.twoBallResults.forEach((row) => { %>
                       <tr>
                         <td class="fw-semibold text-muted"><%= row.position %></td>
-                        <td><strong><%= row.displayName %></strong></td>
+                        <td>
+                          <strong><%= row.displayName %></strong>
+                          <% if (row.countbackApplied) { %><span class="text-muted small ms-1">cb</span><% } %>
+                        </td>
                         <td class="text-end fw-semibold"><%= row.total %></td>
                       </tr>
                     <% }) %>

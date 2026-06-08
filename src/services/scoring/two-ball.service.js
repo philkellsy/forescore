@@ -1,5 +1,12 @@
 'use strict';
 
+// Absolute back-9 hole numbers — matches the individual stableford countback convention
+const BACK_9 = [10, 11, 12, 13, 14, 15, 16, 17, 18];
+
+function holeSum(pointsByHole, holes) {
+  return holes.reduce((sum, h) => sum + (pointsByHole.get(h) || 0), 0);
+}
+
 async function calculateTwoBallLeaderboard(db, tourId, roundNumber, twoBallType) {
   const groupPlayers = await db('tee_group_players as tgp')
     .join('tee_groups as tg', 'tg.id', 'tgp.tee_group_id')
@@ -47,19 +54,43 @@ async function calculateTwoBallLeaderboard(db, tourId, roundNumber, twoBallType)
     const s2 = scoresByUser.get(p2.userId);
     if (!s1 || !s2) continue;
 
+    // Build the pair's per-hole score (best-ball or aggregate) for total + countback
     const allHoles = new Set([...s1.pointsByHole.keys(), ...s2.pointsByHole.keys()]);
-    let total = 0;
+    const pairByHole = new Map();
     for (const hole of allHoles) {
       const pts1 = s1.pointsByHole.get(hole) || 0;
       const pts2 = s2.pointsByHole.get(hole) || 0;
-      total += twoBallType === 'best_ball' ? Math.max(pts1, pts2) : pts1 + pts2;
+      pairByHole.set(hole, twoBallType === 'best_ball' ? Math.max(pts1, pts2) : pts1 + pts2);
     }
 
-    results.push({ displayName: `${s1.name} & ${s2.name}`, total });
+    const total = [...pairByHole.values()].reduce((sum, v) => sum + v, 0);
+
+    results.push({
+      displayName: `${s1.name} & ${s2.name}`,
+      total,
+      countbackLast9: holeSum(pairByHole, BACK_9),
+      countbackLast6: holeSum(pairByHole, BACK_9.slice(3)),
+      countbackLast3: holeSum(pairByHole, BACK_9.slice(6)),
+      countbackLast1: holeSum(pairByHole, BACK_9.slice(8)),
+    });
   }
 
-  results.sort((a, b) => b.total - a.total);
-  return results.map((r, i) => ({ ...r, position: i + 1 }));
+  results.sort((a, b) =>
+    (b.total - a.total) ||
+    (b.countbackLast9 - a.countbackLast9) ||
+    (b.countbackLast6 - a.countbackLast6) ||
+    (b.countbackLast3 - a.countbackLast3) ||
+    (b.countbackLast1 - a.countbackLast1) ||
+    String(a.displayName).localeCompare(String(b.displayName))
+  );
+
+  // Mark rows where countback separated a tie (same total as adjacent row)
+  const totals = results.map((r) => r.total);
+  return results.map((r, i) => ({
+    ...r,
+    position: i + 1,
+    countbackApplied: r.total === totals[i - 1] || r.total === totals[i + 1],
+  }));
 }
 
 module.exports = { calculateTwoBallLeaderboard };
