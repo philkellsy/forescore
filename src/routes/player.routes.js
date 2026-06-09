@@ -83,6 +83,8 @@ function playerRouter(db) {
           championshipStanding: null,
           skinsSummary: null,
           daysSummary: [],
+          rounds: [],
+          nextItinerary: [],
           byDate: {},
           todayKey: _now.toISOString().slice(0, 10),
           tomorrowKey: new Date(_now.getTime() + 86400000).toISOString().slice(0, 10),
@@ -232,6 +234,7 @@ function playerRouter(db) {
       const publishedStablefordRounds = stablefordRoundNumbers.filter((rn) => publishedRoundNumbers.includes(rn));
 
       let championshipStanding = null;
+      let dayPositions = {};
       if (publishedStablefordRounds.length) {
         const boards = await calculateStablefordLeaderboards(db, tourId, {
           roundNumbers: publishedStablefordRounds,
@@ -248,6 +251,13 @@ function playerRouter(db) {
             points: Number(row.total || row.points || 0),
             pointsFromLeader: Math.max(0, leaderPoints - Number(row.total || row.points || 0)),
           };
+        }
+        for (const rn of publishedStablefordRounds) {
+          const dayBoard = boards?.byDay?.[rn] || [];
+          const di = dayBoard.findIndex((r) => Number(r.userId) === Number(user.id));
+          if (di >= 0) {
+            dayPositions[rn] = { position: di + 1, total: dayBoard.length, points: Number(dayBoard[di].total || 0) };
+          }
         }
       }
 
@@ -404,6 +414,33 @@ function playerRouter(db) {
       const todayKey = new Date().toISOString().slice(0, 10);
       const tomorrowKey = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
+      // Build a flat rounds list with round metadata merged in
+      const roundMetaByNumber = {};
+      for (const key of Object.keys(byDate)) {
+        for (const entry of byDate[key]) {
+          if (entry._kind === 'round') {
+            roundMetaByNumber[entry.round_number] = { tourDate: key, courseName: entry.course_name, calcType: entry.calc_type };
+          }
+        }
+      }
+      const rounds = daysSummary.map((d) => ({
+        ...d,
+        ...roundMetaByNumber[d.roundNumber],
+        dayPosition: dayPositions[d.roundNumber] || null,
+      })).sort((a, b) => a.roundNumber - b.roundNumber);
+
+      // Next upcoming non-round itinerary items
+      const nextItinerary = [];
+      for (const key of Object.keys(byDate).sort()) {
+        if (key < todayKey) continue;
+        for (const entry of byDate[key]) {
+          if (entry._kind === 'item' && entry._display !== 'checkout' && nextItinerary.length < 3) {
+            nextItinerary.push({ ...entry, dateKey: key });
+          }
+        }
+        if (nextItinerary.length >= 3) break;
+      }
+
       return res.render('player/dashboard', {
         title: 'Dashboard',
         activeTour,
@@ -413,6 +450,8 @@ function playerRouter(db) {
         championshipStanding,
         skinsSummary,
         daysSummary,
+        rounds,
+        nextItinerary,
         byDate,
         todayKey,
         tomorrowKey,
