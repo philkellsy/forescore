@@ -57,11 +57,17 @@
               <h2 class="h6 mb-0"><i class="fa-solid fa-flag fa-sm me-2 text-muted"></i>Rounds</h2>
               <a href="<%= tenantPath('/scoring') %>" class="text-muted small">Scoring <i class="fa-solid fa-chevron-right fa-xs"></i></a>
             </div>
-            <% if (!rounds || !rounds.length) { %>
+            <%
+              const closedRounds = (rounds || []).filter(r => r.status === 'closed');
+              const lastPlayed = closedRounds.length ? closedRounds[closedRounds.length - 1] : null;
+              const nextRound = (rounds || []).find(r => r.status === 'open') || (rounds || []).find(r => r.status === 'draft');
+              const dashRounds = [lastPlayed, nextRound].filter(Boolean).filter((r, i, a) => a.findIndex(x => x.roundNumber === r.roundNumber) === i);
+            %>
+            <% if (!dashRounds.length) { %>
               <div class="card-body text-muted small">No rounds scheduled yet.</div>
             <% } else { %>
               <ul class="list-group list-group-flush">
-                <% rounds.forEach((r) => {
+                <% dashRounds.forEach((r) => {
                   const relLabel = roundRelLabel(r.tourDate);
                   const dateStr = relLabel || fmtDate(r.tourDate);
                   const isPast = r.tourDate && r.tourDate < todayKey;
