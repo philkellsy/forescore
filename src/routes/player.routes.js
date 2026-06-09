@@ -82,6 +82,7 @@ function playerRouter(db) {
           todayHandicap: null,
           championshipStanding: null,
           skinsSummary: null,
+          prizeWins: [],
           daysSummary: [],
           rounds: [],
           nextItinerary: [],
@@ -283,6 +284,55 @@ function playerRouter(db) {
         }
       }
 
+      // Build unified prize wins list
+      const parsePrizes = (v) => Array.isArray(v) ? v : (v ? JSON.parse(v) : []);
+      const tourPrizeList = parsePrizes(activeTour.tour_prizes);
+      const dailyPrizeList = parsePrizes(activeTour.daily_prizes);
+
+      const prizeWins = [];
+
+      // Championship prize
+      if (championshipStanding && tourPrizeList.length >= championshipStanding.place) {
+        const p = tourPrizeList[championshipStanding.place - 1];
+        if (Number(p.amount) > 0) {
+          prizeWins.push({ label: `Championship — ${p.label || `${championshipStanding.place}${['st','nd','rd'][championshipStanding.place-1]||'th'}`}`, amount: Number(p.amount), type: 'championship' });
+        }
+      }
+
+      // Daily stableford prizes
+      for (const [rn, pos] of Object.entries(dayPositions)) {
+        if (dailyPrizeList.length >= pos.position) {
+          const p = dailyPrizeList[pos.position - 1];
+          if (Number(p.amount) > 0) {
+            prizeWins.push({ label: `${dayLabel(Number(rn))} — ${p.label || `${pos.position}${['st','nd','rd'][pos.position-1]||'th'}`}`, amount: Number(p.amount), type: 'daily' });
+          }
+        }
+      }
+
+      // Skins
+      if (skinsSummary && skinsSummary.totalPayout > 0) {
+        prizeWins.push({ label: `Skins (${skinsSummary.totalSkins} skin${skinsSummary.totalSkins !== 1 ? 's' : ''})`, amount: skinsSummary.totalPayout, type: 'skins' });
+      }
+
+      // Novelty wins
+      if (publishedRoundNumbers.length) {
+        const noveltyWins = await db('novelty_results as nr')
+          .join('novelty_events as ne', 'ne.id', 'nr.novelty_event_id')
+          .where('nr.winner_user_id', user.id)
+          .where('ne.tour_id', tourId)
+          .where(function () { this.where('nr.is_no_winner', false).orWhereNull('nr.is_no_winner'); })
+          .whereIn('ne.round_number', publishedRoundNumbers)
+          .select('ne.label', 'ne.novelty_type', 'ne.prize_amount', 'ne.round_number');
+        for (const w of noveltyWins) {
+          const amount = w.novelty_type === 'Other'
+            ? Number(w.prize_amount || 0)
+            : w.novelty_type === 'NTP'
+            ? Number(activeTour.prize_ntp_amount || 0)
+            : Number(activeTour.prize_long_drive_amount || 0);
+          prizeWins.push({ label: w.label || w.novelty_type, amount, type: 'novelty' });
+        }
+      }
+
       const daysSummary = await Promise.all(
         allRoundRows.map(async (roundRow) => {
           const [teeGroupRow, scorecard] = await Promise.all([
@@ -449,6 +499,7 @@ function playerRouter(db) {
         todayHandicap,
         championshipStanding,
         skinsSummary,
+        prizeWins,
         daysSummary,
         rounds,
         nextItinerary,
