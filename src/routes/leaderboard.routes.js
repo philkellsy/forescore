@@ -65,6 +65,7 @@ async function getNoveltyResults(db, tourId, publishedRoundNumbers, tour = null)
       prizeAmount,
       result: result ? {
         isNoWinner: Boolean(result.is_no_winner),
+        winnerId: result.winner_user_id || null,
         winnerName: result.winner_user_id ? (winnerById.get(result.winner_user_id) || null) : null,
       } : null,
     };
@@ -83,9 +84,74 @@ function isAdminViewer(req) {
     || Boolean(req.res?.locals?.hasTourAdminAccess);
 }
 
+function buildPayoutsData(boards, tour, skinsLeaderboard, noveltyResults) {
+  const parsePrizes = (v) => Array.isArray(v) ? v : (v ? JSON.parse(v) : []);
+  const tourPrizes = parsePrizes(tour.tour_prizes);
+  const dailyPrizeList = parsePrizes(tour.daily_prizes);
+
+  const byPlayer = new Map();
+  function addPrize(userId, name, prize) {
+    if (!byPlayer.has(userId)) byPlayer.set(userId, { userId, name, prizes: [] });
+    byPlayer.get(userId).prizes.push(prize);
+  }
+
+  // Championship prizes
+  const championship = boards?.stableford?.championship || [];
+  for (let i = 0; i < Math.min(tourPrizes.length, championship.length); i++) {
+    const p = tourPrizes[i];
+    const row = championship[i];
+    if (Number(p.amount) > 0 && row) {
+      addPrize(row.userId, row.name, { label: `Championship — ${p.label}`, amount: Number(p.amount), type: 'championship' });
+    }
+  }
+
+  // Daily stableford prizes
+  const byDay = boards?.stableford?.byDay || {};
+  for (const [rnStr, dayBoard] of Object.entries(byDay)) {
+    const rn = Number(rnStr);
+    for (let i = 0; i < Math.min(dailyPrizeList.length, dayBoard.length); i++) {
+      const p = dailyPrizeList[i];
+      const row = dayBoard[i];
+      if (Number(p.amount) > 0 && row) {
+        addPrize(row.userId, row.name, { label: `${dayLabel(rn)} — ${p.label}`, amount: Number(p.amount), type: 'daily' });
+      }
+    }
+  }
+
+  // Skins
+  for (const row of (skinsLeaderboard?.playerRows || [])) {
+    if (row.payoutAmount > 0) {
+      addPrize(row.participantId, row.name, {
+        label: `Skins (${row.skinsWon} skin${row.skinsWon !== 1 ? 's' : ''})`,
+        amount: row.payoutAmount,
+        type: 'skins',
+      });
+    }
+  }
+
+  // Novelty wins
+  for (const ne of (noveltyResults || [])) {
+    if (!ne.result || ne.result.isNoWinner || !ne.result.winnerId || !ne.prizeAmount) continue;
+    addPrize(ne.result.winnerId, ne.result.winnerName, {
+      label: ne.label || ne.noveltyType,
+      amount: ne.prizeAmount,
+      type: 'novelty',
+    });
+  }
+
+  const players = [...byPlayer.values()]
+    .map((p) => ({ ...p, total: p.prizes.reduce((s, x) => s + Number(x.amount || 0), 0) }))
+    .filter((p) => p.total > 0)
+    .sort((a, b) => b.total - a.total);
+
+  const grandTotal = players.reduce((s, p) => s + p.total, 0);
+  return { players, grandTotal };
+}
+
 function normalizeLeaderboardView(raw, validDayNumbers, publishedDayNumbers) {
   const candidate = String(raw || '').trim().toLowerCase();
-  if (['championship', 'skins', 'novelty'].includes(candidate)) return candidate;
+  if (candidate === 'skins') return 'payouts'; // legacy alias
+  if (['championship', 'payouts', 'novelty'].includes(candidate)) return candidate;
   const dayMatch = candidate.match(/^day-(\d+)$/);
   if (dayMatch && (validDayNumbers || []).includes(Number(dayMatch[1]))) return candidate;
   // Default: most recent published day (not just visible — admins shouldn't land on an unreleased day by default)
@@ -948,6 +1014,7 @@ function leaderboardRouter(db) {
 
       const skinsPotPerHole = Number(boards.skins.activePlayerCount || 0) * Number(tour.skins_amount_per_player_per_hole || 0);
       const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinsPotPerHole);
+      const payoutsData = buildPayoutsData(visibleBoards, tour, skinsLeaderboard, noveltyResults);
 
       const vtEnabledRounds = roundStates.filter((r) => r.virtualTeamsEnabled && effectiveVisible.includes(r.roundNumber));
       const virtualTeamResultsByRound = {};
@@ -983,6 +1050,7 @@ function leaderboardRouter(db) {
         boards: visibleBoards,
         skinsDetail,
         skinsLeaderboard,
+        payoutsData,
         championshipTable,
         playerMetaById,
         noveltyResults,
@@ -1021,6 +1089,7 @@ function leaderboardRouter(db) {
           },
           skinsDetail: [],
           skinsLeaderboard: { playerRows: [], teamRows: [] },
+          payoutsData: { players: [], grandTotal: 0 },
           championshipTable: [],
           playerMetaById: {},
           noveltyResults: [],
@@ -1080,6 +1149,7 @@ function leaderboardRouter(db) {
 
       const skinsPotPerHole = Number(boards.skins.activePlayerCount || 0) * Number(active.skins_amount_per_player_per_hole || 0);
       const skinsLeaderboard = buildSkinsLeaderboard(visibleBoards.skins.holes, skinsPotPerHole);
+      const payoutsData = buildPayoutsData(visibleBoards, active, skinsLeaderboard, noveltyResults);
 
       const vtEnabledRounds = roundStates.filter((r) => r.virtualTeamsEnabled && effectiveVisible.includes(r.roundNumber));
       const virtualTeamResultsByRound = {};
@@ -1115,6 +1185,7 @@ function leaderboardRouter(db) {
         boards: visibleBoards,
         skinsDetail,
         skinsLeaderboard,
+        payoutsData,
         championshipTable,
         playerMetaById,
         noveltyResults,
