@@ -1842,16 +1842,15 @@ function adminRouter(db) {
 
   router.post('/courses/import', anyAdminGuard, async (req, res, next) => {
     try {
-      const apiCourseId = parseInt(req.body.apiCourseId, 10);
+      const apiCourseId = parseInt(req.body.apiCourseId, 10) || null;
       const apiTeeName = String(req.body.apiTeeName || '').trim();
       const apiGender = String(req.body.gender || 'male'); // 'male'|'female' from import UI
       const courseGenderStored = apiGender === 'female' ? 'womens' : 'mens';
       const courseName = String(req.body.courseName || '').trim();
       const teeName = String(req.body.teeName || '').trim();
       const holesJson = String(req.body.holesJson || '[]');
-      const apiTeeKey = `${apiGender === 'female' ? 'f' : 'm'}:${apiTeeName}`;
 
-      if (!apiCourseId || !apiTeeName || !courseName || !teeName) {
+      if (!courseName || !teeName) {
         return res.redirect(`${res.locals.tenantPath('/admin/courses/import')}?error=Missing+required+fields`);
       }
 
@@ -1863,16 +1862,20 @@ function adminRouter(db) {
         return res.redirect(`${res.locals.tenantPath('/admin/courses/import')}?error=Course+does+not+have+18+holes`);
       }
 
-      const existing = await db('courses')
-        .where({ tenant_id: req.tenant.id, api_course_id: apiCourseId, api_tee_key: apiTeeKey })
-        .first();
-      if (existing) {
-        const label = `${existing.course_name} — ${existing.tee_name}`;
-        return res.redirect(`${res.locals.tenantPath('/admin/courses/import')}?error=${encodeURIComponent(`Already imported as "${label}"`)}`);
+      if (apiCourseId && apiTeeName) {
+        const apiTeeKey = `${apiGender === 'female' ? 'f' : 'm'}:${apiTeeName}`;
+        const existing = await db('courses')
+          .where({ tenant_id: req.tenant.id, api_course_id: apiCourseId, api_tee_key: apiTeeKey })
+          .first();
+        if (existing) {
+          const label = `${existing.course_name} — ${existing.tee_name}`;
+          return res.redirect(`${res.locals.tenantPath('/admin/courses/import')}?error=${encodeURIComponent(`Already imported as "${label}"`)}`);
+        }
       }
 
       const courseRating = req.body.courseRating ? parseFloat(req.body.courseRating) : null;
       const slopeRating = req.body.slopeRating ? parseInt(req.body.slopeRating, 10) : null;
+      const apiTeeKey = apiCourseId && apiTeeName ? `${apiGender === 'female' ? 'f' : 'm'}:${apiTeeName}` : null;
 
       const [course] = await db('courses').insert({
         tenant_id: req.tenant.id,
@@ -1881,8 +1884,8 @@ function adminRouter(db) {
         gender: courseGenderStored,
         course_rating: Number.isFinite(courseRating) ? courseRating : null,
         slope_rating: Number.isFinite(slopeRating) ? slopeRating : null,
-        api_course_id: apiCourseId,
-        api_tee_key: apiTeeKey,
+        api_course_id: apiCourseId || null,
+        api_tee_key: apiTeeKey || null,
       }).returning('*');
 
       const holes = apiHoles.slice(0, 18).map((h, i) => {

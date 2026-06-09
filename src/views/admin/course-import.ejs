@@ -15,7 +15,7 @@
   <%- include('../partials/nav') %>
   <main class="container py-3 py-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <h1 class="h4 mb-0">Import Course from API</h1>
+      <h1 class="h4 mb-0">Import Course</h1>
       <a class="btn btn-outline-secondary btn-sm" href="<%= tenantPath('/admin/courses') %>">Back to Courses</a>
     </div>
 
@@ -28,6 +28,19 @@
         You can still <a href="<%= tenantPath('/admin/courses') %>" class="alert-link">add courses manually</a>.
       </div>
     <% } %>
+
+    <%# BlueGolf paste section %>
+    <section class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-transparent">
+        <h2 class="h6 mb-0">Paste from BlueGolf</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-2">Copy the scorecard table from BlueGolf (select from the Tee row through to the Hcp row) and paste below.</p>
+        <textarea id="bluegolfInput" class="form-control form-control-sm font-monospace mb-2" rows="5" placeholder="Tee&#9;1&#9;2&#9;3&#9;...&#10;yds&#9;503&#9;387&#9;...&#10;Par&#9;5&#9;4&#9;4&#9;...&#10;Hcp&#9;13&#9;9&#9;3&#9;..."></textarea>
+        <div id="bluegolfError" class="alert alert-danger py-2 small d-none"></div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bluegolfParseBtn">Parse</button>
+      </div>
+    </section>
 
     <section class="card border-0 shadow-sm mb-3 <%= !hasApiKey ? 'opacity-50 pe-none' : '' %>">
       <div class="card-body">
@@ -100,7 +113,7 @@
             </div>
           </div>
 
-          <p class="text-muted small mb-2">Yardage converted to metres. SI Secondary defaults to SI Primary + 18 — edit after import if needed.</p>
+          <p class="text-muted small mb-2">Yardage converted to metres. SI Secondary defaults to SI Primary + 18 — edit after import if needed. Fill in Course Name, Tee Name and ratings before confirming.</p>
 
           <div class="table-responsive mb-3">
             <table class="table table-sm align-middle mb-0">
@@ -247,6 +260,117 @@
       document.getElementById('searchInput').value = '';
       document.getElementById('searchInput').focus();
     });
+
+    // ── BlueGolf paste parser ──
+    document.getElementById('bluegolfParseBtn').addEventListener('click', () => {
+      const errEl = document.getElementById('bluegolfError');
+      errEl.classList.add('d-none');
+      try {
+        const holes = parseBlueGolf(document.getElementById('bluegolfInput').value);
+        populatePreviewFromPaste(holes);
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove('d-none');
+      }
+    });
+
+    function parseBlueGolf(raw) {
+      const lines = raw.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      if (lines.length < 3) throw new Error('Paste must include at least the Par and Hcp rows');
+
+      // Split each line — prefer tabs, fall back to 2+ spaces
+      function splitRow(line) {
+        return line.includes('\t')
+          ? line.split('\t').map(c => c.trim())
+          : line.split(/  +/).map(c => c.trim());
+      }
+
+      const rowMap = {};
+      let headerCells = null;
+      for (const line of lines) {
+        const cells = splitRow(line);
+        const label = cells[0].toLowerCase().replace(/\./g, '');
+        if (!headerCells && (cells[1] === '1' || cells.slice(1, 10).every(c => /^\d+$/.test(c)))) {
+          headerCells = cells;
+        } else if (label === 'yds' || label === 'yards' || label === 'metres' || label === 'meters') {
+          rowMap.yds = cells;
+        } else if (label === 'par') {
+          rowMap.par = cells;
+        } else if (label === 'hcp' || label === 'handicap' || label === 'si') {
+          rowMap.hcp = cells;
+        }
+      }
+
+      if (!rowMap.par) throw new Error('Could not find a Par row — make sure the row starts with "Par"');
+      if (!rowMap.hcp) throw new Error('Could not find a Hcp row — make sure the row starts with "Hcp" or "Handicap"');
+
+      // Determine column indices for holes 1-18 by skipping Out/In/Tot
+      const SKIP = new Set(['out', 'in', 'tot', 'total', '']);
+      let holeColumns = [];
+      if (headerCells) {
+        for (let i = 1; i < headerCells.length; i++) {
+          const v = headerCells[i].toLowerCase();
+          if (SKIP.has(v)) continue;
+          const n = parseInt(headerCells[i], 10);
+          if (Number.isFinite(n) && n >= 1 && n <= 18) holeColumns.push({ col: i, hole: n });
+          if (holeColumns.length === 18) break;
+        }
+      }
+      // Fallback: assume standard BlueGolf layout (cols 1-9 = holes 1-9, col 10 = Out, cols 11-19 = holes 10-18)
+      if (holeColumns.length !== 18) {
+        holeColumns = [];
+        for (let h = 1; h <= 9; h++) holeColumns.push({ col: h, hole: h });
+        for (let h = 10; h <= 18; h++) holeColumns.push({ col: h + 1, hole: h });
+      }
+      if (holeColumns.length !== 18) throw new Error('Could not identify 18 holes in the pasted data');
+
+      const holes = holeColumns.map(({ col, hole }) => {
+        const par = parseInt(rowMap.par[col], 10);
+        const hcp = parseInt(rowMap.hcp[col], 10);
+        const yds = rowMap.yds ? parseInt(rowMap.yds[col], 10) : NaN;
+        if (!Number.isFinite(par) || par < 3 || par > 5) throw new Error(`Invalid par at hole ${hole}: "${rowMap.par[col]}"`);
+        if (!Number.isFinite(hcp) || hcp < 1 || hcp > 18) throw new Error(`Invalid handicap at hole ${hole}: "${rowMap.hcp[col]}"`);
+        return { holeNumber: hole, par, handicap: hcp, yardage: Number.isFinite(yds) && yds > 0 ? yds : null };
+      });
+
+      const hcpsSorted = holes.map(h => h.handicap).sort((a, b) => a - b);
+      if (hcpsSorted.some((v, i) => v !== i + 1)) throw new Error('Handicap values are not unique 1–18 — check the pasted data');
+
+      return holes;
+    }
+
+    function populatePreviewFromPaste(holes) {
+      // Clear API-specific hidden fields
+      document.getElementById('fApiCourseId').value = '';
+      document.getElementById('fApiTeeName').value = '';
+      document.getElementById('fGender').value = 'male';
+
+      // holesJson uses same format as API import: { par, handicap, yardage }
+      document.getElementById('fHolesJson').value = JSON.stringify(holes.map(h => ({ par: h.par, handicap: h.handicap, yardage: h.yardage })));
+      document.getElementById('fCourseRating').value = '';
+      document.getElementById('fSlopeRating').value = '';
+
+      // Reset editable fields
+      document.getElementById('fCourseName').value = '';
+      document.getElementById('previewTee').value = '';
+      document.getElementById('previewGender').value = 'Male';
+      const totalPar = holes.reduce((s, h) => s + h.par, 0);
+      document.getElementById('previewPar').value = totalPar;
+      document.getElementById('previewCourseRating').value = '—';
+      document.getElementById('previewSlopeRating').value = '—';
+
+      const tbody = document.getElementById('previewBody');
+      tbody.innerHTML = '';
+      holes.forEach(h => {
+        const metres = h.yardage ? Math.round(h.yardage * 0.9144) : '—';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${h.holeNumber}</td><td>${h.par}</td><td>${metres}</td><td>${h.handicap}</td><td>${h.handicap + 18}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('previewSection').classList.remove('d-none');
+      document.getElementById('previewSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   </script>
 </body>
 </html>
